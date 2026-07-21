@@ -4,7 +4,7 @@ const path = require('path');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 3000;
-const RECORDINGS_DIR = path.join(__dirname, '..', 'recordings');
+const RECORDINGS_DIR = process.env.RECORDINGS_DIR || path.join(__dirname, '..', 'recordings');
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
 
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -14,5 +14,5 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 const app = createApp({ recordingsDir: RECORDINGS_DIR, accessCode: ACCESS_CODE });
 
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
