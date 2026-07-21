@@ -63,7 +63,68 @@
     }
   }
 
-  const api = { computeBlockGrid, drawHalftone, drawAscii };
+  function computeSobelGrid(imageData) {
+    const { data, width, height } = imageData;
+    const gray = new Float64Array(width * height);
+
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 4;
+      gray[i] = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+    }
+
+    const gx = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+    const gy = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+    const magnitudes = new Array(width * height).fill(0);
+
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        let sx = 0;
+        let sy = 0;
+        let k = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const val = gray[(y + dy) * width + (x + dx)];
+            sx += val * gx[k];
+            sy += val * gy[k];
+            k++;
+          }
+        }
+        magnitudes[y * width + x] = Math.min(255, Math.sqrt(sx * sx + sy * sy));
+      }
+    }
+
+    return { width, height, magnitudes };
+  }
+
+  function computeEdgeSketchPixels(sobelGrid, threshold) {
+    const { width, height, magnitudes } = sobelGrid;
+    const data = new Uint8ClampedArray(width * height * 4);
+
+    for (let i = 0; i < width * height; i++) {
+      const v = magnitudes[i] >= threshold ? 0 : 255;
+      const o = i * 4;
+      data[o] = v;
+      data[o + 1] = v;
+      data[o + 2] = v;
+      data[o + 3] = 255;
+    }
+
+    return { data, width, height };
+  }
+
+  function drawEdgeSketch(ctx, edgePixels) {
+    const imageData = new ImageData(edgePixels.data, edgePixels.width, edgePixels.height);
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  const api = {
+    computeBlockGrid,
+    drawHalftone,
+    drawAscii,
+    computeSobelGrid,
+    computeEdgeSketchPixels,
+    drawEdgeSketch,
+  };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;

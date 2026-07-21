@@ -1,7 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockCtx } = require('./testUtils');
-const { computeBlockGrid, drawHalftone, drawAscii } = require('../public/filters');
+const {
+  computeBlockGrid,
+  drawHalftone,
+  drawAscii,
+  computeSobelGrid,
+  computeEdgeSketchPixels,
+} = require('../public/filters');
 
 function makeImageData(pixels, width, height) {
   // pixels: array of [r,g,b] per pixel, row-major
@@ -94,4 +100,39 @@ test('drawAscii maps brightness to charset and draws centered text', () => {
   assert.equal(textCalls[1][1], '@'); // brightest -> last char
   assert.equal(textCalls[1][2], 15); // x center
   assert.equal(textCalls[1][3], 5); // y center
+});
+
+test('computeSobelGrid finds higher edge magnitude near a vertical black/white boundary', () => {
+  // 5x3 image: columns 0-1 black, columns 2-4 white
+  const black = [0, 0, 0];
+  const white = [255, 255, 255];
+  const row = [black, black, white, white, white];
+  const pixels = [...row, ...row, ...row];
+  const imageData = makeImageData(pixels, 5, 3);
+
+  const sobel = computeSobelGrid(imageData);
+
+  const nearEdge = sobel.magnitudes[1 * 5 + 1]; // y=1, x=1 (next to boundary)
+  const uniformArea = sobel.magnitudes[1 * 5 + 3]; // y=1, x=3 (inside white region)
+
+  assert.ok(nearEdge > uniformArea);
+  assert.ok(nearEdge > 100);
+  assert.equal(uniformArea, 0);
+});
+
+test('computeEdgeSketchPixels renders black pixels above threshold, white otherwise', () => {
+  const sobelGrid = { width: 2, height: 2, magnitudes: [300, 0, 50, 300] };
+  const edgePixels = computeEdgeSketchPixels(sobelGrid, 100);
+
+  assert.equal(edgePixels.width, 2);
+  assert.equal(edgePixels.height, 2);
+  // pixel 0: magnitude 300 >= 100 -> black
+  assert.equal(edgePixels.data[0], 0);
+  assert.equal(edgePixels.data[3], 255); // alpha
+  // pixel 1: magnitude 0 -> white
+  assert.equal(edgePixels.data[4], 255);
+  // pixel 2: magnitude 50 < 100 -> white
+  assert.equal(edgePixels.data[8], 255);
+  // pixel 3: magnitude 300 -> black
+  assert.equal(edgePixels.data[12], 0);
 });
