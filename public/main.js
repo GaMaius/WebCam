@@ -1,7 +1,7 @@
 (function () {
   const video = document.getElementById('source-video');
   const canvas = document.getElementById('output-canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const accessCodeInput = document.getElementById('access-code');
   const blockSizeInput = document.getElementById('block-size');
   const startBtn = document.getElementById('start-btn');
@@ -87,8 +87,11 @@
       body: JSON.stringify({ format }),
     });
 
+    if (startRes.status === 401) {
+      throw new Error('접근 코드가 올바르지 않거나 비어 있습니다. (401 Unauthorized)');
+    }
     if (!startRes.ok) {
-      throw new Error('세션 시작 실패: 접근 코드를 확인하세요.');
+      throw new Error(`세션 시작 실패 (상태 코드: ${startRes.status})`);
     }
 
     const startBody = await startRes.json();
