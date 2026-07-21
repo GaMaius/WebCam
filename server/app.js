@@ -34,6 +34,9 @@ function createApp({ recordingsDir, accessCode }) {
     const sessionId = randomUUID();
     const filePath = path.join(recordingsDir, `${sessionId}.${ext}`);
     const stream = fs.createWriteStream(filePath);
+    stream.on('error', (err) => {
+      console.error(`recording write error for session ${sessionId}:`, err);
+    });
     sessions.set(sessionId, { stream });
     res.json({ sessionId });
   });
@@ -59,9 +62,10 @@ function createApp({ recordingsDir, accessCode }) {
       res.status(404).json({ error: 'unknown session' });
       return;
     }
-    session.stream.end();
     sessions.delete(req.params.sessionId);
-    res.json({ ok: true });
+    session.stream.end(() => {
+      res.json({ ok: true });
+    });
   });
 
   return app;
