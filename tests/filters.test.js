@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockCtx } = require('./testUtils');
-const { computeBlockGrid, drawHalftone } = require('../public/filters');
+const { computeBlockGrid, drawHalftone, drawAscii } = require('../public/filters');
 
 function makeImageData(pixels, width, height) {
   // pixels: array of [r,g,b] per pixel, row-major
@@ -77,4 +77,21 @@ test('drawHalftone skips zero-brightness blocks and draws a circle sized by brig
   assert.equal(cx, 15); // block.x + w/2
   assert.equal(cy, 5); // block.y + h/2
   assert.equal(radius, 5); // (255/255) * (min(10,10)/2)
+});
+
+test('drawAscii maps brightness to charset and draws centered text', () => {
+  const ctx = createMockCtx(20, 10);
+  const blocks = [
+    { x: 0, y: 0, w: 10, h: 10, brightness: 0 },
+    { x: 10, y: 0, w: 10, h: 10, brightness: 255 },
+  ];
+
+  drawAscii(ctx, blocks);
+
+  const textCalls = ctx.calls.filter((c) => c[0] === 'fillText');
+  assert.equal(textCalls.length, 2);
+  assert.equal(textCalls[0][1], ' '); // darkest -> first char in default charset
+  assert.equal(textCalls[1][1], '@'); // brightest -> last char
+  assert.equal(textCalls[1][2], 15); // x center
+  assert.equal(textCalls[1][3], 5); // y center
 });

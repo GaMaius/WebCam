@@ -47,7 +47,23 @@
     }
   }
 
-  const api = { computeBlockGrid, drawHalftone };
+  function drawAscii(ctx, blockGrid, charset) {
+    const chars = charset || ' .:-=+*#%@';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (const block of blockGrid) {
+      const idx = Math.min(chars.length - 1, Math.floor((block.brightness / 255) * chars.length));
+      const ch = chars[idx];
+      ctx.font = `${Math.min(block.w, block.h)}px monospace`;
+      ctx.fillText(ch, block.x + block.w / 2, block.y + block.h / 2);
+    }
+  }
+
+  const api = { computeBlockGrid, drawHalftone, drawAscii };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
