@@ -33,7 +33,21 @@
     return blocks;
   }
 
-  const api = { computeBlockGrid };
+  function drawHalftone(ctx, blockGrid) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillStyle = '#fff';
+
+    for (const block of blockGrid) {
+      const radius = (block.brightness / 255) * (Math.min(block.w, block.h) / 2);
+      if (radius <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(block.x + block.w / 2, block.y + block.h / 2, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const api = { computeBlockGrid, drawHalftone };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;

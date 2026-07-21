@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { computeBlockGrid } = require('../public/filters');
+const { createMockCtx } = require('./testUtils');
+const { computeBlockGrid, drawHalftone } = require('../public/filters');
 
 function makeImageData(pixels, width, height) {
   // pixels: array of [r,g,b] per pixel, row-major
@@ -59,4 +60,21 @@ test('computeBlockGrid handles image dimensions not divisible by blockSize', () 
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].w, 2);
   assert.equal(blocks[1].w, 1);
+});
+
+test('drawHalftone skips zero-brightness blocks and draws a circle sized by brightness', () => {
+  const ctx = createMockCtx(20, 10);
+  const blocks = [
+    { x: 0, y: 0, w: 10, h: 10, brightness: 0 },
+    { x: 10, y: 0, w: 10, h: 10, brightness: 255 },
+  ];
+
+  drawHalftone(ctx, blocks);
+
+  const arcCalls = ctx.calls.filter((c) => c[0] === 'arc');
+  assert.equal(arcCalls.length, 1);
+  const [, cx, cy, radius] = arcCalls[0];
+  assert.equal(cx, 15); // block.x + w/2
+  assert.equal(cy, 5); // block.y + h/2
+  assert.equal(radius, 5); // (255/255) * (min(10,10)/2)
 });
