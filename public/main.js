@@ -17,6 +17,7 @@
   let sessionId = null;
   let wakeLock = null;
   let rafId = null;
+  let pendingUploads = [];
 
   function setStatus(text) {
     statusText.textContent = text;
@@ -64,6 +65,7 @@
   }
 
   async function startRecording(mediaStream) {
+    pendingUploads = [];
     const candidates = ['video/webm;codecs=vp8,opus', 'video/mp4'];
     const mimeType = window.RecordingUtils.pickSupportedMimeType(
       candidates,
@@ -71,8 +73,7 @@
     );
 
     if (!mimeType) {
-      setStatus('이 브라우저는 녹화를 지원하지 않습니다.');
-      return;
+      throw new Error('이 브라우저는 녹화를 지원하지 않습니다.');
     }
 
     const format = mimeType.includes('mp4') ? 'mp4' : 'webm';
@@ -87,25 +88,27 @@
     });
 
     if (!startRes.ok) {
-      setStatus('세션 시작 실패: 접근 코드를 확인하세요.');
-      return;
+      throw new Error('세션 시작 실패: 접근 코드를 확인하세요.');
     }
 
     const startBody = await startRes.json();
     sessionId = startBody.sessionId;
 
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-    mediaRecorder.ondataavailable = async (event) => {
+    mediaRecorder.ondataavailable = (event) => {
       if (event.data.size === 0) return;
-      const buffer = await event.data.arrayBuffer();
-      await fetch(`/upload/${sessionId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'x-access-code': getAccessCode(),
-        },
-        body: buffer,
-      });
+      const uploadPromise = (async () => {
+        const buffer = await event.data.arrayBuffer();
+        await fetch(`/upload/${sessionId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'x-access-code': getAccessCode(),
+          },
+          body: buffer,
+        });
+      })();
+      pendingUploads.push(uploadPromise);
     };
     mediaRecorder.start(3000);
   }
@@ -117,6 +120,8 @@
         mediaRecorder.stop();
       });
     }
+    await Promise.all(pendingUploads);
+    pendingUploads = [];
     if (sessionId) {
       await fetch(`/session/end/${sessionId}`, {
         method: 'POST',
@@ -127,30 +132,49 @@
   }
 
   async function start() {
-    const maxWidth = Math.min(window.innerWidth, 640);
-    const constraints = window.RecordingUtils.buildVideoConstraints(maxWidth, facingMode);
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject = stream;
-    await video.play();
+    if (startBtn.disabled) return;
+    startBtn.disabled = true;
 
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const cameraCount = devices.filter((d) => d.kind === 'videoinput').length;
-    switchCameraBtn.hidden = cameraCount < 2;
+    try {
+      const maxWidth = Math.min(window.innerWidth, 640);
+      const constraints = window.RecordingUtils.buildVideoConstraints(maxWidth, facingMode);
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
 
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-      } catch (err) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameraCount = devices.filter((d) => d.kind === 'videoinput').length;
+      switchCameraBtn.hidden = cameraCount < 2;
+
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          wakeLock = null;
+        }
+      }
+
+      renderFrame();
+      await startRecording(stream);
+
+      stopBtn.disabled = false;
+      setStatus('녹화 중...');
+    } catch (err) {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+        stream = null;
+      }
+      if (wakeLock) {
+        wakeLock.release();
         wakeLock = null;
       }
+      startBtn.disabled = false;
+      throw err;
     }
-
-    renderFrame();
-    await startRecording(stream);
-
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    setStatus('녹화 중...');
   }
 
   async function stop() {
