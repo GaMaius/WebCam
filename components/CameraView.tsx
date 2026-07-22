@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FacingMode } from "@/lib/types";
+import {
+  startBackgroundRecording,
+  type BackgroundRecording,
+} from "@/lib/backgroundRecorder";
 import styles from "./CameraView.module.css";
 
 type Status = "idle" | "requesting" | "ready" | "error";
@@ -20,6 +24,7 @@ export function CameraView({
   maxWidth = 720,
   guide = "none",
   guideHint,
+  recordModule,
   onReady,
   onStopped,
   overlay,
@@ -31,18 +36,32 @@ export function CameraView({
   maxWidth?: number;
   guide?: "none" | "face";
   guideHint?: string;
+  /** When set, the raw stream is also recorded in the background and
+   * uploaded to storage once the camera stops or switches. Used for data
+   * collection alongside the on-screen (on-device) analysis. */
+  recordModule?: "heartpulse" | "personalframe";
   onReady?: (handle: CameraHandle) => void;
   onStopped?: () => void;
   overlay?: React.ReactNode;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<BackgroundRecording | null>(null);
   const [facing, setFacing] = useState<FacingMode>(initialFacing);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
   const [hasMultiple, setHasMultiple] = useState(false);
 
+  const finalizeRecorder = useCallback(() => {
+    if (recorderRef.current) {
+      const recording = recorderRef.current;
+      recorderRef.current = null;
+      void recording.finish();
+    }
+  }, []);
+
   const stop = useCallback(() => {
+    finalizeRecorder();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -50,7 +69,7 @@ export function CameraView({
     if (videoRef.current) videoRef.current.srcObject = null;
     setStatus("idle");
     onStopped?.();
-  }, [onStopped]);
+  }, [finalizeRecorder, onStopped]);
 
   const start = useCallback(
     async (mode: FacingMode) => {
@@ -61,7 +80,10 @@ export function CameraView({
       }
       setStatus("requesting");
       setError("");
-      // Release any previous stream before requesting a new facing mode.
+      // Release any previous stream before requesting a new facing mode —
+      // finalize its recording first, since stopping tracks first would
+      // cut the recorder off mid-stream.
+      finalizeRecorder();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -77,6 +99,10 @@ export function CameraView({
         video.srcObject = stream;
         await video.play().catch(() => {});
         setStatus("ready");
+
+        if (recordModule) {
+          recorderRef.current = startBackgroundRecording(stream, recordModule);
+        }
 
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
@@ -100,7 +126,7 @@ export function CameraView({
         }
       }
     },
-    [maxWidth, onReady]
+    [maxWidth, onReady, recordModule, finalizeRecorder]
   );
 
   const switchCamera = useCallback(() => {
@@ -112,6 +138,9 @@ export function CameraView({
   useEffect(() => {
     if (autoStart) void start(initialFacing);
     return () => {
+      // Component unmount (e.g. navigating away mid-scan): finalize any
+      // in-progress recording before the stream's tracks are torn down.
+      finalizeRecorder();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;

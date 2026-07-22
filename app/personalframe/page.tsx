@@ -18,6 +18,7 @@ export default function PersonalFramePage() {
         initialFacing="user"
         guide="face"
         guideHint="얼굴 전체가 가이드 안에 들어오도록 맞춰주세요"
+        recordModule="personalframe"
       />
 
       <Card className={styles.info}>

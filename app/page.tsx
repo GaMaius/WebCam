@@ -17,7 +17,7 @@ export default function Home() {
         </p>
         <div className={styles.privacyNote}>
           <LockIcon />
-          모든 영상 분석은 <strong>기기 안(on-device)</strong>에서 처리되며 서버로 전송·저장되지 않습니다.
+          심박수·톤·골격 측정은 <strong>브라우저에서 실시간(on-device)</strong>으로 계산됩니다.
         </div>
       </header>
 
