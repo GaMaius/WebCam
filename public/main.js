@@ -18,6 +18,7 @@
   let wakeLock = null;
   let rafId = null;
   let pendingUploads = [];
+  let busy = false;
 
   function setStatus(text) {
     statusText.textContent = text;
@@ -135,7 +136,8 @@
   }
 
   async function start() {
-    if (startBtn.disabled) return;
+    if (busy) return;
+    busy = true;
     startBtn.disabled = true;
 
     try {
@@ -177,23 +179,36 @@
       }
       startBtn.disabled = false;
       throw err;
+    } finally {
+      busy = false;
     }
   }
 
   async function stop() {
-    if (rafId) cancelAnimationFrame(rafId);
-    await stopRecording();
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      stream = null;
+    if (busy) return;
+    busy = true;
+
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
     }
-    if (wakeLock) {
-      wakeLock.release();
-      wakeLock = null;
+
+    try {
+      await stopRecording();
+    } finally {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+        stream = null;
+      }
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      setStatus('중지됨');
+      busy = false;
     }
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    setStatus('중지됨');
   }
 
   window.addEventListener('pagehide', () => {
@@ -205,6 +220,7 @@
   startBtn.addEventListener('click', () => start().catch((err) => setStatus(`오류: ${err.message}`)));
   stopBtn.addEventListener('click', () => stop().catch((err) => setStatus(`오류: ${err.message}`)));
   switchCameraBtn.addEventListener('click', async () => {
+    if (busy) return;
     facingMode = facingMode === 'user' ? 'environment' : 'user';
     await stop();
     await start();
