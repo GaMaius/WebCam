@@ -75,6 +75,7 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
       bufferedBytes: 0,
       partNumber: 1,
       uploadedParts: [],
+      pendingUploads: [],
     });
     res.json({ sessionId });
   });
@@ -99,22 +100,26 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
         session.bufferedBytes = 0;
         session.partNumber += 1;
 
-        try {
-          const etag = await uploadPartWithRetry(
-            s3Client,
-            {
-              Bucket: bucket,
-              Key: session.key,
-              UploadId: session.uploadId,
-              PartNumber: partNumber,
-              Body: partBuffer,
-            },
-            { delayMs: retryDelayMs }
-          );
-          session.uploadedParts.push({ ETag: etag, PartNumber: partNumber });
-        } catch (err) {
-          console.error(`part ${partNumber} upload failed for session ${req.params.sessionId}:`, err);
-        }
+        const uploadPromise = (async () => {
+          try {
+            const etag = await uploadPartWithRetry(
+              s3Client,
+              {
+                Bucket: bucket,
+                Key: session.key,
+                UploadId: session.uploadId,
+                PartNumber: partNumber,
+                Body: partBuffer,
+              },
+              { delayMs: retryDelayMs }
+            );
+            session.uploadedParts.push({ ETag: etag, PartNumber: partNumber });
+          } catch (err) {
+            console.error(`part ${partNumber} upload failed for session ${req.params.sessionId}:`, err);
+          }
+        })();
+        session.pendingUploads.push(uploadPromise);
+        await uploadPromise;
       }
 
       res.json({ received: req.body.length });
@@ -133,23 +138,28 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
       const partBuffer = Buffer.concat(session.buffer);
       const partNumber = session.partNumber;
 
-      try {
-        const etag = await uploadPartWithRetry(
-          s3Client,
-          {
-            Bucket: bucket,
-            Key: session.key,
-            UploadId: session.uploadId,
-            PartNumber: partNumber,
-            Body: partBuffer,
-          },
-          { delayMs: retryDelayMs }
-        );
-        session.uploadedParts.push({ ETag: etag, PartNumber: partNumber });
-      } catch (err) {
-        console.error(`final part upload failed for session ${req.params.sessionId}:`, err);
-      }
+      const finalUploadPromise = (async () => {
+        try {
+          const etag = await uploadPartWithRetry(
+            s3Client,
+            {
+              Bucket: bucket,
+              Key: session.key,
+              UploadId: session.uploadId,
+              PartNumber: partNumber,
+              Body: partBuffer,
+            },
+            { delayMs: retryDelayMs }
+          );
+          session.uploadedParts.push({ ETag: etag, PartNumber: partNumber });
+        } catch (err) {
+          console.error(`final part upload failed for session ${req.params.sessionId}:`, err);
+        }
+      })();
+      session.pendingUploads.push(finalUploadPromise);
     }
+
+    await Promise.all(session.pendingUploads);
 
     try {
       await s3Client.send(
