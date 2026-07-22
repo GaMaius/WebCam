@@ -1,0 +1,34 @@
+.info {
+  padding: 20px;
+}
+.infoTitle {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.desc {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.flow {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.flow strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+.pending {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+}

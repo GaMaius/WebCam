@@ -1,46 +1,45 @@
-# WebCam - 실시간 웹캠 필터 & 녹화 수집 서비스
+# VisionLab AI
 
-실시간으로 웹캠 영상에 하프톤(Halftone), ASCII, 엣지 스케치(Edge Sketch) 필터를 적용하고, 원본 영상을 서버에 녹화 저장하는 웹 애플리케이션입니다.
+설치·로그인 없이 웹캠으로 **(1) 심박수·스트레스(rPPG)** 와 **(2) 퍼스널 컬러·얼굴 골격(CIELAB)** 을 분석하는 원스톱 비전 분석 웹 서비스.
 
-## 🚀 Render.com 배포 방법
+모든 영상 분석은 브라우저(on-device)에서 수행되며 원본 영상은 서버로 전송·저장되지 않습니다.
 
-Render(https://render.com)의 무료 플랜(Free Tier)을 사용하여 클릭 몇 번으로 쉽게 배포할 수 있습니다.
+## 기술 스택
 
-### 1단계: Render에 로그인 및 저장소 연결
-1. [Render.com](https://render.com) 접속 후 GitHub 계정으로 로그인합니다.
-2. Dashboard에서 **New +** 버튼을 누르고 **Web Service**를 선택합니다.
-3. GitHub 저장소 중 `GaMaius/WebCam`을 연결(Connect)합니다.
+- **Next.js 14 (App Router) + TypeScript**
+- MediaPipe Tasks Vision — Face Detection & Face Mesh (예정)
+- rPPG POS 알고리즘 (TS 포팅) / `onnxruntime-web` (예정)
+- Chart.js + HTML5 Canvas — 파형/결과 시각화 및 이미지 저장 (예정)
 
-### 2단계: 배포 설정 확인
-Render가 프로젝트의 `render.yaml` 및 `package.json`을 자동으로 감지합니다.
-* **Name**: `webcam-filter-app` (원하는 이름 설정 가능)
-* **Runtime**: `Node`
-* **Build Command**: `npm install`
-* **Start Command**: `npm start`
-* **Instance Type**: `Free`
-
-### 3단계: 환경 변수(Environment Variable) 설정
-페이지 하단의 **Environment Variables** 항목에서 보안 코드를 설정합니다:
-* **Key**: `ACCESS_CODE`
-* **Value**: `비밀번호` (예: `changeme` 또는 설정하고 싶은 비밀번호)
-
-### 4단계: 배포 실행
-1. **Deploy Web Service** 버튼을 누릅니다.
-2. 빌드가 완료되면 `https://webcam-xxxx.onrender.com` 과 같은 무료 HTTPS 주소가 생성됩니다.
-3. 해당 주소로 접속하면 브라우저에서 웹캠 카메라 권한 요청을 받고 즉시 정상 작동합니다!
-
----
-
-## 🛠️ 로컬 실행 방법
+## 개발
 
 ```bash
-# 1. 의존성 설치
 npm install
-
-# 2. .env 파일 생성 및 설정
-# ACCESS_CODE=changeme
-
-# 3. 서버 실행
-npm start
-# http://localhost:3000 접속
+npm run dev
+# http://localhost:3000
 ```
+
+카메라는 HTTPS 또는 `localhost`에서만 동작합니다. 배포 대상은 Vercel입니다.
+
+## 구조
+
+```
+app/
+  page.tsx            메인 랜딩 (모듈 3종 진입)
+  heartpulse/         HeartPulse — rPPG 심박수/스트레스
+  personalframe/      PersonalFrame — 순차 전/후면 스캔, CIELAB 톤·골격
+  summary/            통합 결과지
+components/
+  CameraView.tsx      facingMode(전/후면) 전환 공통 카메라
+  ModuleShell.tsx     모듈 공통 헤더 + 단계 인디케이터
+  Card.tsx / ModuleCard.tsx
+lib/
+  types.ts            모듈 간 공유 결과 타입 (sessionStorage 연동)
+```
+
+## 진행 상황
+
+- [x] **VL-1** 프로젝트 뼈대 · 디자인 시스템 · 랜딩/IA · 전·후면 카메라 컴포넌트
+- [ ] **VL-2** HeartPulse (MediaPipe ROI → POS/FFT → BPM·HRV·스트레스)
+- [ ] **VL-3** PersonalFrame (Gray World 조명 보정 → CIELAB 톤 · Face Mesh 골격)
+- [ ] **VL-4** 통합 결과지 · Canvas 저장/공유

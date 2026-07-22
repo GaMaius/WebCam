@@ -1,0 +1,24 @@
+.info {
+  padding: 20px;
+}
+.infoTitle {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+.tips {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.pending {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+}
