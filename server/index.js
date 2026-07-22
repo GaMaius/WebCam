@@ -1,17 +1,19 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
+const { S3Client } = require('@aws-sdk/client-s3');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 3000;
-const RECORDINGS_DIR = process.env.RECORDINGS_DIR || path.join(__dirname, '..', 'recordings');
-const ACCESS_CODE = process.env.ACCESS_CODE || '';
 
-if (!fs.existsSync(RECORDINGS_DIR)) {
-  fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
-}
+const s3Client = new S3Client({
+  endpoint: process.env.B2_ENDPOINT,
+  region: process.env.B2_REGION,
+  credentials: {
+    accessKeyId: process.env.B2_KEY_ID,
+    secretAccessKey: process.env.B2_APPLICATION_KEY,
+  },
+});
 
-const app = createApp({ recordingsDir: RECORDINGS_DIR, accessCode: ACCESS_CODE });
+const app = createApp({ s3Client, bucket: process.env.B2_BUCKET });
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
