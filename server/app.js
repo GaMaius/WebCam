@@ -5,6 +5,12 @@ const { randomUUID } = require('crypto');
 
 const EXTENSION_BY_FORMAT = { webm: 'webm', mp4: 'mp4' };
 
+function sanitizeName(name) {
+  const trimmed = (name || '').trim();
+  const cleaned = trimmed.replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+  return cleaned.slice(0, 60) || 'anonymous';
+}
+
 function createApp({ recordingsDir, accessCode }) {
   const app = express();
   const sessions = new Map();
@@ -71,4 +77,4 @@ function createApp({ recordingsDir, accessCode }) {
   return app;
 }
 
-module.exports = { createApp };
+module.exports = { createApp, sanitizeName };
