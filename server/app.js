@@ -5,6 +5,7 @@ const {
   CreateMultipartUploadCommand,
   UploadPartCommand,
   CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } = require('@aws-sdk/client-s3');
 
 const EXTENSION_BY_FORMAT = { webm: 'webm', mp4: 'mp4' };
@@ -17,6 +18,9 @@ function sanitizeName(name) {
 
 const DEFAULT_MIN_PART_SIZE = 5 * 1024 * 1024;
 const MAX_PART_ATTEMPTS = 3;
+const DEFAULT_MAX_SESSIONS = 20;
+const DEFAULT_SESSION_IDLE_MS = 10 * 60 * 1000;
+const DEFAULT_SWEEP_INTERVAL_MS = 60 * 1000;
 
 async function uploadPartWithRetry(s3Client, params, { attempts = MAX_PART_ATTEMPTS, delayMs = 100 } = {}) {
   let lastErr;
@@ -34,9 +38,38 @@ async function uploadPartWithRetry(s3Client, params, { attempts = MAX_PART_ATTEM
   throw lastErr;
 }
 
-function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retryDelayMs = 100 }) {
+function createApp({
+  s3Client,
+  bucket,
+  minPartSize = DEFAULT_MIN_PART_SIZE,
+  retryDelayMs = 100,
+  maxSessions = DEFAULT_MAX_SESSIONS,
+  sessionIdleMs = DEFAULT_SESSION_IDLE_MS,
+  sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
+}) {
   const app = express();
   const sessions = new Map();
+
+  function sweepIdleSessions(now = Date.now()) {
+    for (const [id, session] of sessions) {
+      if (now - session.lastActivity > sessionIdleMs) {
+        sessions.delete(id);
+        s3Client
+          .send(
+            new AbortMultipartUploadCommand({
+              Bucket: bucket,
+              Key: session.key,
+              UploadId: session.uploadId,
+            })
+          )
+          .catch((err) => console.error(`failed to abort idle session ${id}:`, err));
+      }
+    }
+  }
+
+  const sweeper = setInterval(() => sweepIdleSessions(), sweepIntervalMs);
+  if (sweeper.unref) sweeper.unref();
+  app.locals.sweepIdleSessions = sweepIdleSessions;
 
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use(express.json());
@@ -50,6 +83,11 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
     const ext = EXTENSION_BY_FORMAT[format];
     if (!ext) {
       res.status(400).json({ error: 'unsupported format' });
+      return;
+    }
+
+    if (sessions.size >= maxSessions) {
+      res.status(429).json({ error: 'too many active sessions' });
       return;
     }
 
@@ -76,6 +114,7 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
       partNumber: 1,
       uploadedParts: [],
       pendingUploads: [],
+      lastActivity: Date.now(),
     });
     res.json({ sessionId });
   });
@@ -90,6 +129,12 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
         return;
       }
 
+      if (!Buffer.isBuffer(req.body)) {
+        res.status(400).json({ error: 'expected binary body' });
+        return;
+      }
+
+      session.lastActivity = Date.now();
       session.buffer.push(req.body);
       session.bufferedBytes += req.body.length;
 
@@ -160,6 +205,24 @@ function createApp({ s3Client, bucket, minPartSize = DEFAULT_MIN_PART_SIZE, retr
     }
 
     await Promise.all(session.pendingUploads);
+
+    if (session.uploadedParts.length === 0) {
+      try {
+        await s3Client.send(
+          new AbortMultipartUploadCommand({
+            Bucket: bucket,
+            Key: session.key,
+            UploadId: session.uploadId,
+          })
+        );
+      } catch (err) {
+        console.error(`failed to abort empty multipart upload for session ${req.params.sessionId}:`, err);
+      }
+      res.json({ ok: true });
+      return;
+    }
+
+    session.uploadedParts.sort((a, b) => a.PartNumber - b.PartNumber);
 
     try {
       await s3Client.send(

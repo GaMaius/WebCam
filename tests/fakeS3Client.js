@@ -20,6 +20,9 @@ function createFakeS3Client() {
       if (name === 'CompleteMultipartUploadCommand') {
         return {};
       }
+      if (name === 'AbortMultipartUploadCommand') {
+        return {};
+      }
       throw new Error(`createFakeS3Client: unexpected command ${name}`);
     },
   };

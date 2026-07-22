@@ -168,3 +168,85 @@ test('ending unknown session returns 404', async () => {
   const res = await request(app).post('/session/end/does-not-exist');
   assert.equal(res.status, 404);
 });
+
+test('POST /session/start returns 429 when the max session cap is reached', async () => {
+  const app = createApp({ s3Client: createFakeS3Client(), bucket: 'test-bucket', maxSessions: 1 });
+  const first = await request(app).post('/session/start').send({ format: 'webm', name: 'a' });
+  assert.equal(first.status, 200);
+  const second = await request(app).post('/session/start').send({ format: 'webm', name: 'b' });
+  assert.equal(second.status, 429);
+});
+
+test('POST /session/start returns 502 when creating the multipart upload fails', async () => {
+  const fakeClient = createFakeS3Client();
+  fakeClient.send = async (command) => {
+    if (command.constructor.name === 'CreateMultipartUploadCommand') {
+      throw new Error('simulated B2 failure');
+    }
+    throw new Error('unexpected command');
+  };
+  const app = createApp({ s3Client: fakeClient, bucket: 'test-bucket' });
+  const res = await request(app).post('/session/start').send({ format: 'webm', name: 'x' });
+  assert.equal(res.status, 502);
+});
+
+test('session end with no uploaded parts aborts the multipart upload instead of completing it', async () => {
+  const fakeClient = createFakeS3Client();
+  const app = createApp({ s3Client: fakeClient, bucket: 'test-bucket' });
+  const startRes = await request(app).post('/session/start').send({ format: 'webm', name: 'y' });
+  const { sessionId } = startRes.body;
+
+  const endRes = await request(app).post(`/session/end/${sessionId}`);
+  assert.equal(endRes.status, 200);
+  assert.deepEqual(endRes.body, { ok: true });
+
+  assert.equal(fakeClient.calls.filter((c) => c.name === 'CompleteMultipartUploadCommand').length, 0);
+  assert.equal(fakeClient.calls.filter((c) => c.name === 'AbortMultipartUploadCommand').length, 1);
+});
+
+test('session end completes with parts in ascending PartNumber order', async () => {
+  const fakeClient = createFakeS3Client();
+  const app = createApp({ s3Client: fakeClient, bucket: 'test-bucket', minPartSize: 5 });
+  const startRes = await request(app).post('/session/start').send({ format: 'webm', name: 'z' });
+  const { sessionId } = startRes.body;
+
+  await request(app).post(`/upload/${sessionId}`).set('Content-Type', 'application/octet-stream').send(Buffer.from('aaaaa'));
+  await request(app).post(`/upload/${sessionId}`).set('Content-Type', 'application/octet-stream').send(Buffer.from('bbbbb'));
+  await request(app).post(`/upload/${sessionId}`).set('Content-Type', 'application/octet-stream').send(Buffer.from('cc'));
+
+  const endRes = await request(app).post(`/session/end/${sessionId}`);
+  assert.equal(endRes.status, 200);
+
+  const completeCall = fakeClient.calls.find((c) => c.name === 'CompleteMultipartUploadCommand');
+  const partNumbers = completeCall.input.MultipartUpload.Parts.map((p) => p.PartNumber);
+  const sorted = [...partNumbers].sort((a, b) => a - b);
+  assert.deepEqual(partNumbers, sorted);
+});
+
+test('idle session sweeper aborts and removes sessions past the idle timeout', async () => {
+  const fakeClient = createFakeS3Client();
+  const app = createApp({ s3Client: fakeClient, bucket: 'test-bucket', sessionIdleMs: 1000 });
+  const startRes = await request(app).post('/session/start').send({ format: 'webm', name: 'idle' });
+  const { sessionId } = startRes.body;
+
+  app.locals.sweepIdleSessions(Date.now() + 10000);
+
+  const uploadRes = await request(app)
+    .post(`/upload/${sessionId}`)
+    .set('Content-Type', 'application/octet-stream')
+    .send(Buffer.from('x'));
+  assert.equal(uploadRes.status, 404);
+  assert.equal(fakeClient.calls.filter((c) => c.name === 'AbortMultipartUploadCommand').length, 1);
+});
+
+test('upload rejects a non-binary body with 400', async () => {
+  const app = createApp({ s3Client: createFakeS3Client(), bucket: 'test-bucket' });
+  const startRes = await request(app).post('/session/start').send({ format: 'webm', name: 'g' });
+  const { sessionId } = startRes.body;
+
+  const res = await request(app)
+    .post(`/upload/${sessionId}`)
+    .set('Content-Type', 'application/json')
+    .send({ not: 'binary' });
+  assert.equal(res.status, 400);
+});
