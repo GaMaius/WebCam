@@ -2,7 +2,7 @@
   const video = document.getElementById('source-video');
   const canvas = document.getElementById('output-canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const accessCodeInput = document.getElementById('access-code');
+  const nameInput = document.getElementById('user-name');
   const blockSizeInput = document.getElementById('block-size');
   const startBtn = document.getElementById('start-btn');
   const stopBtn = document.getElementById('stop-btn');
@@ -24,8 +24,8 @@
     statusText.textContent = text;
   }
 
-  function getAccessCode() {
-    return accessCodeInput.value || '';
+  function getUserName() {
+    return nameInput.value.trim();
   }
 
   filterButtons.forEach((btn) => {
@@ -83,14 +83,10 @@
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-access-code': getAccessCode(),
       },
-      body: JSON.stringify({ format }),
+      body: JSON.stringify({ format, name: getUserName() }),
     });
 
-    if (startRes.status === 401) {
-      throw new Error('접근 코드가 올바르지 않거나 비어 있습니다. (401 Unauthorized)');
-    }
     if (!startRes.ok) {
       throw new Error(`세션 시작 실패 (상태 코드: ${startRes.status})`);
     }
@@ -107,7 +103,6 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
-            'x-access-code': getAccessCode(),
           },
           body: buffer,
         });
@@ -129,13 +124,16 @@
     if (sessionId) {
       await fetch(`/session/end/${sessionId}`, {
         method: 'POST',
-        headers: { 'x-access-code': getAccessCode() },
       });
       sessionId = null;
     }
   }
 
   async function start() {
+    if (!nameInput.value.trim()) {
+      setStatus('이름을 입력해주세요.');
+      return;
+    }
     if (busy) return;
     busy = true;
     startBtn.disabled = true;

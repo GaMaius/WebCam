@@ -15,17 +15,11 @@ main {
   padding: 12px;
 }
 
-.access-row {
+.name-row {
   display: flex;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-}
-
-.notice {
-  font-size: 0.85rem;
-  color: #f5a623;
-  margin: 4px 0 12px;
 }
 
 .stage {
