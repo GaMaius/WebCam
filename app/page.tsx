@@ -50,7 +50,7 @@ export default function Home() {
 
       <footer className={styles.footer}>
         <span className="vl-mono">VisionLab AI</span>
-        <span>촬영 영상은 분석 품질 향상을 위해 서버에 저장돼요 · DeepPhys rPPG · MediaPipe · CIELAB</span>
+        <span>DeepPhys rPPG · MediaPipe · CIELAB</span>
       </footer>
     </main>
   );
