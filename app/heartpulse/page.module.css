@@ -79,8 +79,24 @@
   flex-direction: column;
   gap: 16px;
 }
+.resultHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .resultTitle {
   font-size: 17px;
+}
+.engineTag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, #f78ca0 30%, transparent);
+  color: #f78ca0;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .statGrid {
   display: grid;

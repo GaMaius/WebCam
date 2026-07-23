@@ -64,6 +64,46 @@ export function computeRoiRegions(
   };
 }
 
+/**
+ * The face crop box used for the DeepPhys model: the tight face bounding
+ * box enlarged by `coef` around its own center, matching this checkpoint's
+ * training config (CROP_FACE.LARGE_BOX_COEF: 1.5), clamped to frame bounds.
+ */
+export function computeFaceCropBox(
+  landmarks: NormalizedLandmark[],
+  frameWidth: number,
+  frameHeight: number,
+  coef = 1.5
+): RoiRegion {
+  let minX = 1;
+  let maxX = 0;
+  let minY = 1;
+  let maxY = 0;
+  for (const lm of landmarks) {
+    if (lm.x < minX) minX = lm.x;
+    if (lm.x > maxX) maxX = lm.x;
+    if (lm.y < minY) minY = lm.y;
+    if (lm.y > maxY) maxY = lm.y;
+  }
+
+  const pxMinX = minX * frameWidth;
+  const pxMaxX = maxX * frameWidth;
+  const pxMinY = minY * frameHeight;
+  const pxMaxY = maxY * frameHeight;
+
+  const cx = (pxMinX + pxMaxX) / 2;
+  const cy = (pxMinY + pxMaxY) / 2;
+  const w = (pxMaxX - pxMinX) * coef;
+  const h = (pxMaxY - pxMinY) * coef;
+
+  const x = Math.max(0, Math.min(frameWidth, cx - w / 2));
+  const y = Math.max(0, Math.min(frameHeight, cy - h / 2));
+  const clampedW = Math.min(w, frameWidth - x);
+  const clampedH = Math.min(h, frameHeight - y);
+
+  return { x, y, w: clampedW, h: clampedH };
+}
+
 export interface RgbMean {
   r: number;
   g: number;
@@ -94,4 +134,34 @@ export function sampleRegionMean(
     b += data[i + 2];
   }
   return { r: r / pixelCount, g: g / pixelCount, b: b / pixelCount };
+}
+
+/**
+ * Draws a region of the source video, scaled to `size x size`, onto a
+ * scratch canvas and reads it back as a flat channel-last RGB Float32Array
+ * — the frame representation lib/deepPhys.ts's preprocessing expects.
+ */
+export function sampleRegionAsRgbFrame(
+  source: CanvasImageSource,
+  region: RoiRegion,
+  scratchCanvas: HTMLCanvasElement,
+  size: number
+): Float32Array {
+  if (scratchCanvas.width !== size || scratchCanvas.height !== size) {
+    scratchCanvas.width = size;
+    scratchCanvas.height = size;
+  }
+  const ctx = scratchCanvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return new Float32Array(size * size * 3);
+
+  ctx.drawImage(source, region.x, region.y, region.w, region.h, 0, 0, size, size);
+  const { data } = ctx.getImageData(0, 0, size, size);
+
+  const out = new Float32Array(size * size * 3);
+  for (let p = 0, i = 0; p < size * size; p++, i += 4) {
+    out[p * 3] = data[i];
+    out[p * 3 + 1] = data[i + 1];
+    out[p * 3 + 2] = data[i + 2];
+  }
+  return out;
 }

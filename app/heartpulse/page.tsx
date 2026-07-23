@@ -12,7 +12,7 @@ const STEPS = ["카메라 정렬", "15초 스캔", "결과 리포트"];
 
 function stepForPhase(phase: string): number {
   if (phase === "scanning") return 1;
-  if (phase === "done" || phase === "error") return 2;
+  if (phase === "analyzing" || phase === "done" || phase === "error") return 2;
   return 0;
 }
 
@@ -78,9 +78,21 @@ export default function HeartPulsePage() {
         </Card>
       )}
 
+      {scan.phase === "analyzing" && (
+        <Card className={styles.statusCard}>
+          <span className={styles.spinner} />
+          측정 신호를 분석하고 있습니다...
+        </Card>
+      )}
+
       {scan.phase === "done" && scan.result && (
         <Card className={styles.resultCard}>
-          <h3 className={styles.resultTitle}>측정 결과</h3>
+          <div className={styles.resultHeader}>
+            <h3 className={styles.resultTitle}>측정 결과</h3>
+            <span className={styles.engineTag}>
+              {scan.engine === "deepphys" ? "DeepPhys AI 모델" : "POS 신호처리"}
+            </span>
+          </div>
           <div className={styles.statGrid}>
             <div className={styles.stat}>
               <span className={styles.statLabel}>심박수</span>
