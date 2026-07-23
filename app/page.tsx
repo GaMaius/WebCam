@@ -16,11 +16,6 @@ export default function Home() {
           <strong>퍼스널 컬러·얼굴 골격</strong>을 한 번에 측정하고, 매일의 컨디션과 스타일을
           기록해 나가세요.
         </p>
-        <div className={styles.privacyNote}>
-          <LockIcon />
-          분석은 <strong>기기 안(온디바이스)</strong>에서 이뤄지고, 원본 영상은 서비스 개선을 위해
-          안전하게 전송·보관돼요.
-        </div>
       </header>
 
       <section className={styles.grid} aria-label="분석 모듈">
@@ -55,20 +50,12 @@ export default function Home() {
 
       <footer className={styles.footer}>
         <span className="vl-mono">VisionLab AI</span>
-        <span>DeepPhys rPPG · MediaPipe · CIELAB</span>
+        <span>촬영 영상은 분석 품질 향상을 위해 서버에 저장돼요 · DeepPhys rPPG · MediaPipe · CIELAB</span>
       </footer>
     </main>
   );
 }
 
-function LockIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="11" width="16" height="10" rx="2" />
-      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-    </svg>
-  );
-}
 function PulseIcon() {
   return (
     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
