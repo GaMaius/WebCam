@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ModuleShell } from "@/components/ModuleShell";
 import { Card } from "@/components/Card";
@@ -9,11 +9,16 @@ import {
   type HeartPulseResult,
   type PersonalFrameResult,
 } from "@/lib/types";
+import { SEASON_LABEL, UNDERTONE_LABEL, FACE_SHAPE_LABEL } from "@/lib/labels";
+import { drawSummaryCard, canvasToPngBlob } from "@/lib/summaryCard";
 import styles from "./page.module.css";
 
 export default function SummaryPage() {
   const [heart, setHeart] = useState<HeartPulseResult | null>(null);
   const [frame, setFrame] = useState<PersonalFrameResult | null>(null);
+  const [canShare, setCanShare] = useState(false);
+  const [exportState, setExportState] = useState<"idle" | "working" | "error">("idle");
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     try {
@@ -24,9 +29,64 @@ export default function SummaryPage() {
     } catch {
       /* ignore malformed session data */
     }
+    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
   }, []);
 
   const hasAny = heart || frame;
+
+  const renderCard = useCallback((): HTMLCanvasElement => {
+    if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+    drawSummaryCard(
+      canvasRef.current,
+      { heart, frame },
+      { season: SEASON_LABEL, undertone: UNDERTONE_LABEL, faceShape: FACE_SHAPE_LABEL }
+    );
+    return canvasRef.current;
+  }, [heart, frame]);
+
+  const handleSave = useCallback(async () => {
+    setExportState("working");
+    try {
+      const canvas = renderCard();
+      const blob = await canvasToPngBlob(canvas);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `visionlab-summary-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportState("idle");
+    } catch (err) {
+      console.error("summary card export failed:", err);
+      setExportState("error");
+    }
+  }, [renderCard]);
+
+  const handleShare = useCallback(async () => {
+    setExportState("working");
+    try {
+      const canvas = renderCard();
+      const blob = await canvasToPngBlob(canvas);
+      const file = new File([blob], "visionlab-summary.png", { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "VisionLab AI 통합 결과지",
+          text: "VisionLab AI로 측정한 나의 결과예요.",
+        });
+      } else {
+        await handleSave();
+      }
+      setExportState("idle");
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") {
+        setExportState("idle");
+        return;
+      }
+      console.error("summary card share failed:", err);
+      setExportState("error");
+    }
+  }, [renderCard, handleSave]);
 
   return (
     <ModuleShell eyebrow="Integrated" title="통합 결과지" accent="#a78bfa">
@@ -70,17 +130,40 @@ export default function SummaryPage() {
             PersonalFrame
           </span>
           <div className={styles.stats}>
-            <Stat label="언더톤" value={frame.undertone} />
-            <Stat label="시즌 톤" value={frame.season} />
-            <Stat label="얼굴형" value={frame.faceShape} />
+            <Stat label="언더톤" value={UNDERTONE_LABEL[frame.undertone] ?? frame.undertone} />
+            <Stat label="시즌 톤" value={SEASON_LABEL[frame.season] ?? frame.season} />
+            <Stat label="얼굴형" value={FACE_SHAPE_LABEL[frame.faceShape] ?? frame.faceShape} />
           </div>
         </Card>
       )}
 
       {hasAny && (
-        <p className={styles.pending}>
-          Canvas 이미지 저장·공유 기능은 다음 단계에서 연결됩니다.
-        </p>
+        <Card className={styles.exportCard}>
+          <p className={styles.exportDesc}>
+            두 결과를 하나의 이미지로 저장하거나 공유할 수 있어요.
+          </p>
+          <div className={styles.exportActions}>
+            <button
+              className={styles.exportBtn}
+              onClick={handleSave}
+              disabled={exportState === "working"}
+            >
+              이미지로 저장
+            </button>
+            {canShare && (
+              <button
+                className={`${styles.exportBtn} ${styles.exportBtnPrimary}`}
+                onClick={handleShare}
+                disabled={exportState === "working"}
+              >
+                공유하기
+              </button>
+            )}
+          </div>
+          {exportState === "error" && (
+            <p className={styles.exportError}>이미지 생성에 실패했습니다. 다시 시도해주세요.</p>
+          )}
+        </Card>
       )}
     </ModuleShell>
   );

@@ -5,31 +5,10 @@ import { ModuleShell } from "@/components/ModuleShell";
 import { CameraView, type CameraHandle } from "@/components/CameraView";
 import { Card } from "@/components/Card";
 import { usePersonalFrameScan } from "@/hooks/usePersonalFrameScan";
+import { SEASON_LABEL, UNDERTONE_LABEL, FACE_SHAPE_LABEL } from "@/lib/labels";
 import styles from "./page.module.css";
 
 const STEPS = ["전면 · 얼굴 스캔", "후면 · 조명 보정", "톤 & 골격 진단"];
-
-const SEASON_LABEL: Record<string, string> = {
-  "spring-warm": "봄 웜톤",
-  "summer-cool": "여름 쿨톤",
-  "autumn-warm": "가을 웜톤",
-  "winter-cool": "겨울 쿨톤",
-};
-
-const UNDERTONE_LABEL: Record<string, string> = {
-  warm: "웜톤",
-  cool: "쿨톤",
-  neutral: "뉴트럴",
-};
-
-const FACE_SHAPE_LABEL: Record<string, string> = {
-  oval: "타원형",
-  round: "둥근형",
-  square: "각진형",
-  heart: "하트형",
-  oblong: "긴 얼굴형",
-  diamond: "다이아몬드형",
-};
 
 function stepForPhase(phase: string): number {
   if (phase === "awaiting-switch" || phase === "back-capturing") return 1;
