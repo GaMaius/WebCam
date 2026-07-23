@@ -25,10 +25,179 @@
   color: var(--accent);
   font-weight: 700;
 }
-.pending {
-  margin: 16px 0 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
+
+.statusCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scanCard {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.progressRow {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.progressTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--violet));
+  transition: width 0.15s linear;
+}
+
+.switchCard {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+.switchTitle {
+  font-size: 16px;
+}
+.switchDesc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.switchDesc strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+.skipBtn {
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
   color: var(--text-muted);
   font-size: 13px;
+  font-weight: 600;
+}
+.skipBtn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.resultCard,
+.errorCard {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.resultTitle {
+  font-size: 17px;
+}
+
+.swatchRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.swatch {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  flex: none;
+}
+.swatchInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.swatchHex {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.swatchLab {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px;
+  border-radius: 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+}
+.statLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.statValue {
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.statUnit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.errorCard p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.retryBtn {
+  align-self: flex-start;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 14px;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.retryBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
