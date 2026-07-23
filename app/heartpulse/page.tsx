@@ -19,6 +19,7 @@ export default function HeartPulsePage() {
         guide="face"
         guideHint="이마와 양 뺨이 가이드 안에 들어오도록 정렬하세요"
         recordModule="heartpulse"
+        autoStart
       />
 
       <Card className={styles.info}>
