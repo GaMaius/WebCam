@@ -18,17 +18,17 @@ const SANS = "'Segoe UI', system-ui, 'Noto Sans KR', sans-serif";
 const MONO = "'SFMono-Regular', ui-monospace, 'JetBrains Mono', monospace";
 
 const COL = {
-  bg1: "#1a1a21",
-  bg2: "#16161c",
-  surface: "#23232c",
-  surfaceBorder: "rgba(255,255,255,0.08)",
-  base: "#16161c",
-  baseBorder: "rgba(255,255,255,0.07)",
-  text: "#e9e9f1",
-  textDim: "#a2a2b2",
-  textMuted: "#6d6d7c",
-  accent: "#92a9e1",
-  rose: "#f78ca0",
+  bg1: "#f5efe0",
+  bg2: "#fbf7ec",
+  surface: "#fffdf7",
+  surfaceBorder: "rgba(28,31,21,0.5)",
+  base: "#fbf7ec",
+  baseBorder: "rgba(28,31,21,0.16)",
+  text: "#1c1f15",
+  textDim: "#565a48",
+  textMuted: "#8b8a73",
+  accent: "#4b6b3a",
+  rose: "#c4553a",
 };
 
 function roundRect(
@@ -99,8 +99,8 @@ export function drawSummaryCard(
   ctx.fillRect(0, 0, W, H);
 
   const glow = ctx.createRadialGradient(W * 0.85, 20, 40, W * 0.85, 20, 760);
-  glow.addColorStop(0, "rgba(146,169,225,0.18)");
-  glow.addColorStop(1, "rgba(146,169,225,0)");
+  glow.addColorStop(0, "rgba(75,107,58,0.12)");
+  glow.addColorStop(1, "rgba(75,107,58,0)");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
 
@@ -160,9 +160,15 @@ export function drawSummaryCard(
 
     const statsY = cardY + 200;
     const statW = (cardW - 32 * 2 - 20 * 2) / 3;
-    drawStat(ctx, cardX + 32, statsY, statW, "스트레스", `${data.heart.stressIndex}`, {
-      unit: "/100",
-    });
+    drawStat(
+      ctx,
+      cardX + 32,
+      statsY,
+      statW,
+      "스트레스",
+      data.heart.stressIndex !== null ? `${data.heart.stressIndex}` : "측정 불가",
+      { unit: data.heart.stressIndex !== null ? "/100" : undefined, monoValue: data.heart.stressIndex !== null }
+    );
     drawStat(ctx, cardX + 32 + statW + 20, statsY, statW, "신뢰도", `${data.heart.confidence}`, {
       unit: "%",
     });
@@ -172,8 +178,8 @@ export function drawSummaryCard(
       statsY,
       statW,
       "SDNN",
-      `${Math.round(data.heart.sdnn)}`,
-      { unit: "ms" }
+      data.heart.sdnn !== null ? `${data.heart.sdnn}` : "측정 불가",
+      { unit: data.heart.sdnn !== null ? "ms" : undefined, monoValue: data.heart.sdnn !== null }
     );
 
     y = cardY + cardH + 32;
@@ -181,7 +187,7 @@ export function drawSummaryCard(
 
   if (data.frame) {
     const cardY = y;
-    const cardH = 380;
+    const cardH = data.frame.ambientCorrected ? 380 : 416;
 
     roundRect(ctx, cardX, cardY, cardW, cardH, 28);
     ctx.fillStyle = COL.surface;
@@ -194,6 +200,12 @@ export function drawSummaryCard(
     ctx.fillStyle = COL.accent;
     ctx.font = `700 22px ${SANS}`;
     ctx.fillText("PERSONALFRAME", cardX + 32, iy);
+
+    ctx.fillStyle = COL.textMuted;
+    ctx.font = `600 18px ${SANS}`;
+    ctx.textAlign = "right";
+    ctx.fillText(`측정 신뢰도 ${data.frame.confidence}%`, cardX + cardW - 32, iy);
+    ctx.textAlign = "left";
 
     const swatchSize = 84;
     const swatchX = cardX + 32;
@@ -245,6 +257,12 @@ export function drawSummaryCard(
       labels.faceShape[data.frame.faceShape] ?? data.frame.faceShape,
       { monoValue: false }
     );
+
+    if (!data.frame.ambientCorrected) {
+      ctx.fillStyle = COL.textMuted;
+      ctx.font = `500 17px ${SANS}`;
+      ctx.fillText("후면 카메라 조명 보정 없이 진행된 결과입니다", cardX + 32, statsY + 166);
+    }
 
     y = cardY + cardH + 32;
   }

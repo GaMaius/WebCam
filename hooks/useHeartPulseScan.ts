@@ -131,20 +131,28 @@ export function useHeartPulseScan() {
             : 0;
         // Heuristic: more frame-to-frame ROI displacement (head motion) and
         // fewer confidently-detected beats both erode trust in the reading.
+        // No artificial floor — a genuinely bad capture (heavy motion, almost
+        // no beats found) should be able to read as low confidence rather
+        // than being reported as at least 20% trustworthy.
         const motionPenalty = Math.min(55, avgMotion * 6);
         const beatsPenalty = beatsDetected < 8 ? (8 - beatsDetected) * 5 : 0;
-        const confidence = Math.max(20, Math.round(100 - motionPenalty - beatsPenalty));
+        const confidence = Math.max(0, Math.round(100 - motionPenalty - beatsPenalty));
 
         const clampedBpm = Math.min(220, Math.max(35, Math.round(bpm)));
         // Lower HRV (RMSSD) is associated with lower parasympathetic/vagal
         // activity, i.e. higher perceived stress — mapped onto a 0-100 scale.
-        const stressIndex = Math.max(0, Math.min(100, Math.round(100 - Math.min(100, (rmssd / 60) * 100))));
+        // The 120ms denominator (rather than clinical HRV norms) is
+        // calibrated for this pipeline's actual noise floor: webcam rPPG
+        // peak timing is far noisier than a real PPG sensor, so a tighter
+        // scale was saturating almost every real reading to 0.
+        const stressIndex =
+          rmssd !== null ? Math.max(0, Math.min(100, Math.round(100 - Math.min(100, (rmssd / 120) * 100)))) : null;
 
         const result: HeartPulseResult = {
           bpm: clampedBpm,
           stressIndex,
-          sdnn: Math.round(sdnn),
-          rmssd: Math.round(rmssd),
+          sdnn: sdnn !== null ? Math.round(sdnn) : null,
+          rmssd: rmssd !== null ? Math.round(rmssd) : null,
           confidence,
           measuredAt: new Date().toISOString(),
         };

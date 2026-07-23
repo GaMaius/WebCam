@@ -57,11 +57,11 @@ test("estimateBpmAndHrv still recovers a plausible BPM in the presence of modera
   assert.ok(Math.abs(result.bpm - bpm) < 8, `expected ~${bpm} BPM under noise, got ${result.bpm}`);
 });
 
-test("estimateBpmAndHrv falls back to placeholder HRV values when too few beats are detected", () => {
+test("estimateBpmAndHrv reports HRV as unavailable (not a fabricated number) when too few beats are detected", () => {
   const fps = 30;
   // A signal far too short to contain enough beats for a real HRV estimate.
   const flat = new Array(10).fill(0);
   const result = estimateBpmAndHrv(flat, fps);
-  assert.equal(result.sdnn, 30);
-  assert.equal(result.rmssd, 25);
+  assert.equal(result.sdnn, null);
+  assert.equal(result.rmssd, null);
 });

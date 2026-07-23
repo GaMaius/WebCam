@@ -36,6 +36,26 @@ export function grayWorldCorrection(skin: Rgb, ambient: Rgb): Rgb {
   };
 }
 
+/**
+ * Average per-channel standard deviation across a series of RGB samples.
+ * Used as a measurement-quality signal: a shaky capture (head motion during
+ * front skin sampling, hand motion during the rear ambient-light sampling)
+ * shows up as high sample-to-sample variance, so this feeds directly into
+ * PersonalFrame's confidence score instead of a fixed/assumed number.
+ */
+export function rgbSampleStdDev(samples: Rgb[]): number {
+  if (samples.length < 2) return 0;
+  const meanOf = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const channelStdDev = (xs: number[]) => {
+    const m = meanOf(xs);
+    return Math.sqrt(meanOf(xs.map((x) => (x - m) ** 2)));
+  };
+  const rStd = channelStdDev(samples.map((s) => s.r));
+  const gStd = channelStdDev(samples.map((s) => s.g));
+  const bStd = channelStdDev(samples.map((s) => s.b));
+  return (rStd + gStd + bStd) / 3;
+}
+
 export type Undertone = "warm" | "cool" | "neutral";
 
 /** b* (yellow-blue) vs a* (red-green): more yellow-relative-to-red reads

@@ -51,11 +51,20 @@ export function bandpassFilter(signal: number[], fps: number, lowHz = MIN_HZ, hi
 
 export interface HeartRateEstimate {
   bpm: number;
-  sdnn: number;
-  rmssd: number;
+  /** null when too few clean beats were detected for a real HRV estimate — never a fabricated number. */
+  sdnn: number | null;
+  rmssd: number | null;
   /** Number of beats detected in the time-domain peak pass — low counts mean the HRV numbers are unreliable. */
   beatsDetected: number;
 }
+
+// Physiologically-implausible RR intervals (180+ BPM or under 40 BPM) are
+// almost always a mis-detected peak rather than a real beat-to-beat gap. A
+// single such outlier dominates RMSSD (it's a diff-of-diffs), so we drop
+// these before computing HRV rather than let one bad peak invalidate the
+// whole reading.
+const MIN_RR_MS = 333; // 180 BPM
+const MAX_RR_MS = 1500; // 40 BPM
 
 export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartRateEstimate {
   const bpm = findDominantBpm(filteredSignal, fps);
@@ -64,15 +73,16 @@ export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartR
   // period so we don't double-count a peak's shoulder as a second beat.
   const expectedPeriodSamples = fps / (bpm / 60);
   const minDistance = Math.max(1, Math.round(expectedPeriodSamples / 1.6));
-  const peakIndices = detectPeaks(filteredSignal, minDistance);
+  const peakPositions = detectPeaks(filteredSignal, minDistance);
 
   const rrIntervalsMs: number[] = [];
-  for (let i = 1; i < peakIndices.length; i++) {
-    rrIntervalsMs.push(((peakIndices[i] - peakIndices[i - 1]) / fps) * 1000);
+  for (let i = 1; i < peakPositions.length; i++) {
+    const rr = ((peakPositions[i] - peakPositions[i - 1]) / fps) * 1000;
+    if (rr >= MIN_RR_MS && rr <= MAX_RR_MS) rrIntervalsMs.push(rr);
   }
 
-  let sdnn: number;
-  let rmssd: number;
+  let sdnn: number | null;
+  let rmssd: number | null;
   if (rrIntervalsMs.length >= 2) {
     const rrMean = mean(rrIntervalsMs);
     sdnn = Math.sqrt(mean(rrIntervalsMs.map((x) => (x - rrMean) ** 2)));
@@ -80,13 +90,13 @@ export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartR
     for (let i = 1; i < rrIntervalsMs.length; i++) diffs.push(rrIntervalsMs[i] - rrIntervalsMs[i - 1]);
     rmssd = Math.sqrt(mean(diffs.map((d) => d * d)));
   } else {
-    // Too few clean beats for a real HRV estimate — fall back to
-    // population-average-ish placeholders rather than reporting 0.
-    sdnn = 30;
-    rmssd = 25;
+    // Too few clean beats for a real HRV estimate — report it as unavailable
+    // rather than substituting a made-up number.
+    sdnn = null;
+    rmssd = null;
   }
 
-  return { bpm, sdnn, rmssd, beatsDetected: peakIndices.length };
+  return { bpm, sdnn, rmssd, beatsDetected: peakPositions.length };
 }
 
 function findDominantBpm(filteredSignal: number[], fps: number): number {
@@ -128,7 +138,26 @@ function detectPeaks(signal: number[], minDistance: number): number[] {
       peaks[peaks.length - 1] = i;
     }
   }
-  return peaks;
+  // Refine each integer sample index to a sub-sample position via parabolic
+  // interpolation. Without this, RR intervals are quantized to whole video
+  // frames (e.g. ~67ms at the DeepPhys path's reduced ~15fps), and that
+  // jitter alone is enough to inflate RMSSD past any reasonable stress-scale
+  // denominator — this is what was collapsing the stress index to 0 on
+  // otherwise-good captures.
+  return peaks.map((i) => refinePeakPosition(signal, i));
+}
+
+function refinePeakPosition(signal: number[], i: number): number {
+  const yLeft = signal[i - 1];
+  const yCenter = signal[i];
+  const yRight = signal[i + 1];
+  const denom = yLeft - 2 * yCenter + yRight;
+  if (denom === 0) return i;
+  const delta = (0.5 * (yLeft - yRight)) / denom;
+  // Keep the refinement within the immediate neighborhood of the detected
+  // sample — a large delta means the parabola fit is degenerate, not that
+  // the true peak is a full sample away.
+  return i + Math.max(-0.5, Math.min(0.5, delta));
 }
 
 /** Removes the best-fit linear trend (least squares) from a signal. */

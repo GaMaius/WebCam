@@ -3,27 +3,22 @@
   display: flex;
   flex-direction: column;
   gap: 22px;
-  padding: 22px;
-  min-height: 230px;
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  padding: 24px;
+  min-height: 236px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  box-shadow: var(--shadow-sticker);
   overflow: hidden;
-  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
-}
-.card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--card-accent) 16%, transparent), transparent 55%);
-  opacity: 0.9;
-  pointer-events: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 .card:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--card-accent) 45%, transparent);
-  box-shadow: var(--shadow), 0 0 40px -20px var(--card-accent);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--card-accent);
+}
+.card:active {
+  transform: translate(0, 0);
+  box-shadow: 2px 2px 0 var(--card-accent);
 }
 
 .top {
@@ -36,9 +31,9 @@
   place-items: center;
   width: 52px;
   height: 52px;
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--card-accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--card-accent) 30%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--card-accent) 14%, var(--surface));
+  border: 2px solid var(--card-accent);
   color: var(--card-accent);
 }
 .index {
@@ -56,13 +51,14 @@
 }
 .subtitle {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--card-accent);
 }
 .title {
-  font-size: 22px;
+  font-size: 24px;
+  letter-spacing: -0.01em;
 }
 .desc {
   margin: 0;
@@ -74,11 +70,19 @@
 .cta {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 9px 16px 9px 18px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--text);
+  background: var(--text);
+  color: var(--surface);
   font-size: 13.5px;
   font-weight: 700;
-  color: var(--text);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .card:hover .cta {
-  color: var(--card-accent);
+  background: var(--card-accent);
+  border-color: var(--card-accent);
+  color: #fff;
 }

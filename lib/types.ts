@@ -5,11 +5,13 @@ export type FacingMode = "user" | "environment";
 
 export interface HeartPulseResult {
   bpm: number;
-  /** 0-100, higher = more stressed (derived from HRV) */
-  stressIndex: number;
-  /** Heart-rate variability metrics (ms) */
-  sdnn: number;
-  rmssd: number;
+  /** 0-100, higher = more stressed (derived from HRV). Null when too few
+   * clean beats were detected to compute a real HRV-based estimate — the UI
+   * must show this as "measurement unavailable", never as a fabricated 0. */
+  stressIndex: number | null;
+  /** Heart-rate variability metrics (ms). Null under the same condition as stressIndex. */
+  sdnn: number | null;
+  rmssd: number | null;
   /** 0-100 measurement confidence (penalised by head motion / low signal) */
   confidence: number;
   measuredAt: string; // ISO timestamp
@@ -45,6 +47,13 @@ export interface PersonalFrameResult {
     /** jaw angle in degrees */
     jawAngle: number;
   };
+  /** 0-100 measurement confidence, from front/back capture stability — real
+   * signal quality, not a fixed number. */
+  confidence: number;
+  /** Whether the rear-camera ambient reading actually corrected the skin
+   * color (false when the user had no second camera and skipped that step —
+   * the result is then an uncorrected estimate, and the UI must say so). */
+  ambientCorrected: boolean;
   measuredAt: string;
 }
 

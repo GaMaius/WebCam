@@ -5,12 +5,19 @@ import { loadFaceLandmarker } from "@/lib/faceLandmarker";
 import { computeRoiRegions, sampleRegionMean, type RgbMean } from "@/lib/roi";
 import { computeFaceGeometry, classifyFaceShape, type FaceLandmarkArray } from "@/lib/faceShape";
 import { rgbToLab, rgbToHex } from "@/lib/colorSpace";
-import { grayWorldCorrection, classifyUndertone, classifySeason } from "@/lib/personalColor";
+import { grayWorldCorrection, classifyUndertone, classifySeason, rgbSampleStdDev } from "@/lib/personalColor";
 import { SESSION_KEYS, type PersonalFrameResult } from "@/lib/types";
 import type { CameraHandle } from "@/components/CameraView";
 
 const FRONT_CAPTURE_MS = 1200; // short stable-capture window once a face is found
-const BACK_CAPTURE_MS = 1000;
+// The rear "ambient light" reading only needs to average out the scene, but
+// 1s left almost no margin for the camera's autofocus/exposure to settle
+// after the front->back switch, so a shaky or still-adjusting first few
+// frames could dominate the average. A short warmup is discarded before the
+// real accumulation window starts, and the window itself is longer so a
+// brief wobble doesn't skew the whole reading.
+const BACK_WARMUP_MS = 400;
+const BACK_CAPTURE_MS = 2000;
 const AMBIENT_SAMPLE_SIZE = 32; // downsample the back-camera frame for a cheap average
 
 export type PersonalFrameScanPhase =
@@ -43,6 +50,7 @@ export function usePersonalFrameScan() {
 
   const frontSkinRef = useRef<RgbMean | null>(null);
   const frontGeometryRef = useRef<FaceLandmarkArray | null>(null);
+  const frontStdDevRef = useRef<number>(0);
 
   const stopLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -55,10 +63,15 @@ export function usePersonalFrameScan() {
     stopLoop();
     frontSkinRef.current = null;
     frontGeometryRef.current = null;
+    frontStdDevRef.current = 0;
     setState({ phase: "idle", progress: 0, result: null, errorMessage: "" });
   }, [stopLoop]);
 
-  const finalize = useCallback((ambient: RgbMean) => {
+  /** `ambientStdDev` is null when the rear-camera reading was skipped
+   * entirely (no second camera) rather than actually measured — that case
+   * gets a flat confidence penalty instead of pretending the (fabricated,
+   * neutral-gray) ambient sample was a real measurement. */
+  const finalize = useCallback((ambient: RgbMean, ambientStdDev: number | null) => {
     const skin = frontSkinRef.current;
     const landmarks = frontGeometryRef.current;
     if (!skin || !landmarks) {
@@ -78,6 +91,16 @@ export function usePersonalFrameScan() {
       const faceShape = classifyFaceShape(landmarks);
       const geometry = computeFaceGeometry(landmarks);
 
+      // Confidence is a real signal-quality readout, not a fixed label: more
+      // frame-to-frame color variance during either capture (motion, an
+      // unstable face lock, a shaky rear-camera aim) erodes trust in the
+      // averaged reading, and skipping the rear correction entirely costs a
+      // flat penalty since the result is then an uncorrected estimate.
+      const ambientCorrected = ambientStdDev !== null;
+      const frontPenalty = Math.min(45, frontStdDevRef.current * 4);
+      const backPenalty = ambientCorrected ? Math.min(35, (ambientStdDev as number) * 4) : 35;
+      const confidence = Math.max(0, Math.round(100 - frontPenalty - backPenalty));
+
       const result: PersonalFrameResult = {
         lab: { L: Math.round(lab.L * 10) / 10, a: Math.round(lab.a * 10) / 10, b: Math.round(lab.b * 10) / 10 },
         skinHex: rgbToHex(corrected.r, corrected.g, corrected.b),
@@ -93,6 +116,8 @@ export function usePersonalFrameScan() {
           lengthToWidth: Math.round(geometry.lengthToWidth * 100) / 100,
           jawAngle: Math.round(geometry.jawAngle * 10) / 10,
         },
+        confidence,
+        ambientCorrected,
         measuredAt: new Date().toISOString(),
       };
 
@@ -133,13 +158,23 @@ export function usePersonalFrameScan() {
           return;
         }
         if (startTime === null) startTime = now;
+        const sinceStart = now - startTime;
+
+        // Discard the warmup window entirely (don't sample) so a still-
+        // focusing/adjusting camera right after the facing-mode switch
+        // doesn't get baked into the average.
+        if (sinceStart < BACK_WARMUP_MS) {
+          setState((s) => ({ ...s, progress: 0 }));
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
 
         ctx.drawImage(video, 0, 0, AMBIENT_SAMPLE_SIZE, AMBIENT_SAMPLE_SIZE);
         samples.push(
           sampleRegionMean(ctx, { x: 0, y: 0, w: AMBIENT_SAMPLE_SIZE, h: AMBIENT_SAMPLE_SIZE }, AMBIENT_SAMPLE_SIZE, AMBIENT_SAMPLE_SIZE)
         );
 
-        const elapsed = now - startTime;
+        const elapsed = sinceStart - BACK_WARMUP_MS;
         setState((s) => ({ ...s, progress: Math.min(1, elapsed / BACK_CAPTURE_MS) }));
 
         if (elapsed >= BACK_CAPTURE_MS) {
@@ -148,7 +183,7 @@ export function usePersonalFrameScan() {
             g: samples.reduce((sum, s) => sum + s.g, 0) / samples.length,
             b: samples.reduce((sum, s) => sum + s.b, 0) / samples.length,
           };
-          finalize(ambient);
+          finalize(ambient, rgbSampleStdDev(samples));
           return;
         }
         rafRef.current = requestAnimationFrame(loop);
@@ -238,6 +273,7 @@ export function usePersonalFrameScan() {
             g: skinSamples.reduce((sum, s) => sum + s.g, 0) / skinSamples.length,
             b: skinSamples.reduce((sum, s) => sum + s.b, 0) / skinSamples.length,
           };
+          frontStdDevRef.current = rgbSampleStdDev(skinSamples);
           frontGeometryRef.current = lastLandmarks;
           stopLoop();
           setState((s) => ({ ...s, phase: "awaiting-switch", progress: 1 }));
@@ -268,7 +304,7 @@ export function usePersonalFrameScan() {
    * that doesn't exist. */
   const skipBackCapture = useCallback(() => {
     stopLoop();
-    finalize({ r: 128, g: 128, b: 128 });
+    finalize({ r: 128, g: 128, b: 128 }, null);
   }, [stopLoop, finalize]);
 
   return { ...state, handleCameraReady, reset, stop: stopLoop, skipBackCapture };

@@ -28,7 +28,7 @@ export default function Home() {
           subtitle="rPPG · 생체 신호"
           title="HeartPulse"
           desc="전면 카메라로 15초간 얼굴 미세 혈류를 추적해 심박수(BPM)와 자율신경 스트레스 지수를 측정합니다."
-          accent="#f78ca0"
+          accent="#c4553a"
           icon={<PulseIcon />}
         />
         <ModuleCard
@@ -37,7 +37,7 @@ export default function Home() {
           subtitle="CIELAB · 스타일"
           title="PersonalFrame"
           desc="전·후면 순차 스캔으로 조명을 보정하고, 퍼스널 컬러 톤과 얼굴 골격·비율을 진단합니다."
-          accent="#92a9e1"
+          accent="#4b6b3a"
           icon={<PaletteIcon />}
         />
         <ModuleCard
@@ -46,7 +46,7 @@ export default function Home() {
           subtitle="Integrated"
           title="통합 결과지"
           desc="두 분석을 하나의 카드로 종합하고, 이미지로 저장·공유할 수 있는 리포트를 생성합니다."
-          accent="#a78bfa"
+          accent="#8c5a73"
           icon={<ReportIcon />}
         />
       </section>

@@ -89,7 +89,7 @@ export default function SummaryPage() {
   }, [renderCard, handleSave]);
 
   return (
-    <ModuleShell eyebrow="Integrated" title="통합 결과지" accent="#a78bfa">
+    <ModuleShell eyebrow="Integrated" title="통합 결과지" accent="#8c5a73">
       {!hasAny && (
         <Card className={styles.empty}>
           <div className={styles.emptyIcon}>
@@ -113,12 +113,16 @@ export default function SummaryPage() {
 
       {heart && (
         <Card className={styles.block}>
-          <span className={styles.blockTag} style={{ color: "#f78ca0" }}>
+          <span className={styles.blockTag} style={{ color: "#c4553a" }}>
             HeartPulse
           </span>
           <div className={styles.stats}>
             <Stat label="심박수" value={`${heart.bpm}`} unit="BPM" />
-            <Stat label="스트레스" value={`${heart.stressIndex}`} unit="/100" />
+            <Stat
+              label="스트레스"
+              value={heart.stressIndex !== null ? `${heart.stressIndex}` : "측정 불가"}
+              unit={heart.stressIndex !== null ? "/100" : undefined}
+            />
             <Stat label="신뢰도" value={`${heart.confidence}`} unit="%" />
           </div>
         </Card>
@@ -126,14 +130,18 @@ export default function SummaryPage() {
 
       {frame && (
         <Card className={styles.block}>
-          <span className={styles.blockTag} style={{ color: "#92a9e1" }}>
+          <span className={styles.blockTag} style={{ color: "#4b6b3a" }}>
             PersonalFrame
           </span>
           <div className={styles.stats}>
             <Stat label="언더톤" value={UNDERTONE_LABEL[frame.undertone] ?? frame.undertone} />
             <Stat label="시즌 톤" value={SEASON_LABEL[frame.season] ?? frame.season} />
             <Stat label="얼굴형" value={FACE_SHAPE_LABEL[frame.faceShape] ?? frame.faceShape} />
+            <Stat label="신뢰도" value={`${frame.confidence}`} unit="%" />
           </div>
+          {!frame.ambientCorrected && (
+            <p className={styles.blockNote}>후면 카메라 조명 보정 없이 진행된 결과예요.</p>
+          )}
         </Card>
       )}
 

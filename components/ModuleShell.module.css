@@ -18,15 +18,16 @@
   width: 42px;
   height: 42px;
   flex: none;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .back:hover {
-  background: var(--accent-soft);
-  color: var(--m-accent);
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: #fff;
 }
 .titles {
   display: flex;
@@ -41,8 +42,9 @@
   color: var(--m-accent);
 }
 .title {
-  font-size: 26px;
-  letter-spacing: -0.02em;
+  font-size: 27px;
+  letter-spacing: -0.01em;
+  font-weight: 800;
 }
 
 .steps {
@@ -58,12 +60,12 @@
   align-items: center;
   gap: 9px;
   padding: 11px 13px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border-strong);
   background: var(--surface);
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   min-width: 0;
 }
 .stepNum {
@@ -84,19 +86,19 @@
   white-space: nowrap;
 }
 .active {
-  border-color: color-mix(in srgb, var(--m-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--m-accent) 12%, var(--surface));
+  border-color: var(--m-accent);
+  background: color-mix(in srgb, var(--m-accent) 10%, var(--surface));
   color: var(--text);
 }
 .active .stepNum {
   background: var(--m-accent);
-  color: #10121a;
+  color: #fff;
 }
 .done {
   color: var(--text-dim);
 }
 .done .stepNum {
-  background: color-mix(in srgb, var(--m-accent) 26%, transparent);
+  background: color-mix(in srgb, var(--m-accent) 22%, transparent);
   color: var(--m-accent);
 }
 

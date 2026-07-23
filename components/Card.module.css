@@ -1,12 +1,10 @@
 .card {
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
-  border: 1px solid var(--border);
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
 
 .glow {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(146, 169, 225, 0.08),
-    0 0 44px -18px var(--accent-glow);
+  box-shadow: var(--shadow-sticker);
 }
