@@ -1,0 +1,97 @@
+// Derives forehead/cheek sampling regions from MediaPipe face landmarks.
+// Rather than hardcoding a handful of the 478-point face-mesh indices
+// (easy to get subtly wrong from memory), we take the bounding box of ALL
+// returned landmarks and carve out proportional regions within it — a
+// simple, robust way to land on the same anatomical areas regardless of
+// exact topology indexing.
+
+export interface RoiRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface NormalizedLandmark {
+  x: number;
+  y: number;
+}
+
+export interface RoiRegions {
+  forehead: RoiRegion;
+  leftCheek: RoiRegion;
+  rightCheek: RoiRegion;
+  /** Overall face bounding box center, in pixel coordinates — used for motion tracking. */
+  center: { x: number; y: number };
+}
+
+export function computeRoiRegions(
+  landmarks: NormalizedLandmark[],
+  frameWidth: number,
+  frameHeight: number
+): RoiRegions {
+  let minX = 1;
+  let maxX = 0;
+  let minY = 1;
+  let maxY = 0;
+  for (const lm of landmarks) {
+    if (lm.x < minX) minX = lm.x;
+    if (lm.x > maxX) maxX = lm.x;
+    if (lm.y < minY) minY = lm.y;
+    if (lm.y > maxY) maxY = lm.y;
+  }
+  const faceW = Math.max(1e-6, maxX - minX);
+  const faceH = Math.max(1e-6, maxY - minY);
+
+  const region = (rx: number, ry: number, rw: number, rh: number): RoiRegion => ({
+    x: (minX + rx * faceW) * frameWidth,
+    y: (minY + ry * faceH) * frameHeight,
+    w: rw * faceW * frameWidth,
+    h: rh * faceH * frameHeight,
+  });
+
+  return {
+    // Upper-middle of the face box: glabella/forehead, below the hairline.
+    forehead: region(0.32, 0.08, 0.36, 0.14),
+    // Image-space left side (== subject's right cheek when facing the camera).
+    leftCheek: region(0.1, 0.5, 0.22, 0.16),
+    // Image-space right side (== subject's left cheek).
+    rightCheek: region(0.68, 0.5, 0.22, 0.16),
+    center: {
+      x: (minX + faceW / 2) * frameWidth,
+      y: (minY + faceH / 2) * frameHeight,
+    },
+  };
+}
+
+export interface RgbMean {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** Reads the average RGB of a region from a 2D canvas context, clamped to
+ * the canvas bounds so an ROI that drifts to the frame edge doesn't throw. */
+export function sampleRegionMean(
+  ctx: CanvasRenderingContext2D,
+  region: RoiRegion,
+  canvasWidth: number,
+  canvasHeight: number
+): RgbMean {
+  const x = Math.max(0, Math.min(canvasWidth - 1, Math.floor(region.x)));
+  const y = Math.max(0, Math.min(canvasHeight - 1, Math.floor(region.y)));
+  const w = Math.max(1, Math.min(canvasWidth - x, Math.floor(region.w)));
+  const h = Math.max(1, Math.min(canvasHeight - y, Math.floor(region.h)));
+
+  const { data } = ctx.getImageData(x, y, w, h);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const pixelCount = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+  }
+  return { r: r / pixelCount, g: g / pixelCount, b: b / pixelCount };
+}
