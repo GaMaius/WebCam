@@ -5,13 +5,17 @@ import { ModuleShell } from "@/components/ModuleShell";
 import { CameraView, type CameraHandle } from "@/components/CameraView";
 import { Card } from "@/components/Card";
 import { Waveform } from "@/components/Waveform";
+import { InfoModal } from "@/components/InfoModal";
+import { HeartPulseHowto } from "@/components/illustrations";
 import { useHeartPulseScan } from "@/hooks/useHeartPulseScan";
+import { HEART_METRIC_INFO, HEART_DISCLAIMER } from "@/lib/guidance";
 import styles from "./page.module.css";
 
 const STEPS = ["원리 안내", "15초 스캔", "결과 리포트"];
+const ONBOARD_KEY = "visionlab:heartpulse:onboarded";
 
-function stepForPhase(phase: string, introDone: boolean): number {
-  if (!introDone) return 0;
+function stepForPhase(phase: string, started: boolean): number {
+  if (!started) return 0;
   if (phase === "aligning" || phase === "scanning") return 1;
   if (phase === "analyzing" || phase === "done" || phase === "error") return 2;
   return 1;
@@ -20,38 +24,50 @@ function stepForPhase(phase: string, introDone: boolean): number {
 export default function HeartPulsePage() {
   const scan = useHeartPulseScan();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [introDone, setIntroDone] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
-  // The camera (and its background recording) must auto-start on page load
-  // regardless of the intro screen — only the *measurement* is gated behind
-  // it, so handleCameraReady just remembers the handle until the user has
-  // read the instructions and pressed start (or starts it immediately if the
-  // user somehow dismisses the intro before the camera finishes acquiring).
+  // First visit: auto-open the how-it-works modal. Returning visitors skip
+  // it but can reopen anytime via the header "?" button.
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(ONBOARD_KEY)) setModalOpen(true);
+    } catch {
+      setModalOpen(true);
+    }
+  }, []);
+
+  // Camera + background recording auto-start on load; the measurement itself
+  // only begins once the user chooses to start.
   const handleCameraReady = useCallback(
     (handle: CameraHandle) => {
       videoRef.current = handle.video;
-      if (introDone && scan.phase === "idle") void scan.start(handle.video);
+      if (started && scan.phase === "idle") void scan.start(handle.video);
     },
-    [introDone, scan]
+    [started, scan]
   );
 
   useEffect(() => {
-    if (introDone && videoRef.current && scan.phase === "idle") {
+    if (started && videoRef.current && scan.phase === "idle") {
       void scan.start(videoRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [introDone]);
+  }, [started]);
 
-  const handleStart = useCallback(() => {
-    setIntroDone(true);
+  const beginMeasurement = useCallback(() => {
+    try {
+      localStorage.setItem(ONBOARD_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    setStarted(true);
   }, []);
 
   const handleRetry = useCallback(() => {
-    if (videoRef.current) {
-      void scan.start(videoRef.current);
-    } else {
-      scan.reset();
-    }
+    setShowDetail(false);
+    if (videoRef.current) void scan.start(videoRef.current);
+    else scan.reset();
   }, [scan]);
 
   return (
@@ -60,13 +76,35 @@ export default function HeartPulsePage() {
       title="HeartPulse"
       accent="#c4553a"
       steps={STEPS}
-      activeStep={stepForPhase(scan.phase, introDone)}
+      activeStep={stepForPhase(scan.phase, started)}
+      onHelp={() => setModalOpen(true)}
     >
+      <InfoModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        accent="#c4553a"
+        eyebrow="어떻게 측정하나요"
+        title="얼굴 혈류로 심박을 읽어요"
+        illustration={<HeartPulseHowto />}
+        primaryLabel={!started ? "이해했어요, 측정 시작" : undefined}
+        onPrimary={!started ? beginMeasurement : undefined}
+      >
+        <p>
+          심장이 뛸 때마다 얼굴 피부의 혈류량이 미세하게 변하고, 그만큼 피부색도 아주 조금씩 달라져요.
+          이 변화를 카메라로 15초간 추적해 심박수(BPM)와 자율신경 균형(스트레스)을 추정합니다.
+        </p>
+        <ul className={styles.modalTips}>
+          <li>밝고 균일한 조명 아래, 정면을 응시해 주세요 — 역광은 피해주세요.</li>
+          <li>안경에 빛이 반사되면 잠시 벗는 것을 권장해요.</li>
+          <li>측정 15초 동안 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
+        </ul>
+      </InfoModal>
+
       <CameraView
         initialFacing="user"
-        guide={introDone ? "face" : "none"}
+        guide={started ? "face" : "none"}
         guideHint={
-          introDone && scan.phase === "aligning"
+          started && scan.phase === "aligning"
             ? "이마와 양 뺨이 가이드 안에 들어오도록 정렬하세요"
             : undefined
         }
@@ -75,32 +113,33 @@ export default function HeartPulsePage() {
         onReady={handleCameraReady}
       />
 
-      {!introDone && (
-        <Card className={styles.introCard}>
-          <h3 className={styles.introTitle}>측정 전에 알아두세요</h3>
-          <p className={styles.introPrinciple}>
-            얼굴 피부 아래 혈관은 심장이 뛸 때마다 아주 미세하게 색이 바뀝니다. 이 변화를 카메라로 읽어
-            심박수(BPM)와 자율신경 균형에서 오는 스트레스 지수를 계산해요.
-          </p>
-          <ul className={styles.introTips}>
-            <li>밝고 균일한 조명 아래, 정면을 응시해 주세요 — 역광은 피해주세요.</li>
-            <li>안경에 빛이 반사된다면 잠시 벗는 것을 권장해요.</li>
-            <li>측정 15초 동안 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
-          </ul>
-          <button className={styles.startBtn} onClick={handleStart}>
-            이해했어요, 측정 시작
-          </button>
+      {!started && !modalOpen && (
+        <Card className={styles.startCard}>
+          <div>
+            <h3 className={styles.startTitle}>측정 준비됐어요</h3>
+            <p className={styles.startDesc}>
+              밝은 곳에서 정면을 바라보고, 15초간 움직이지 않으면 돼요.
+            </p>
+          </div>
+          <div className={styles.startActions}>
+            <button className={styles.startBtn} onClick={beginMeasurement}>
+              측정 시작
+            </button>
+            <button className={styles.linkBtn} onClick={() => setModalOpen(true)}>
+              측정 방법 보기
+            </button>
+          </div>
         </Card>
       )}
 
-      {introDone && scan.phase === "aligning" && (
+      {started && scan.phase === "aligning" && (
         <Card className={styles.statusCard}>
           <span className={styles.spinner} />
           얼굴을 찾는 중입니다 — 가이드 안에 얼굴을 맞춰주세요.
         </Card>
       )}
 
-      {introDone && scan.phase === "scanning" && (
+      {started && scan.phase === "scanning" && (
         <Card className={styles.scanCard}>
           <div className={styles.progressRow}>
             <span>측정 중...</span>
@@ -114,14 +153,14 @@ export default function HeartPulsePage() {
         </Card>
       )}
 
-      {introDone && scan.phase === "analyzing" && (
+      {started && scan.phase === "analyzing" && (
         <Card className={styles.statusCard}>
           <span className={styles.spinner} />
           측정 신호를 분석하고 있습니다...
         </Card>
       )}
 
-      {introDone && scan.phase === "done" && scan.result && (
+      {started && scan.phase === "done" && scan.result && (
         <Card className={styles.resultCard}>
           <div className={styles.resultHeader}>
             <h3 className={styles.resultTitle}>측정 결과</h3>
@@ -129,77 +168,58 @@ export default function HeartPulsePage() {
               {scan.engine === "deepphys" ? "DeepPhys AI 모델" : "POS 신호처리"}
             </span>
           </div>
+
           <div className={styles.statGrid}>
-            <div className={styles.stat}>
-              <span className={styles.statLabel}>심박수</span>
-              <span className={styles.statValue}>
-                {scan.result.bpm}
-                <span className={styles.statUnit}>BPM</span>
-              </span>
-            </div>
-            <div className={styles.stat}>
-              <span className={styles.statLabel}>측정 신뢰도</span>
-              <span className={styles.statValue}>
-                {scan.result.confidence}
-                <span className={styles.statUnit}>%</span>
-              </span>
-            </div>
-            {scan.result.stressIndex !== null ? (
-              <div className={styles.stat}>
-                <span className={styles.statLabel}>스트레스 지수</span>
-                <span className={styles.statValue}>
-                  {scan.result.stressIndex}
-                  <span className={styles.statUnit}>/100</span>
-                </span>
-              </div>
-            ) : (
-              <div className={styles.statUnavailable}>
-                <span className={styles.statLabel}>스트레스 지수</span>
-                <span className={styles.statValueMuted}>측정 불가</span>
-              </div>
-            )}
-            {scan.result.sdnn !== null ? (
-              <div className={styles.stat}>
-                <span className={styles.statLabel}>SDNN</span>
-                <span className={styles.statValue}>
-                  {scan.result.sdnn}
-                  <span className={styles.statUnit}>ms</span>
-                </span>
-              </div>
-            ) : (
-              <div className={styles.statUnavailable}>
-                <span className={styles.statLabel}>SDNN</span>
-                <span className={styles.statValueMuted}>측정 불가</span>
-              </div>
-            )}
-            {scan.result.rmssd !== null ? (
-              <div className={styles.stat}>
-                <span className={styles.statLabel}>RMSSD</span>
-                <span className={styles.statValue}>
-                  {scan.result.rmssd}
-                  <span className={styles.statUnit}>ms</span>
-                </span>
-              </div>
-            ) : (
-              <div className={styles.statUnavailable}>
-                <span className={styles.statLabel}>RMSSD</span>
-                <span className={styles.statValueMuted}>측정 불가</span>
-              </div>
-            )}
+            <ResultStat label="심박수" value={`${scan.result.bpm}`} unit="BPM" info={HEART_METRIC_INFO.bpm.short} />
+            <ResultStat label="측정 신뢰도" value={`${scan.result.confidence}`} unit="%" info="측정 안정도(움직임·비트 수 기반)" />
+            <ResultStat
+              label="스트레스 지수"
+              value={scan.result.stressIndex !== null ? `${scan.result.stressIndex}` : null}
+              unit={scan.result.stressIndex !== null ? "/100" : undefined}
+              info={HEART_METRIC_INFO.stress.short}
+            />
+            <ResultStat
+              label="SDNN"
+              value={scan.result.sdnn !== null ? `${scan.result.sdnn}` : null}
+              unit={scan.result.sdnn !== null ? "ms" : undefined}
+              info={HEART_METRIC_INFO.sdnn.short}
+            />
+            <ResultStat
+              label="RMSSD"
+              value={scan.result.rmssd !== null ? `${scan.result.rmssd}` : null}
+              unit={scan.result.rmssd !== null ? "ms" : undefined}
+              info={HEART_METRIC_INFO.rmssd.short}
+            />
           </div>
+
           {scan.result.stressIndex === null && (
             <p className={styles.unavailableNote}>
-              심장 박동이 충분히 안정적으로 잡히지 않아 스트레스 지수와 HRV는 계산하지 않았어요. 조명을
-              밝게 하고 머리를 고정한 채 다시 측정하면 계산될 확률이 높아져요.
+              심장 박동이 충분히 안정적으로 잡히지 않아 스트레스·HRV는 계산하지 않았어요. 조명을 밝게 하고
+              머리를 고정한 채 다시 측정하면 계산될 확률이 높아져요.
             </p>
           )}
+
+          <button className={styles.detailToggle} onClick={() => setShowDetail((v) => !v)}>
+            {showDetail ? "지표 설명 접기" : "이 수치들, 무슨 뜻인가요?"}
+          </button>
+
+          {showDetail && (
+            <div className={styles.detailList}>
+              <MetricDetail title="심박수 (BPM)" info={HEART_METRIC_INFO.bpm.detail} range={HEART_METRIC_INFO.bpm.range} />
+              <MetricDetail title="스트레스 지수" info={HEART_METRIC_INFO.stress.detail} range={HEART_METRIC_INFO.stress.range} />
+              <MetricDetail title="SDNN" info={HEART_METRIC_INFO.sdnn.detail} range={HEART_METRIC_INFO.sdnn.range} />
+              <MetricDetail title="RMSSD" info={HEART_METRIC_INFO.rmssd.detail} range={HEART_METRIC_INFO.rmssd.range} />
+              <p className={styles.disclaimer}>{HEART_DISCLAIMER}</p>
+            </div>
+          )}
+
           <button className={styles.retryBtn} onClick={handleRetry}>
             다시 측정
           </button>
         </Card>
       )}
 
-      {introDone && scan.phase === "error" && (
+      {started && scan.phase === "error" && (
         <Card className={styles.errorCard}>
           <p>{scan.errorMessage}</p>
           <button className={styles.retryBtn} onClick={handleRetry}>
@@ -208,5 +228,44 @@ export default function HeartPulsePage() {
         </Card>
       )}
     </ModuleShell>
+  );
+}
+
+function ResultStat({
+  label,
+  value,
+  unit,
+  info,
+}: {
+  label: string;
+  value: string | null;
+  unit?: string;
+  info: string;
+}) {
+  return (
+    <div className={`${styles.stat} ${value === null ? styles.statUnavailable : ""}`}>
+      <span className={styles.statLabel}>{label}</span>
+      {value !== null ? (
+        <span className={styles.statValue}>
+          {value}
+          {unit && <span className={styles.statUnit}>{unit}</span>}
+        </span>
+      ) : (
+        <span className={styles.statValueMuted}>측정 불가</span>
+      )}
+      <span className={styles.statDesc}>{info}</span>
+    </div>
+  );
+}
+
+function MetricDetail({ title, info, range }: { title: string; info: string; range?: string }) {
+  return (
+    <div className={styles.detailItem}>
+      <div className={styles.detailHead}>
+        <span className={styles.detailTitle}>{title}</span>
+        {range && <span className={styles.detailRange}>{range}</span>}
+      </div>
+      <p className={styles.detailText}>{info}</p>
+    </div>
   );
 }

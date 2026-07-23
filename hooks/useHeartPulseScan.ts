@@ -123,30 +123,29 @@ export function useHeartPulseScan() {
         }
 
         const filtered = bandpassFilter(rawSignal, effectiveFps);
-        const { bpm, sdnn, rmssd, beatsDetected } = estimateBpmAndHrv(filtered, effectiveFps);
+        // Stress is computed inside estimateBpmAndHrv (Baevsky Stress Index on
+        // artifact-rejected RR intervals) rather than re-derived here, so the
+        // whole HRV pipeline stays testable in one place.
+        const { bpm, sdnn, rmssd, stressIndex, beatsDetected, cleanBeats } = estimateBpmAndHrv(
+          filtered,
+          effectiveFps
+        );
 
         const avgMotion =
           motionRef.current.sampleCount > 0
             ? motionRef.current.totalDisplacement / motionRef.current.sampleCount
             : 0;
         // Heuristic: more frame-to-frame ROI displacement (head motion) and
-        // fewer confidently-detected beats both erode trust in the reading.
-        // No artificial floor — a genuinely bad capture (heavy motion, almost
-        // no beats found) should be able to read as low confidence rather
-        // than being reported as at least 20% trustworthy.
+        // fewer clean (artifact-rejected) beats both erode trust in the
+        // reading. No artificial floor — a genuinely bad capture (heavy
+        // motion, almost no usable beats) should read as low confidence
+        // rather than being reported as at least 20% trustworthy.
         const motionPenalty = Math.min(55, avgMotion * 6);
-        const beatsPenalty = beatsDetected < 8 ? (8 - beatsDetected) * 5 : 0;
+        const usableBeats = Math.min(beatsDetected, cleanBeats);
+        const beatsPenalty = usableBeats < 8 ? (8 - usableBeats) * 6 : 0;
         const confidence = Math.max(0, Math.round(100 - motionPenalty - beatsPenalty));
 
         const clampedBpm = Math.min(220, Math.max(35, Math.round(bpm)));
-        // Lower HRV (RMSSD) is associated with lower parasympathetic/vagal
-        // activity, i.e. higher perceived stress — mapped onto a 0-100 scale.
-        // The 120ms denominator (rather than clinical HRV norms) is
-        // calibrated for this pipeline's actual noise floor: webcam rPPG
-        // peak timing is far noisier than a real PPG sensor, so a tighter
-        // scale was saturating almost every real reading to 0.
-        const stressIndex =
-          rmssd !== null ? Math.max(0, Math.min(100, Math.round(100 - Math.min(100, (rmssd / 120) * 100)))) : null;
 
         const result: HeartPulseResult = {
           bpm: clampedBpm,

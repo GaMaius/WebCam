@@ -7,6 +7,7 @@ export function ModuleShell({
   accent = "var(--accent)",
   steps,
   activeStep,
+  onHelp,
   children,
 }: {
   eyebrow: string;
@@ -14,6 +15,8 @@ export function ModuleShell({
   accent?: string;
   steps?: string[];
   activeStep?: number;
+  /** When set, a "?" help button appears in the header (reopens the guide). */
+  onHelp?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -28,6 +31,15 @@ export function ModuleShell({
           <span className={styles.eyebrow}>{eyebrow}</span>
           <h1 className={styles.title}>{title}</h1>
         </div>
+        {onHelp && (
+          <button className={styles.help} onClick={onHelp} aria-label="측정 방법 안내 다시 보기">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3" />
+              <circle cx="12" cy="17" r="0.6" fill="currentColor" />
+            </svg>
+          </button>
+        )}
       </header>
 
       {steps && steps.length > 0 && (

@@ -1,0 +1,114 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(20, 22, 15, 0.5);
+  backdrop-filter: blur(3px);
+  animation: fade 0.16s ease;
+}
+
+.sheet {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 26px 24px 24px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  box-shadow: var(--shadow-sticker);
+  animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1.1);
+}
+
+.close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.close:hover {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.illustration {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  margin-bottom: 18px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--modal-accent) 10%, var(--surface));
+  border: 1.5px solid color-mix(in srgb, var(--modal-accent) 40%, transparent);
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--modal-accent);
+}
+.title {
+  margin: 4px 0 14px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.primary {
+  margin-top: 20px;
+  width: 100%;
+  padding: 13px 22px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--modal-accent);
+  background: var(--modal-accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  box-shadow: var(--shadow-sticker-sm);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.primary:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 rgba(28, 31, 21, 0.94);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .sheet {
+    animation: none;
+  }
+}

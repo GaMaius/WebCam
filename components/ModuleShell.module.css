@@ -34,6 +34,24 @@
   flex-direction: column;
   gap: 3px;
 }
+.help {
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.help:hover {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: #fff;
+}
 .eyebrow {
   font-size: 12px;
   font-weight: 700;

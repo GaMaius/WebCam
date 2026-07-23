@@ -54,8 +54,14 @@ export interface HeartRateEstimate {
   /** null when too few clean beats were detected for a real HRV estimate — never a fabricated number. */
   sdnn: number | null;
   rmssd: number | null;
-  /** Number of beats detected in the time-domain peak pass — low counts mean the HRV numbers are unreliable. */
+  /** 0-100 stress index (Baevsky-based, higher = more sympathetic/stressed).
+   * null under the same too-few-beats condition as sdnn/rmssd. */
+  stressIndex: number | null;
+  /** Number of raw beats detected in the time-domain peak pass. */
   beatsDetected: number;
+  /** Number of RR intervals surviving artifact rejection — the HRV/stress
+   * numbers are only as trustworthy as this count. */
+  cleanBeats: number;
 }
 
 // Physiologically-implausible RR intervals (180+ BPM or under 40 BPM) are
@@ -66,6 +72,18 @@ export interface HeartRateEstimate {
 const MIN_RR_MS = 333; // 180 BPM
 const MAX_RR_MS = 1500; // 40 BPM
 
+// Relative artifact tolerance: real beat-to-beat variation at rest is only a
+// few percent of the mean RR, whereas a missed/extra/spurious peak lands far
+// off the median. Intervals deviating from the (robust) median RR by more
+// than this fraction are treated as artifacts and dropped. This is what was
+// missing before: the absolute 333-1500ms window can't catch an alternating
+// "split beat / merged beat" pattern that stays in range but wrecks RMSSD.
+const RR_MEDIAN_TOLERANCE = 0.25;
+
+// Need at least this many clean intervals before we're willing to report any
+// HRV/stress number at all — below this it's noise, not a measurement.
+const MIN_CLEAN_RR = 5;
+
 export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartRateEstimate {
   const bpm = findDominantBpm(filteredSignal, fps);
 
@@ -75,28 +93,103 @@ export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartR
   const minDistance = Math.max(1, Math.round(expectedPeriodSamples / 1.6));
   const peakPositions = detectPeaks(filteredSignal, minDistance);
 
-  const rrIntervalsMs: number[] = [];
+  const rawRr: number[] = [];
   for (let i = 1; i < peakPositions.length; i++) {
     const rr = ((peakPositions[i] - peakPositions[i - 1]) / fps) * 1000;
-    if (rr >= MIN_RR_MS && rr <= MAX_RR_MS) rrIntervalsMs.push(rr);
+    if (rr >= MIN_RR_MS && rr <= MAX_RR_MS) rawRr.push(rr);
   }
 
-  let sdnn: number | null;
-  let rmssd: number | null;
-  if (rrIntervalsMs.length >= 2) {
-    const rrMean = mean(rrIntervalsMs);
-    sdnn = Math.sqrt(mean(rrIntervalsMs.map((x) => (x - rrMean) ** 2)));
-    const diffs: number[] = [];
-    for (let i = 1; i < rrIntervalsMs.length; i++) diffs.push(rrIntervalsMs[i] - rrIntervalsMs[i - 1]);
-    rmssd = Math.sqrt(mean(diffs.map((d) => d * d)));
-  } else {
-    // Too few clean beats for a real HRV estimate — report it as unavailable
+  const rr = rejectRrArtifacts(rawRr);
+
+  if (rr.length < MIN_CLEAN_RR) {
+    // Too few clean beats for a real HRV estimate — report as unavailable
     // rather than substituting a made-up number.
-    sdnn = null;
-    rmssd = null;
+    return {
+      bpm,
+      sdnn: null,
+      rmssd: null,
+      stressIndex: null,
+      beatsDetected: peakPositions.length,
+      cleanBeats: rr.length,
+    };
   }
 
-  return { bpm, sdnn, rmssd, beatsDetected: peakPositions.length };
+  const rrMean = mean(rr);
+  const sdnn = Math.sqrt(mean(rr.map((x) => (x - rrMean) ** 2)));
+  const diffs: number[] = [];
+  for (let i = 1; i < rr.length; i++) diffs.push(rr[i] - rr[i - 1]);
+  const rmssd = Math.sqrt(mean(diffs.map((d) => d * d)));
+
+  const stressIndex = baevskyStressIndex(rr);
+
+  return {
+    bpm,
+    sdnn,
+    rmssd,
+    stressIndex,
+    beatsDetected: peakPositions.length,
+    cleanBeats: rr.length,
+  };
+}
+
+/** Drops RR intervals that deviate from the median by more than
+ * RR_MEDIAN_TOLERANCE — a robust artifact filter (missed/extra/spurious
+ * beats) that leaves genuine beat-to-beat variation intact. */
+export function rejectRrArtifacts(rrMs: number[]): number[] {
+  if (rrMs.length < 2) return rrMs.slice();
+  const med = median(rrMs);
+  if (med <= 0) return rrMs.slice();
+  const lo = med * (1 - RR_MEDIAN_TOLERANCE);
+  const hi = med * (1 + RR_MEDIAN_TOLERANCE);
+  return rrMs.filter((x) => x >= lo && x <= hi);
+}
+
+// --- Baevsky Stress Index -------------------------------------------------
+// A recognized way to quantify sympathetic activation from the distribution
+// of RR intervals (Baevsky et al.): SI = AMo / (2 * Mo * MxDMn), where the
+// RR intervals are histogrammed into 50ms bins.
+//   Mo (mode)     = most-frequent RR bin center, in seconds
+//   AMo           = % of intervals in the modal bin
+//   MxDMn         = (max RR - min RR), in seconds
+// A tighter, more concentrated distribution (high AMo, small MxDMn) means
+// the heart is "locked" to one rate — sympathetic dominance / stress — and
+// yields a high SI. The raw SI is then squashed onto 0-100 with a log map
+// whose anchors are calibrated (see tests/signalProcessing.test.ts) for this
+// short-window webcam pipeline rather than clinical 5-minute ECG norms.
+const SI_BIN_MS = 50;
+// Anchors calibrated empirically against this pipeline's own output (15s
+// window, ~15-30fps, 50ms bins) — a short-window webcam SI runs an order of
+// magnitude higher than clinical 5-minute ECG norms, so these are tuned so a
+// genuinely relaxed reading lands ~25-30 and a tightly-locked (stressed) one
+// lands ~85-90, rather than blindly reusing clinical SI bands.
+const SI_LOG_LOW = Math.log(50); // SI at/below this -> ~0 (very relaxed)
+const SI_LOG_HIGH = Math.log(700); // SI at/above this -> ~100 (highly stressed)
+
+export function baevskyStressIndex(rrMs: number[]): number {
+  const n = rrMs.length;
+  const bins = new Map<number, number>();
+  for (const rr of rrMs) {
+    const bin = Math.floor(rr / SI_BIN_MS);
+    bins.set(bin, (bins.get(bin) ?? 0) + 1);
+  }
+  let modeBin = 0;
+  let modeCount = 0;
+  for (const [bin, count] of bins) {
+    if (count > modeCount) {
+      modeCount = count;
+      modeBin = bin;
+    }
+  }
+  const moSec = ((modeBin + 0.5) * SI_BIN_MS) / 1000;
+  const aMo = (modeCount / n) * 100;
+  const rangeMs = Math.max(...rrMs) - Math.min(...rrMs);
+  // Floor the range at half a bin so an ultra-concentrated (near-zero-range)
+  // reading can't send SI to infinity.
+  const mxdmnSec = Math.max(rangeMs, SI_BIN_MS / 2) / 1000;
+  const si = aMo / (2 * moSec * mxdmnSec);
+
+  const norm = ((Math.log(si) - SI_LOG_LOW) / (SI_LOG_HIGH - SI_LOG_LOW)) * 100;
+  return Math.max(0, Math.min(100, Math.round(norm)));
 }
 
 function findDominantBpm(filteredSignal: number[], fps: number): number {
@@ -196,4 +289,11 @@ function hannWindow(n: number): Float64Array {
 
 function mean(xs: number[]): number {
   return xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }

@@ -6,18 +6,20 @@ export default function Home() {
     <main className={styles.main}>
       <header className={styles.hero}>
         <span className="vl-pill">
-          <span className={styles.dot} /> 설치·로그인 없이 · 브라우저에서 즉시 분석
+          <span className={styles.dot} /> Vision Wellness &amp; Style Lab
         </span>
         <h1 className={styles.title}>
           VisionLab <span className={styles.accent}>AI</span>
         </h1>
         <p className={styles.lede}>
-          웹캠 한 대로 <strong>심박수·스트레스</strong>부터 <strong>퍼스널 컬러·얼굴 골격</strong>까지.
-          rPPG 신호처리와 CIELAB 색공간 분석을 브라우저 안에서 수행하는 원스톱 비전 분석 플랫폼입니다.
+          카메라 하나로 나를 읽는 셀프 스캔. <strong>심박·스트레스</strong>와{" "}
+          <strong>퍼스널 컬러·얼굴 골격</strong>을 한 번에 측정하고, 매일의 컨디션과 스타일을
+          기록해 나가세요.
         </p>
         <div className={styles.privacyNote}>
           <LockIcon />
-          심박수·톤·골격 측정은 <strong>브라우저에서 실시간(on-device)</strong>으로 계산됩니다.
+          분석은 <strong>기기 안(온디바이스)</strong>에서 이뤄지고, 원본 영상은 서비스 개선을 위해
+          안전하게 전송·보관돼요.
         </div>
       </header>
 
@@ -53,7 +55,7 @@ export default function Home() {
 
       <footer className={styles.footer}>
         <span className="vl-mono">VisionLab AI</span>
-        <span>rPPG-Toolbox · MediaPipe · CIELAB</span>
+        <span>DeepPhys rPPG · MediaPipe · CIELAB</span>
       </footer>
     </main>
   );
