@@ -25,3 +25,6 @@ yarn-error.log*
 # local Claude tooling (not part of the product)
 .agents/
 .claude/skills/
+
+.vercel
+.env*
