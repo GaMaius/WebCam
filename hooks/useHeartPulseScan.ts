@@ -13,9 +13,10 @@ import { bandpassFilter, estimateBpmAndHrv } from "@/lib/signalProcessing";
 import { loadDeepPhysSession, runDeepPhysInference, DEEPPHYS_IMG_SIZE, type RgbFrame } from "@/lib/deepPhys";
 import { SESSION_KEYS, type HeartPulseResult } from "@/lib/types";
 
-// 30s is the practical floor for a defensible short-window HRV/stress read
-// (15s is too short for RMSSD/SD1 to stabilize on noisy webcam data).
-const SCAN_DURATION_MS = 30_000;
+// 15s scan: a shorter, more comfortable capture window. BPM and the spectral
+// stress read remain reliable at this length; RMSSD/SD1-based HRV is noisier
+// than at 30s, so treat those as rougher estimates on webcam data.
+const SCAN_DURATION_MS = 15_000;
 const SCAN_DURATION_SEC = SCAN_DURATION_MS / 1000;
 const MIN_USABLE_SAMPLES = 60; // guards against a near-instant, unusable clip
 const WAVEFORM_POINTS = 150;

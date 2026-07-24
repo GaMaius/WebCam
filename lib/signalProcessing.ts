@@ -5,7 +5,7 @@
 // timestamps for HRV come from simple time-domain peak-picking on the
 // filtered waveform.
 //
-// A short (30s), non-periodic-in-window signal has real spectral leakage:
+// A short (~15s), non-periodic-in-window signal has real spectral leakage:
 // any slow drift that doesn't complete a whole number of cycles within the
 // window creates a boundary discontinuity once zero-padded to the next
 // power of two, which spreads energy across the whole spectrum — including
@@ -16,7 +16,7 @@
 // the peak frequency; the un-windowed, detrended signal is what actually
 // gets bandpass-filtered and returned for time-domain peak (HRV) detection.
 //
-// Caveat: even 30 seconds is short for HRV in the clinical sense (SDNN and
+// Caveat: a ~15s window is short for HRV in the clinical sense (SDNN and
 // frequency-domain metrics are normally computed over minutes) — treat these
 // as approximate, same-session indicators rather than diagnostic values.
 // RMSSD/SD1 are the metrics that survive short windows, so the stress index
