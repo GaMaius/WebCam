@@ -5,25 +5,19 @@
 // notebook and placed under /public (see README).
 
 import * as ort from "onnxruntime-web";
+import {
+  ENCODER_URL,
+  GALLERY_BIN,
+  GALLERY_JSON,
+  POKEDEX_JSON,
+  POKEMATCH_IMG_SIZE,
+} from "./assets";
+
+// Re-export for existing importers (page.tsx etc.).
+export { POKEMATCH_IMG_BASE, POKEMATCH_IMG_SIZE, pokemonImageUrl } from "./assets";
 
 const ORT_VERSION = "1.27.0";
 ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
-
-const ENCODER_URL = "/models/pokemon_encoder.onnx";
-const GALLERY_BIN = "/pokemon/gallery.bin";
-const GALLERY_JSON = "/pokemon/gallery.json";
-const POKEDEX_JSON = "/pokemon/pokedex.json";
-
-/** Base URL for representative images: `${base}/${slug}.webp`.
- * Default: bundled under /public/pokemon/img. Set to a B2 public URL to host
- * them off-repo instead. */
-export const POKEMATCH_IMG_BASE = "/pokemon/img";
-export function pokemonImageUrl(slug: string): string {
-  return `${POKEMATCH_IMG_BASE}/${slug}.webp`;
-}
-
-/** Encoder input side (open_clip preprocess: resize+center-crop 256, [0,1] RGB). */
-export const POKEMATCH_IMG_SIZE = 256;
 
 export interface PokedexEntry {
   slug: string;

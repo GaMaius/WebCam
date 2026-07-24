@@ -4,6 +4,7 @@
 
 import type { HeartPulseResult, PersonalFrameResult } from "./types";
 import { typeColor } from "./typeColors";
+import { pokemonImageUrl } from "./pokematch/assets";
 
 export interface PersonalFrameLabels {
   season: Record<string, string>;
@@ -324,11 +325,11 @@ interface PokematchCardMatch {
 }
 
 const POKEMATCH_ACCENT = "#d64541";
-const POKEMATCH_IMG_BASE = "/pokemon/img";
 
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = "anonymous"; // allow canvas export when images are on B2 (needs CORS)
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
     img.src = url;
@@ -346,7 +347,7 @@ export async function drawPokematchCard(
 
   drawShell(ctx, { appName: "PokéMatch", accent: POKEMATCH_ACCENT });
 
-  const imgs = await Promise.all(matches.map((m) => loadImage(`${POKEMATCH_IMG_BASE}/${m.slug}.webp`)));
+  const imgs = await Promise.all(matches.map((m) => loadImage(pokemonImageUrl(m.slug))));
 
   const cardX = PAD;
   const cardW = W - PAD * 2;
