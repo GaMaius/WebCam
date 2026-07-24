@@ -38,6 +38,10 @@ export interface PersonalFrameResult {
   skinHex: string;
   undertone: "warm" | "cool" | "neutral";
   season: SeasonTone;
+  /** Individual Typology Angle (degrees) — dermatology-standard skin-depth metric. */
+  ita: number;
+  /** ITA° category key (very-light … dark). */
+  itaCategory: "very-light" | "light" | "intermediate" | "tan" | "brown" | "dark";
   faceShape: FaceShape;
   metrics: {
     /** upper : mid : lower facial-third ratios (normalised, sum ~= 3) */

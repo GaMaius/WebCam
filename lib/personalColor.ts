@@ -7,7 +7,7 @@
 // reasonable, clearly-documented heuristic for a fun web feature, not a
 // clinical or professional-grade classification.
 
-import type { Lab } from "./colorSpace";
+import { itaDegrees, type Lab } from "./colorSpace.ts";
 import type { SeasonTone } from "./types";
 
 export interface Rgb {
@@ -67,11 +67,30 @@ export function classifyUndertone(lab: Lab, threshold = 3): Undertone {
   return "neutral";
 }
 
-/** Combines undertone with lightness (L*) into a 4-season label. Neutral
- * undertones fall back to whichever raw sign (even below the confident
- * threshold) the color leans toward, so every input still gets an answer. */
-export function classifySeason(lab: Lab, undertone: Undertone, lightThreshold = 60): SeasonTone {
-  const isLight = lab.L >= lightThreshold;
+// The six standard ITA° skin-tone categories (Chardon / Del Bino).
+export type ItaCategory = "very-light" | "light" | "intermediate" | "tan" | "brown" | "dark";
+
+export function classifyIta(ita: number): ItaCategory {
+  if (ita > 55) return "very-light";
+  if (ita > 41) return "light";
+  if (ita > 28) return "intermediate";
+  if (ita > 10) return "tan";
+  if (ita > -30) return "brown";
+  return "dark";
+}
+
+// Season light/deep split. We use ITA° (which folds in both L* lightness and
+// b* warmth) rather than a bare L* threshold — a more principled, standard
+// measure of skin depth. The 41° boundary is the dermatology light /
+// intermediate line, which maps well onto the personal-color "light-season
+// (spring/summer) vs deep-season (autumn/winter)" axis.
+const SEASON_LIGHT_ITA = 41;
+
+/** Combines undertone with skin depth (ITA°) into a 4-season label. Neutral
+ * undertones fall back to whichever way the raw a*, b* balance leans, so
+ * every input still gets an answer. */
+export function classifySeason(lab: Lab, undertone: Undertone): SeasonTone {
+  const isLight = itaDegrees(lab) >= SEASON_LIGHT_ITA;
   const leansWarm = undertone === "warm" || (undertone === "neutral" && lab.b >= lab.a);
 
   if (leansWarm) return isLight ? "spring-warm" : "autumn-warm";

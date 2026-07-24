@@ -162,5 +162,8 @@ export const HEART_METRIC_INFO: Record<"bpm" | "stress" | "sdnn" | "rmssd", Metr
 export const HEART_DISCLAIMER =
   "본 결과는 카메라 기반 추정값으로 의료 진단이 아니며, 건강 참고용이에요.";
 
+export const ITA_INFO =
+  "ITA°(Individual Typology Angle)는 피부과에서 쓰는 표준 지표로, CIELAB 색좌표의 밝기(L*)와 황색도(b*)로 피부 톤 깊이를 객관적으로 수치화해요. 값이 높을수록 밝은 톤, 낮을수록 깊은 톤이에요.";
+
 export const PERSONAL_COLOR_DISCLAIMER =
   "퍼스널 컬러는 조명·화장·화면에 영향을 받는 참고용 진단이에요. 자연광에서 여러 번 측정하면 더 정확해요.";

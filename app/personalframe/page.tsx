@@ -7,11 +7,12 @@ import { Card } from "@/components/Card";
 import { InfoModal } from "@/components/InfoModal";
 import { PersonalFrameHowto } from "@/components/illustrations";
 import { usePersonalFrameScan } from "@/hooks/usePersonalFrameScan";
-import { SEASON_LABEL, UNDERTONE_LABEL, FACE_SHAPE_LABEL } from "@/lib/labels";
+import { SEASON_LABEL, UNDERTONE_LABEL, FACE_SHAPE_LABEL, ITA_LABEL } from "@/lib/labels";
 import {
   SEASON_GUIDE,
   UNDERTONE_INFO,
   FACE_SHAPE_TIP,
+  ITA_INFO,
   PERSONAL_COLOR_DISCLAIMER,
 } from "@/lib/guidance";
 import styles from "./page.module.css";
@@ -204,6 +205,16 @@ export default function PersonalFramePage() {
             </div>
             <p className={styles.seasonSummary}>{guide.summary}</p>
             <p className={styles.undertoneNote}>{UNDERTONE_INFO[scan.result.undertone]}</p>
+
+            <div className={styles.itaRow}>
+              <div className={styles.itaHead}>
+                <span className={styles.itaLabel}>ITA° · 피부 톤 깊이</span>
+                <span className={styles.itaValue}>
+                  {scan.result.ita}°<span className={styles.itaCat}>{ITA_LABEL[scan.result.itaCategory]}</span>
+                </span>
+              </div>
+              <p className={styles.itaInfo}>{ITA_INFO}</p>
+            </div>
           </Card>
 
           <Card className={styles.applyCard}>

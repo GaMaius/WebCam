@@ -14,6 +14,15 @@ export const UNDERTONE_LABEL: Record<string, string> = {
   neutral: "뉴트럴",
 };
 
+export const ITA_LABEL: Record<string, string> = {
+  "very-light": "매우 밝은 톤",
+  light: "밝은 톤",
+  intermediate: "중간 톤",
+  tan: "탠 톤",
+  brown: "브라운 톤",
+  dark: "딥 톤",
+};
+
 export const FACE_SHAPE_LABEL: Record<string, string> = {
   oval: "타원형",
   round: "둥근형",

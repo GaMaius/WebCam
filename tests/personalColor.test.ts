@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { grayWorldCorrection, classifyUndertone, classifySeason } from "../lib/personalColor.ts";
+import { grayWorldCorrection, classifyUndertone, classifySeason, classifyIta } from "../lib/personalColor.ts";
+import { itaDegrees } from "../lib/colorSpace.ts";
 
 test("grayWorldCorrection leaves the skin sample unchanged under neutral ambient light", () => {
   const skin = { r: 200, g: 170, b: 150 };
@@ -55,4 +56,20 @@ test("classifySeason maps cool+light to summer, cool+dark to winter", () => {
 test("classifySeason resolves a neutral undertone using the raw a*/b* lean", () => {
   assert.equal(classifySeason({ L: 75, a: 10, b: 12 }, "neutral"), "spring-warm");
   assert.equal(classifySeason({ L: 75, a: 12, b: 10 }, "neutral"), "summer-cool");
+});
+
+test("itaDegrees matches the ITA formula and rises with lightness", () => {
+  // ITA = atan((L-50)/b) * 180/pi. For L=70, b=20: atan(20/20)=45deg.
+  assert.ok(Math.abs(itaDegrees({ L: 70, a: 10, b: 20 }) - 45) < 0.5);
+  // Lighter skin (higher L) => higher ITA.
+  assert.ok(itaDegrees({ L: 80, a: 10, b: 20 }) > itaDegrees({ L: 55, a: 10, b: 20 }));
+});
+
+test("classifyIta maps ITA degrees onto the standard skin-tone categories", () => {
+  assert.equal(classifyIta(60), "very-light");
+  assert.equal(classifyIta(48), "light");
+  assert.equal(classifyIta(34), "intermediate");
+  assert.equal(classifyIta(18), "tan");
+  assert.equal(classifyIta(-5), "brown");
+  assert.equal(classifyIta(-40), "dark");
 });

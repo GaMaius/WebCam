@@ -4,8 +4,14 @@ import { useCallback, useRef, useState } from "react";
 import { loadFaceLandmarker } from "@/lib/faceLandmarker";
 import { computeRoiRegions, sampleRegionMean, type RgbMean } from "@/lib/roi";
 import { computeFaceGeometry, classifyFaceShape, type FaceLandmarkArray } from "@/lib/faceShape";
-import { rgbToLab, rgbToHex } from "@/lib/colorSpace";
-import { grayWorldCorrection, classifyUndertone, classifySeason, rgbSampleStdDev } from "@/lib/personalColor";
+import { rgbToLab, rgbToHex, itaDegrees } from "@/lib/colorSpace";
+import {
+  grayWorldCorrection,
+  classifyUndertone,
+  classifySeason,
+  classifyIta,
+  rgbSampleStdDev,
+} from "@/lib/personalColor";
 import { SESSION_KEYS, type PersonalFrameResult } from "@/lib/types";
 import type { CameraHandle } from "@/components/CameraView";
 
@@ -86,6 +92,7 @@ export function usePersonalFrameScan() {
     try {
       const corrected = grayWorldCorrection(skin, ambient);
       const lab = rgbToLab(corrected.r, corrected.g, corrected.b);
+      const ita = itaDegrees(lab);
       const undertone = classifyUndertone(lab);
       const season = classifySeason(lab, undertone);
       const faceShape = classifyFaceShape(landmarks);
@@ -112,6 +119,8 @@ export function usePersonalFrameScan() {
         skinHex: rgbToHex(corrected.r, corrected.g, corrected.b),
         undertone,
         season,
+        ita: Math.round(ita * 10) / 10,
+        itaCategory: classifyIta(ita),
         faceShape,
         metrics: {
           thirds: [

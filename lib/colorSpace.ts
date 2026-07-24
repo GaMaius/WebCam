@@ -43,6 +43,19 @@ export function rgbToLab(r: number, g: number, b: number): Lab {
   };
 }
 
+/**
+ * Individual Typology Angle (Chardon et al. 1991; Del Bino) — the
+ * dermatology-standard, objective skin-tone classifier derived from CIELAB:
+ *   ITA° = arctan((L* − 50) / b*) × 180/π
+ * Higher = lighter skin, lower = deeper. atan2 is used so a near-zero b*
+ * can't blow up the ratio. Standard category boundaries (degrees):
+ *   >55 very light · 41–55 light · 28–41 intermediate · 10–28 tan ·
+ *   −30–10 brown · <−30 dark.
+ */
+export function itaDegrees(lab: Lab): number {
+  return (Math.atan2(lab.L - 50, lab.b) * 180) / Math.PI;
+}
+
 export function rgbToHex(r: number, g: number, b: number): string {
   const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
   const toHex = (v: number) => clamp(v).toString(16).padStart(2, "0");
