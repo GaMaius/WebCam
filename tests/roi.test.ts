@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeRoiRegions } from "../lib/roi.ts";
+import { computeRoiRegions, isSkinPixel } from "../lib/roi.ts";
 
 // A simple square "face" bounding box from (0.25,0.25) to (0.75,0.75) in
 // normalized coordinates, on a 200x200 pixel frame.
@@ -47,4 +47,15 @@ test("computeRoiRegions reports a center matching the face bounding box midpoint
   const { center } = computeRoiRegions(squareFace, 200, 200);
   assert.ok(Math.abs(center.x - 100) < 1e-6);
   assert.ok(Math.abs(center.y - 100) < 1e-6);
+});
+
+test("isSkinPixel accepts typical skin tones and rejects non-skin colors", () => {
+  // Representative skin RGBs across a range of tones.
+  assert.ok(isSkinPixel(230, 190, 170), "light skin should classify as skin");
+  assert.ok(isSkinPixel(200, 150, 120), "medium skin should classify as skin");
+  assert.ok(isSkinPixel(140, 95, 70), "deep skin should classify as skin");
+  // Non-skin: eyebrow/hair (near-black), background greens/blues, pure white.
+  assert.ok(!isSkinPixel(20, 20, 20), "near-black (brow/hair) should be rejected");
+  assert.ok(!isSkinPixel(40, 120, 60), "green background should be rejected");
+  assert.ok(!isSkinPixel(60, 90, 200), "blue should be rejected");
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { loadFaceLandmarker } from "@/lib/faceLandmarker";
-import { computeRoiRegions, sampleRegionMean, type RgbMean } from "@/lib/roi";
+import { computeRoiRegions, sampleRegionMean, sampleRegionSkinMean, type RgbMean } from "@/lib/roi";
 import { computeFaceGeometry, classifyFaceShape, type FaceLandmarkArray } from "@/lib/faceShape";
 import { rgbToLab, rgbToHex, itaDegrees } from "@/lib/colorSpace";
 import {
@@ -57,6 +57,7 @@ export function usePersonalFrameScan() {
   const frontSkinRef = useRef<RgbMean | null>(null);
   const frontGeometryRef = useRef<FaceLandmarkArray | null>(null);
   const frontStdDevRef = useRef<number>(0);
+  const frontSkinRatioRef = useRef<number>(0);
 
   const stopLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -70,6 +71,7 @@ export function usePersonalFrameScan() {
     frontSkinRef.current = null;
     frontGeometryRef.current = null;
     frontStdDevRef.current = 0;
+    frontSkinRatioRef.current = 0;
     setState({ phase: "idle", progress: 0, result: null, errorMessage: "" });
   }, [stopLoop]);
 
@@ -101,6 +103,8 @@ export function usePersonalFrameScan() {
       // Confidence is a multiplicative composite of real capture-quality
       // sub-scores (each 0-1), following color-measurement QA practice rather
       // than a punitive linear penalty:
+      //   - skinRatio: how much of the sampled ROIs actually classified as
+      //     skin (a low ratio = the mask caught hair/shadow/background).
       //   - stability: temporal steadiness of the skin-color mean across
       //     frames, on a soft tolerance curve (normal skin has some spread,
       //     so full credit below ~8 and graceful rolloff to ~30).
@@ -109,10 +113,11 @@ export function usePersonalFrameScan() {
       //   - white balance: a skipped ambient step is a missing correction
       //     opportunity, not a defect — a small cap (×0.9), not a big penalty.
       const ambientCorrected = ambientStdDev !== null;
+      const skin01 = softRamp(frontSkinRatioRef.current, 0.3, 0.7); // 0.3 poor → 0.7 full
       const stability01 = softQuality(frontStdDevRef.current, 8, 30);
       const exposure01 = exposureQuality(skin);
       const wb01 = ambientCorrected ? 1 : 0.9;
-      const confidence = Math.max(0, Math.min(100, Math.round(100 * stability01 * exposure01 * wb01)));
+      const confidence = Math.max(0, Math.min(100, Math.round(100 * skin01 * stability01 * exposure01 * wb01)));
 
       const result: PersonalFrameResult = {
         lab: { L: Math.round(lab.L * 10) / 10, a: Math.round(lab.a * 10) / 10, b: Math.round(lab.b * 10) / 10 },
@@ -239,6 +244,7 @@ export function usePersonalFrameScan() {
 
       let captureStart: number | null = null;
       const skinSamples: RgbMean[] = [];
+      const skinRatios: number[] = [];
       let lastLandmarks: FaceLandmarkArray | null = null;
 
       const loop = (now: number) => {
@@ -265,14 +271,17 @@ export function usePersonalFrameScan() {
         lastLandmarks = landmarks;
         const regions = computeRoiRegions(landmarks, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const forehead = sampleRegionMean(ctx, regions.forehead, canvas.width, canvas.height);
-        const leftCheek = sampleRegionMean(ctx, regions.leftCheek, canvas.width, canvas.height);
-        const rightCheek = sampleRegionMean(ctx, regions.rightCheek, canvas.width, canvas.height);
+        // Per-pixel skin-masked sampling: excludes eyebrows/shadow/specular
+        // within each ROI rather than flat-averaging the whole rectangle.
+        const forehead = sampleRegionSkinMean(ctx, regions.forehead, canvas.width, canvas.height);
+        const leftCheek = sampleRegionSkinMean(ctx, regions.leftCheek, canvas.width, canvas.height);
+        const rightCheek = sampleRegionSkinMean(ctx, regions.rightCheek, canvas.width, canvas.height);
         skinSamples.push({
           r: (forehead.r + leftCheek.r + rightCheek.r) / 3,
           g: (forehead.g + leftCheek.g + rightCheek.g) / 3,
           b: (forehead.b + leftCheek.b + rightCheek.b) / 3,
         });
+        skinRatios.push((forehead.skinRatio + leftCheek.skinRatio + rightCheek.skinRatio) / 3);
 
         if (captureStart === null) {
           captureStart = now;
@@ -288,6 +297,7 @@ export function usePersonalFrameScan() {
             g: skinSamples.reduce((sum, s) => sum + s.g, 0) / skinSamples.length,
             b: skinSamples.reduce((sum, s) => sum + s.b, 0) / skinSamples.length,
           };
+          frontSkinRatioRef.current = skinRatios.reduce((a, b) => a + b, 0) / skinRatios.length;
           frontStdDevRef.current = rgbSampleStdDev(skinSamples);
           frontGeometryRef.current = lastLandmarks;
           stopLoop();
@@ -331,6 +341,13 @@ function softQuality(value: number, good: number, bad: number): number {
   if (value <= good) return 1;
   if (value >= bad) return 0;
   return 1 - (value - good) / (bad - good);
+}
+
+/** Rising soft ramp: 0 at/below `low`, full credit (1) at/above `high`. */
+function softRamp(value: number, low: number, high: number): number {
+  if (value <= low) return 0;
+  if (value >= high) return 1;
+  return (value - low) / (high - low);
 }
 
 /** Penalizes a skin sample whose channels approach clipping — a blown or

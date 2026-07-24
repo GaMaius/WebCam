@@ -136,6 +136,83 @@ export function sampleRegionMean(
   return { r: r / pixelCount, g: g / pixelCount, b: b / pixelCount };
 }
 
+export interface SkinSample extends RgbMean {
+  /** Fraction of the ROI's pixels that classified as skin (0-1) — a validity
+   * signal: a low ratio means the rectangle caught hair/shadow/background. */
+  skinRatio: number;
+}
+
+/**
+ * YCbCr skin-color gate. Chroma-based (Cr 133-173, Cb 77-127) so it stays
+ * reasonably robust across skin tones — far less lightness-biased than the
+ * classic Kovac RGB rules — while rejecting eyebrows, hair, shadow, and
+ * background that a plain rectangular average would fold into the sample.
+ */
+export function isSkinPixel(r: number, g: number, b: number): boolean {
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127;
+}
+
+/**
+ * Per-pixel skin-masked mean of an ROI: keeps only skin-classified pixels,
+ * then trims the darkest and brightest 10% by luminance (drops residual
+ * shadow/eyebrow and specular-highlight pixels) before averaging. This is
+ * the real "skin mask" the personal-color analysis samples from, rather than
+ * a flat rectangular average. Falls back to the plain average when too few
+ * pixels classify as skin, so it never returns an empty sample.
+ */
+export function sampleRegionSkinMean(
+  ctx: CanvasRenderingContext2D,
+  region: RoiRegion,
+  canvasWidth: number,
+  canvasHeight: number
+): SkinSample {
+  const x = Math.max(0, Math.min(canvasWidth - 1, Math.floor(region.x)));
+  const y = Math.max(0, Math.min(canvasHeight - 1, Math.floor(region.y)));
+  const w = Math.max(1, Math.min(canvasWidth - x, Math.floor(region.w)));
+  const h = Math.max(1, Math.min(canvasHeight - y, Math.floor(region.h)));
+
+  const { data } = ctx.getImageData(x, y, w, h);
+  const totalPixels = data.length / 4;
+
+  // Collect skin pixels with their luminance for the outlier trim.
+  const skin: { r: number; g: number; b: number; luma: number }[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (isSkinPixel(r, g, b)) {
+      skin.push({ r, g, b, luma: 0.299 * r + 0.587 * g + 0.114 * b });
+    }
+  }
+  const skinRatio = totalPixels > 0 ? skin.length / totalPixels : 0;
+
+  // Too little skin in the ROI to trust the mask — fall back to a plain
+  // average of the whole region rather than returning garbage.
+  if (skin.length < Math.max(8, totalPixels * 0.15)) {
+    const plain = sampleRegionMean(ctx, region, canvasWidth, canvasHeight);
+    return { ...plain, skinRatio };
+  }
+
+  // Trim the darkest/brightest 10% (shadow/eyebrow & specular) then average.
+  skin.sort((p, q) => p.luma - q.luma);
+  const lo = Math.floor(skin.length * 0.1);
+  const hi = Math.ceil(skin.length * 0.9);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = lo; i < hi; i++) {
+    r += skin[i].r;
+    g += skin[i].g;
+    b += skin[i].b;
+    n += 1;
+  }
+  if (n === 0) n = 1;
+  return { r: r / n, g: g / n, b: b / n, skinRatio };
+}
+
 /**
  * Draws a region of the source video, scaled to `size x size`, onto a
  * scratch canvas and reads it back as a flat channel-last RGB Float32Array
