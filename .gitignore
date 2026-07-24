@@ -28,8 +28,3 @@ yarn-error.log*
 
 .vercel
 .env*
-
-# PokéMatch large assets — host on B2 (see lib/pokematch/assets.ts).
-# Only the small gallery/pokedex JSON/bin are committed to /public.
-/public/models/pokemon_encoder.onnx
-/public/pokemon/img/
