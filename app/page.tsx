@@ -24,7 +24,7 @@ export default function Home() {
           index="01"
           subtitle="rPPG · 생체 신호"
           title="HeartPulse"
-          desc="전면 카메라로 15초간 얼굴 미세 혈류를 추적해 심박수(BPM)와 자율신경 스트레스 지수를 측정합니다."
+          desc="전면 카메라로 30초간 얼굴 미세 혈류를 추적해 심박수(BPM)와 자율신경 스트레스 지수를 측정합니다."
           accent="#c4553a"
           icon={<PulseIcon />}
         />

@@ -5,7 +5,7 @@
 // timestamps for HRV come from simple time-domain peak-picking on the
 // filtered waveform.
 //
-// A short (15s), non-periodic-in-window signal has real spectral leakage:
+// A short (30s), non-periodic-in-window signal has real spectral leakage:
 // any slow drift that doesn't complete a whole number of cycles within the
 // window creates a boundary discontinuity once zero-padded to the next
 // power of two, which spreads energy across the whole spectrum — including
@@ -16,9 +16,12 @@
 // the peak frequency; the un-windowed, detrended signal is what actually
 // gets bandpass-filtered and returned for time-domain peak (HRV) detection.
 //
-// Caveat: 15 seconds is short for HRV in the clinical sense (SDNN/RMSSD
-// are normally computed over minutes) — treat these as approximate,
-// same-session indicators rather than diagnostic values.
+// Caveat: even 30 seconds is short for HRV in the clinical sense (SDNN and
+// frequency-domain metrics are normally computed over minutes) — treat these
+// as approximate, same-session indicators rather than diagnostic values.
+// RMSSD/SD1 are the metrics that survive short windows, so the stress index
+// is built on those (plus a heart-rate-elevation term), not on a histogram
+// statistic like the Baevsky index which is too fragile on noisy webcam RR.
 
 import { fft, ifft, nextPowerOfTwo } from "./fft.ts";
 
@@ -54,38 +57,52 @@ export interface HeartRateEstimate {
   /** null when too few clean beats were detected for a real HRV estimate — never a fabricated number. */
   sdnn: number | null;
   rmssd: number | null;
-  /** 0-100 stress index (Baevsky-based, higher = more sympathetic/stressed).
-   * null under the same too-few-beats condition as sdnn/rmssd. */
+  /** Poincaré SD1 (= RMSSD / √2), the standard short-term parasympathetic index. */
+  sd1: number | null;
+  /** 0-100 stress index (composite of RMSSD/SD1 + heart-rate elevation,
+   * higher = more sympathetic/stressed). null when the signal is too weak
+   * (too few clean beats or low SNR) to report honestly — never a fabricated 0. */
   stressIndex: number | null;
+  /** Spectral signal-to-noise ratio of the pulse peak (dB) — the primary
+   * signal-quality measure, from the FFT rather than fragile peak detection. */
+  snrDb: number;
   /** Number of raw beats detected in the time-domain peak pass. */
   beatsDetected: number;
-  /** Number of RR intervals surviving artifact rejection — the HRV/stress
-   * numbers are only as trustworthy as this count. */
+  /** Number of RR intervals surviving artifact rejection. */
   cleanBeats: number;
 }
 
 // Physiologically-implausible RR intervals (180+ BPM or under 40 BPM) are
-// almost always a mis-detected peak rather than a real beat-to-beat gap. A
-// single such outlier dominates RMSSD (it's a diff-of-diffs), so we drop
-// these before computing HRV rather than let one bad peak invalidate the
-// whole reading.
+// almost always a mis-detected peak rather than a real beat-to-beat gap.
 const MIN_RR_MS = 333; // 180 BPM
 const MAX_RR_MS = 1500; // 40 BPM
 
-// Relative artifact tolerance: real beat-to-beat variation at rest is only a
-// few percent of the mean RR, whereas a missed/extra/spurious peak lands far
-// off the median. Intervals deviating from the (robust) median RR by more
-// than this fraction are treated as artifacts and dropped. This is what was
-// missing before: the absolute 333-1500ms window can't catch an alternating
-// "split beat / merged beat" pattern that stays in range but wrecks RMSSD.
+// Malik criterion: reject a beat if it differs from the previous accepted
+// interval by more than 20% — the most widely used relative artifact filter.
+const MALIK_TOLERANCE = 0.2;
+// Median-relative gate (Kubios "medium" preset, ~0.25) as a first pass.
 const RR_MEDIAN_TOLERANCE = 0.25;
 
-// Need at least this many clean intervals before we're willing to report any
-// HRV/stress number at all — below this it's noise, not a measurement.
-const MIN_CLEAN_RR = 5;
+// Need at least this many clean (artifact-rejected) intervals before we're
+// willing to report an HRV/stress number — below this it's noise, so we
+// report "insufficient signal" rather than a spurious 0. SNR is NOT a hard
+// gate (it's uncalibrated across devices and would risk nulling every real
+// reading); it feeds the confidence score instead, so a weak-but-present
+// signal still yields a value shown at low confidence.
+const MIN_CLEAN_RR = 6;
 
-export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartRateEstimate {
-  const bpm = findDominantBpm(filteredSignal, fps);
+// Population resting-HR reference for the heart-rate-elevation term. A real
+// per-user baseline (localStorage trend) would be better, but this keeps the
+// term meaningful on a first measurement.
+const RESTING_HR_REF = 60;
+const MAX_HR_REF = 100;
+// RMSSD reference band (Shaffer & Ginsberg 2017 adult norms, ms): high vagal
+// tone (relaxed) ~70, low vagal tone (stressed) ~15.
+const RMSSD_RELAXED = 70;
+const RMSSD_STRESSED = 15;
+
+export function estimateBpmAndHrv(filteredSignal: number[], fps: number, restingHr = RESTING_HR_REF): HeartRateEstimate {
+  const { bpm, snrDb } = analyzeSpectrum(filteredSignal, fps);
 
   // Guard the minimum spacing between accepted beats at ~1.6x the expected
   // period so we don't double-count a peak's shoulder as a second beat.
@@ -108,7 +125,9 @@ export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartR
       bpm,
       sdnn: null,
       rmssd: null,
+      sd1: null,
       stressIndex: null,
+      snrDb,
       beatsDetected: peakPositions.length,
       cleanBeats: rr.length,
     };
@@ -119,81 +138,72 @@ export function estimateBpmAndHrv(filteredSignal: number[], fps: number): HeartR
   const diffs: number[] = [];
   for (let i = 1; i < rr.length; i++) diffs.push(rr[i] - rr[i - 1]);
   const rmssd = Math.sqrt(mean(diffs.map((d) => d * d)));
+  const sd1 = rmssd / Math.SQRT2;
 
-  const stressIndex = baevskyStressIndex(rr);
+  const stressIndex = compositeStress(rmssd, bpm, restingHr);
 
   return {
     bpm,
     sdnn,
     rmssd,
+    sd1,
     stressIndex,
+    snrDb,
     beatsDetected: peakPositions.length,
     cleanBeats: rr.length,
   };
 }
 
-/** Drops RR intervals that deviate from the median by more than
- * RR_MEDIAN_TOLERANCE — a robust artifact filter (missed/extra/spurious
- * beats) that leaves genuine beat-to-beat variation intact. */
+/** Two-stage RR artifact rejection: a robust median-relative gate (removes
+ * gross outliers) followed by the Malik ±20% successive-difference filter
+ * (removes ectopic/split/merged beats that survive the first pass). Genuine
+ * beat-to-beat variation — a few percent of the mean RR — is preserved. */
 export function rejectRrArtifacts(rrMs: number[]): number[] {
   if (rrMs.length < 2) return rrMs.slice();
   const med = median(rrMs);
   if (med <= 0) return rrMs.slice();
+
   const lo = med * (1 - RR_MEDIAN_TOLERANCE);
   const hi = med * (1 + RR_MEDIAN_TOLERANCE);
-  return rrMs.filter((x) => x >= lo && x <= hi);
-}
+  const medianFiltered = rrMs.filter((x) => x >= lo && x <= hi);
+  if (medianFiltered.length < 2) return medianFiltered;
 
-// --- Baevsky Stress Index -------------------------------------------------
-// A recognized way to quantify sympathetic activation from the distribution
-// of RR intervals (Baevsky et al.): SI = AMo / (2 * Mo * MxDMn), where the
-// RR intervals are histogrammed into 50ms bins.
-//   Mo (mode)     = most-frequent RR bin center, in seconds
-//   AMo           = % of intervals in the modal bin
-//   MxDMn         = (max RR - min RR), in seconds
-// A tighter, more concentrated distribution (high AMo, small MxDMn) means
-// the heart is "locked" to one rate — sympathetic dominance / stress — and
-// yields a high SI. The raw SI is then squashed onto 0-100 with a log map
-// whose anchors are calibrated (see tests/signalProcessing.test.ts) for this
-// short-window webcam pipeline rather than clinical 5-minute ECG norms.
-const SI_BIN_MS = 50;
-// Anchors calibrated empirically against this pipeline's own output (15s
-// window, ~15-30fps, 50ms bins) — a short-window webcam SI runs an order of
-// magnitude higher than clinical 5-minute ECG norms, so these are tuned so a
-// genuinely relaxed reading lands ~25-30 and a tightly-locked (stressed) one
-// lands ~85-90, rather than blindly reusing clinical SI bands.
-const SI_LOG_LOW = Math.log(50); // SI at/below this -> ~0 (very relaxed)
-const SI_LOG_HIGH = Math.log(700); // SI at/above this -> ~100 (highly stressed)
-
-export function baevskyStressIndex(rrMs: number[]): number {
-  const n = rrMs.length;
-  const bins = new Map<number, number>();
-  for (const rr of rrMs) {
-    const bin = Math.floor(rr / SI_BIN_MS);
-    bins.set(bin, (bins.get(bin) ?? 0) + 1);
-  }
-  let modeBin = 0;
-  let modeCount = 0;
-  for (const [bin, count] of bins) {
-    if (count > modeCount) {
-      modeCount = count;
-      modeBin = bin;
+  const out: number[] = [medianFiltered[0]];
+  for (let i = 1; i < medianFiltered.length; i++) {
+    const prev = out[out.length - 1];
+    if (Math.abs(medianFiltered[i] - prev) <= MALIK_TOLERANCE * prev) {
+      out.push(medianFiltered[i]);
     }
   }
-  const moSec = ((modeBin + 0.5) * SI_BIN_MS) / 1000;
-  const aMo = (modeCount / n) * 100;
-  const rangeMs = Math.max(...rrMs) - Math.min(...rrMs);
-  // Floor the range at half a bin so an ultra-concentrated (near-zero-range)
-  // reading can't send SI to infinity.
-  const mxdmnSec = Math.max(rangeMs, SI_BIN_MS / 2) / 1000;
-  const si = aMo / (2 * moSec * mxdmnSec);
-
-  const norm = ((Math.log(si) - SI_LOG_LOW) / (SI_LOG_HIGH - SI_LOG_LOW)) * 100;
-  return Math.max(0, Math.min(100, Math.round(norm)));
+  return out;
 }
 
-function findDominantBpm(filteredSignal: number[], fps: number): number {
-  const detrended = detrend(filteredSignal);
+/**
+ * Composite stress index (0-100), grounded in short-window HRV literature:
+ *   - Component B (weight 0.65): RMSSD relative to adult norms — lower
+ *     RMSSD = lower parasympathetic tone = more stress. RMSSD is the metric
+ *     that stays reliable on short windows.
+ *   - Component A (weight 0.35): heart-rate elevation relative to a resting
+ *     reference — an elevated HR is a low-noise stress signal.
+ * The blend avoids depending on any single fragile statistic and won't pin
+ * to 0 the way the old Baevsky histogram did.
+ */
+export function compositeStress(rmssd: number, bpm: number, restingHr = RESTING_HR_REF): number {
+  const hrElevation = clamp01((bpm - restingHr) / (MAX_HR_REF - restingHr));
+  const lowVagal = clamp01((RMSSD_RELAXED - rmssd) / (RMSSD_RELAXED - RMSSD_STRESSED));
+  const score = 0.35 * hrElevation + 0.65 * lowVagal;
+  // Floor a *valid* reading at 5: a genuinely very-relaxed person still gets a
+  // real "low stress" number rather than a bare 0, which reads as "no data".
+  return Math.max(5, Math.round(100 * clamp01(score)));
+}
+
+/** Single-FFT spectral analysis: dominant heart-rate frequency (BPM) plus a
+ * de Haan & Jeanne style SNR — signal power in the HR peak (±6 BPM) and its
+ * first harmonic (±12 BPM) vs. the rest of the 0.7-4Hz band. A sharp,
+ * dominant peak (high SNR) means a trustworthy pulse; a smeared spectrum
+ * means noise. This replaces fragile peak-counting as the quality measure. */
+export function analyzeSpectrum(signal: number[], fps: number): { bpm: number; snrDb: number } {
+  const detrended = detrend(signal);
   const window = hannWindow(detrended.length);
   const windowed = detrended.map((v, i) => v * window[i]);
 
@@ -204,18 +214,38 @@ function findDominantBpm(filteredSignal: number[], fps: number): number {
   fft(re, im);
 
   const freqPerBin = fps / n;
+  const half = Math.floor(n / 2);
+  const mag = new Float64Array(half);
   let bestBin = 1;
   let bestMag = -1;
-  for (let k = 1; k < n / 2; k++) {
+  for (let k = 1; k < half; k++) {
     const freq = k * freqPerBin;
-    if (freq < MIN_HZ || freq > MAX_HZ) continue;
-    const mag = Math.hypot(re[k], im[k]);
-    if (mag > bestMag) {
-      bestMag = mag;
+    mag[k] = Math.hypot(re[k], im[k]);
+    if (freq >= MIN_HZ && freq <= MAX_HZ && mag[k] > bestMag) {
+      bestMag = mag[k];
       bestBin = k;
     }
   }
-  return bestBin * freqPerBin * 60;
+  const bpm = bestBin * freqPerBin * 60;
+  const hrHz = bpm / 60;
+
+  let pSignal = 0;
+  let pNoise = 0;
+  for (let k = 1; k < half; k++) {
+    const freq = k * freqPerBin;
+    if (freq < MIN_HZ || freq > MAX_HZ) continue;
+    const power = mag[k] * mag[k];
+    const nearFundamental = Math.abs(freq - hrHz) <= 0.1; // ±6 BPM
+    const nearHarmonic = 2 * hrHz <= MAX_HZ && Math.abs(freq - 2 * hrHz) <= 0.2; // ±12 BPM
+    if (nearFundamental || nearHarmonic) pSignal += power;
+    else pNoise += power;
+  }
+  const snrDb = pNoise > 0 ? 10 * Math.log10(pSignal / pNoise) : pSignal > 0 ? 20 : -20;
+  return { bpm, snrDb };
+}
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
 }
 
 function detectPeaks(signal: number[], minDistance: number): number[] {

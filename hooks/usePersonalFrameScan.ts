@@ -91,15 +91,21 @@ export function usePersonalFrameScan() {
       const faceShape = classifyFaceShape(landmarks);
       const geometry = computeFaceGeometry(landmarks);
 
-      // Confidence is a real signal-quality readout, not a fixed label: more
-      // frame-to-frame color variance during either capture (motion, an
-      // unstable face lock, a shaky rear-camera aim) erodes trust in the
-      // averaged reading, and skipping the rear correction entirely costs a
-      // flat penalty since the result is then an uncorrected estimate.
+      // Confidence is a multiplicative composite of real capture-quality
+      // sub-scores (each 0-1), following color-measurement QA practice rather
+      // than a punitive linear penalty:
+      //   - stability: temporal steadiness of the skin-color mean across
+      //     frames, on a soft tolerance curve (normal skin has some spread,
+      //     so full credit below ~8 and graceful rolloff to ~30).
+      //   - exposure: the skin sample must not be clipped (too dark/bright),
+      //     which would destroy the undertone signal.
+      //   - white balance: a skipped ambient step is a missing correction
+      //     opportunity, not a defect — a small cap (×0.9), not a big penalty.
       const ambientCorrected = ambientStdDev !== null;
-      const frontPenalty = Math.min(45, frontStdDevRef.current * 4);
-      const backPenalty = ambientCorrected ? Math.min(35, (ambientStdDev as number) * 4) : 35;
-      const confidence = Math.max(0, Math.round(100 - frontPenalty - backPenalty));
+      const stability01 = softQuality(frontStdDevRef.current, 8, 30);
+      const exposure01 = exposureQuality(skin);
+      const wb01 = ambientCorrected ? 1 : 0.9;
+      const confidence = Math.max(0, Math.min(100, Math.round(100 * stability01 * exposure01 * wb01)));
 
       const result: PersonalFrameResult = {
         lab: { L: Math.round(lab.L * 10) / 10, a: Math.round(lab.a * 10) / 10, b: Math.round(lab.b * 10) / 10 },
@@ -308,4 +314,22 @@ export function usePersonalFrameScan() {
   }, [stopLoop, finalize]);
 
   return { ...state, handleCameraReady, reset, stop: stopLoop, skipBackCapture };
+}
+
+/** Soft tolerance curve: full credit (1) at/below `good`, linear rolloff to
+ * 0 at `bad`. Avoids the over-punitive linear ×N penalty on normal spread. */
+function softQuality(value: number, good: number, bad: number): number {
+  if (value <= good) return 1;
+  if (value >= bad) return 0;
+  return 1 - (value - good) / (bad - good);
+}
+
+/** Penalizes a skin sample whose channels approach clipping — a blown or
+ * crushed sample loses the chroma that undertone classification depends on. */
+function exposureQuality(skin: RgbMean): number {
+  const mx = Math.max(skin.r, skin.g, skin.b);
+  const mn = Math.min(skin.r, skin.g, skin.b);
+  const over = Math.max(0, Math.min(1, (mx - 235) / (255 - 235))); // >235 → clipping
+  const under = Math.max(0, Math.min(1, (25 - mn) / 25)); // <25 → crushed
+  return 1 - Math.max(over, under);
 }

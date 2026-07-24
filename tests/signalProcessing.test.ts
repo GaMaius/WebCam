@@ -4,7 +4,8 @@ import {
   bandpassFilter,
   estimateBpmAndHrv,
   rejectRrArtifacts,
-  baevskyStressIndex,
+  compositeStress,
+  analyzeSpectrum,
 } from "../lib/signalProcessing.ts";
 
 function makePulseSignal(bpm: number, fps: number, durationSec: number, noiseAmplitude = 0): number[] {
@@ -74,20 +75,20 @@ test("estimateBpmAndHrv reports HRV/stress as unavailable (not a fabricated numb
 
 test("estimateBpmAndHrv produces a real (non-zero, in-range) stress index for a clean pulse", () => {
   const fps = 30;
-  const signal = makePulseSignal(72, fps, 15);
+  const signal = makePulseSignal(72, fps, 30);
   const filtered = bandpassFilter(signal, fps);
   const result = estimateBpmAndHrv(filtered, fps);
-  assert.ok(result.stressIndex !== null, "stress index should be computable for a clean 15s pulse");
+  assert.ok(result.stressIndex !== null, "stress index should be computable for a clean 30s pulse");
+  assert.ok(result.sd1 !== null, "SD1 should be computable for a clean pulse");
   assert.ok(
     (result.stressIndex as number) >= 0 && (result.stressIndex as number) <= 100,
     `stress index should be within 0-100, got ${result.stressIndex}`
   );
-  // A perfectly periodic synthetic pulse has near-zero true HRV, so its
-  // histogram is tightly concentrated -> this should NOT read as maximally
-  // relaxed (0). This is the regression guard for the "stuck at 0" bug.
+  // A valid measurement must never report exactly 0 as if it were a real
+  // reading — this is the regression guard for the "stuck at 0" bug.
   assert.ok(
     (result.stressIndex as number) > 0,
-    `a tightly-periodic pulse should not read as 0 stress, got ${result.stressIndex}`
+    `a valid pulse should not read as 0 stress, got ${result.stressIndex}`
   );
 });
 
@@ -100,13 +101,31 @@ test("rejectRrArtifacts drops beats far from the median but keeps genuine variat
   assert.ok(cleaned.includes(860) && cleaned.includes(845), "genuine ±jitter should be kept");
 });
 
-test("baevskyStressIndex rises as the RR distribution tightens (less variability = more stress)", () => {
-  // Spread RR (high HRV, relaxed) vs tightly-clustered RR (low HRV, stressed).
-  const relaxed = baevskyStressIndex([780, 900, 820, 880, 800, 920, 790, 870, 810]);
-  const stressed = baevskyStressIndex([700, 704, 698, 702, 700, 703, 699, 701, 700]);
-  assert.ok(
-    stressed > relaxed,
-    `tighter RR distribution should read as more stressed (relaxed=${relaxed}, stressed=${stressed})`
-  );
+test("compositeStress rises as RMSSD falls and heart rate climbs", () => {
+  // Relaxed: high RMSSD (high vagal tone), low HR.
+  const relaxed = compositeStress(65, 62);
+  // Stressed: low RMSSD (low vagal tone), elevated HR.
+  const stressed = compositeStress(20, 88);
+  assert.ok(stressed > relaxed, `stressed should exceed relaxed (relaxed=${relaxed}, stressed=${stressed})`);
   assert.ok(relaxed >= 0 && stressed <= 100, "stress index stays within 0-100");
+  // A mid reading should land in a usable mid-range, not pinned to an extreme.
+  const mid = compositeStress(42, 74);
+  assert.ok(mid > 20 && mid < 80, `median HRV/HR should read mid-range, got ${mid}`);
+});
+
+test("analyzeSpectrum recovers BPM and reports high SNR for a clean pulse, low SNR for noise", () => {
+  const fps = 30;
+  const clean = bandpassFilter(makePulseSignal(72, fps, 30), fps);
+  const cleanRes = analyzeSpectrum(clean, fps);
+  assert.ok(Math.abs(cleanRes.bpm - 72) < 5, `expected ~72 BPM, got ${cleanRes.bpm}`);
+
+  const noise = bandpassFilter(
+    Array.from({ length: 30 * fps }, () => Math.random() * 2 - 1),
+    fps
+  );
+  const noiseRes = analyzeSpectrum(noise, fps);
+  assert.ok(
+    cleanRes.snrDb > noiseRes.snrDb,
+    `clean pulse SNR (${cleanRes.snrDb.toFixed(1)}) should exceed noise SNR (${noiseRes.snrDb.toFixed(1)})`
+  );
 });

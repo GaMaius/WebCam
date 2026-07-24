@@ -13,7 +13,10 @@ import { bandpassFilter, estimateBpmAndHrv } from "@/lib/signalProcessing";
 import { loadDeepPhysSession, runDeepPhysInference, DEEPPHYS_IMG_SIZE, type RgbFrame } from "@/lib/deepPhys";
 import { SESSION_KEYS, type HeartPulseResult } from "@/lib/types";
 
-const SCAN_DURATION_MS = 15_000;
+// 30s is the practical floor for a defensible short-window HRV/stress read
+// (15s is too short for RMSSD/SD1 to stabilize on noisy webcam data).
+const SCAN_DURATION_MS = 30_000;
+const SCAN_DURATION_SEC = SCAN_DURATION_MS / 1000;
 const MIN_USABLE_SAMPLES = 60; // guards against a near-instant, unusable clip
 const WAVEFORM_POINTS = 150;
 const DEEPPHYS_LOAD_TIMEOUT_MS = 4_000; // don't make the user wait indefinitely for the model
@@ -123,10 +126,10 @@ export function useHeartPulseScan() {
         }
 
         const filtered = bandpassFilter(rawSignal, effectiveFps);
-        // Stress is computed inside estimateBpmAndHrv (Baevsky Stress Index on
-        // artifact-rejected RR intervals) rather than re-derived here, so the
-        // whole HRV pipeline stays testable in one place.
-        const { bpm, sdnn, rmssd, stressIndex, beatsDetected, cleanBeats } = estimateBpmAndHrv(
+        // The whole HRV/stress/SNR pipeline lives in estimateBpmAndHrv so it
+        // stays testable in one place. Stress is a composite of RMSSD/SD1 and
+        // heart-rate elevation; SNR is the spectral signal-quality measure.
+        const { bpm, sdnn, rmssd, stressIndex, snrDb, beatsDetected, cleanBeats } = estimateBpmAndHrv(
           filtered,
           effectiveFps
         );
@@ -135,15 +138,16 @@ export function useHeartPulseScan() {
           motionRef.current.sampleCount > 0
             ? motionRef.current.totalDisplacement / motionRef.current.sampleCount
             : 0;
-        // Heuristic: more frame-to-frame ROI displacement (head motion) and
-        // fewer clean (artifact-rejected) beats both erode trust in the
-        // reading. No artificial floor — a genuinely bad capture (heavy
-        // motion, almost no usable beats) should read as low confidence
-        // rather than being reported as at least 20% trustworthy.
-        const motionPenalty = Math.min(55, avgMotion * 6);
-        const usableBeats = Math.min(beatsDetected, cleanBeats);
-        const beatsPenalty = usableBeats < 8 ? (8 - usableBeats) * 6 : 0;
-        const confidence = Math.max(0, Math.round(100 - motionPenalty - beatsPenalty));
+        // Confidence blends two real quality signals — how cleanly the beats
+        // survived artifact rejection (retention) and the spectral SNR of the
+        // pulse peak — then attenuates by head motion. SNR uses a gentle map
+        // and neither factor alone can zero the score, so a decent capture
+        // reads a sensible ~60-90% rather than being punished to near zero.
+        const retention = beatsDetected > 0 ? Math.min(1, cleanBeats / beatsDetected) : 0;
+        const snr01 = Math.max(0, Math.min(1, (snrDb + 8) / 16)); // -8dB→0, +8dB→1
+        const quality = 0.6 * retention + 0.4 * snr01;
+        const motionFactor = 1 - Math.min(0.4, avgMotion * 0.05);
+        const confidence = Math.max(0, Math.round(100 * quality * motionFactor));
 
         const clampedBpm = Math.min(220, Math.max(35, Math.round(bpm)));
 
