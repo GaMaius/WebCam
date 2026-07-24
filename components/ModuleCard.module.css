@@ -21,6 +21,23 @@
   box-shadow: 2px 2px 0 var(--card-accent);
 }
 
+/* Upcoming apps: visible but not clickable, so the roadmap can be shown
+   before a route exists. */
+.cardSoon {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+}
+.cardSoon:hover {
+  transform: none;
+  box-shadow: var(--shadow-sticker);
+}
+.ctaSoon {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+
 .top {
   display: flex;
   align-items: center;

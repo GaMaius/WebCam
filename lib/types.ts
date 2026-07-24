@@ -1,5 +1,6 @@
-// Shared result types across VisionLab AI modules.
-// Persisted to sessionStorage so the Integrated Summary can read both reports.
+// Shared result types across VisionLab AI apps.
+// Each app also persists its latest result to sessionStorage (SESSION_KEYS)
+// so a reload within the session can restore it.
 
 export type FacingMode = "user" | "environment";
 

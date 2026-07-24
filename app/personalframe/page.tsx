@@ -7,6 +7,8 @@ import { Card } from "@/components/Card";
 import { InfoModal } from "@/components/InfoModal";
 import { PersonalFrameHowto } from "@/components/illustrations";
 import { usePersonalFrameScan } from "@/hooks/usePersonalFrameScan";
+import { ResultActions } from "@/components/ResultActions";
+import { drawPersonalFrameCard } from "@/lib/resultCard";
 import { SEASON_LABEL, UNDERTONE_LABEL, FACE_SHAPE_LABEL, ITA_LABEL } from "@/lib/labels";
 import {
   SEASON_GUIDE,
@@ -68,6 +70,19 @@ export default function PersonalFramePage() {
     scan.reset();
     if (lastHandleRef.current) scan.handleCameraReady(lastHandleRef.current);
   }, [scan]);
+
+  const cardCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderResultCard = useCallback((): HTMLCanvasElement => {
+    if (!cardCanvasRef.current) cardCanvasRef.current = document.createElement("canvas");
+    if (scan.result)
+      drawPersonalFrameCard(cardCanvasRef.current, scan.result, {
+        season: SEASON_LABEL,
+        undertone: UNDERTONE_LABEL,
+        faceShape: FACE_SHAPE_LABEL,
+        ita: ITA_LABEL,
+      });
+    return cardCanvasRef.current;
+  }, [scan.result]);
 
   const showFaceGuide = started && scan.phase !== "back-capturing" && scan.phase !== "done";
   const guide = scan.result ? SEASON_GUIDE[scan.result.season] : null;
@@ -259,6 +274,13 @@ export default function PersonalFramePage() {
             </div>
 
             <p className={styles.disclaimer}>{PERSONAL_COLOR_DISCLAIMER}</p>
+
+            <ResultActions
+              render={renderResultCard}
+              filename={`visionlab-personalframe-${Date.now()}.png`}
+              shareTitle="VisionLab AI · PersonalFrame 결과"
+              shareText="VisionLab AI로 진단한 나의 퍼스널 컬러·얼굴형 결과예요."
+            />
 
             <button className={styles.retryBtn} onClick={handleRetry}>
               다시 측정

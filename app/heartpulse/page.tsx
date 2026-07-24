@@ -8,8 +8,12 @@ import { Waveform } from "@/components/Waveform";
 import { InfoModal } from "@/components/InfoModal";
 import { HeartPulseHowto } from "@/components/illustrations";
 import { useHeartPulseScan } from "@/hooks/useHeartPulseScan";
+import { ResultActions } from "@/components/ResultActions";
+import { drawHeartPulseCard } from "@/lib/resultCard";
 import { HEART_METRIC_INFO, HEART_DISCLAIMER } from "@/lib/guidance";
 import styles from "./page.module.css";
+
+const ACCENT = "#c4553a";
 
 const STEPS = ["원리 안내", "15초 스캔", "결과 리포트"];
 const ONBOARD_KEY = "visionlab:heartpulse:onboarded";
@@ -69,6 +73,13 @@ export default function HeartPulsePage() {
     if (videoRef.current) void scan.start(videoRef.current);
     else scan.reset();
   }, [scan]);
+
+  const cardCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderResultCard = useCallback((): HTMLCanvasElement => {
+    if (!cardCanvasRef.current) cardCanvasRef.current = document.createElement("canvas");
+    if (scan.result) drawHeartPulseCard(cardCanvasRef.current, scan.result, ACCENT);
+    return cardCanvasRef.current;
+  }, [scan.result]);
 
   return (
     <ModuleShell
@@ -212,6 +223,13 @@ export default function HeartPulsePage() {
               <p className={styles.disclaimer}>{HEART_DISCLAIMER}</p>
             </div>
           )}
+
+          <ResultActions
+            render={renderResultCard}
+            filename={`visionlab-heartpulse-${Date.now()}.png`}
+            shareTitle="VisionLab AI · HeartPulse 결과"
+            shareText="VisionLab AI로 측정한 나의 심박·스트레스 결과예요."
+          />
 
           <button className={styles.retryBtn} onClick={handleRetry}>
             다시 측정
