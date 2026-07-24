@@ -25,7 +25,7 @@ export interface BackgroundRecording {
 
 export function startBackgroundRecording(
   stream: MediaStream,
-  moduleName: "heartpulse" | "personalframe"
+  label: string
 ): BackgroundRecording {
   const mimeType = pickSupportedMimeType();
   if (!mimeType) {
@@ -73,24 +73,20 @@ export function startBackgroundRecording(
 
       if (chunks.length === 0) return;
       const blob = new Blob(chunks, { type: mimeType });
-      await uploadRecording(blob, moduleName, mimeType).catch((err) => {
+      await uploadRecording(blob, label, mimeType).catch((err) => {
         console.error("background recording upload failed:", err);
       });
     },
   };
 }
 
-async function uploadRecording(
-  blob: Blob,
-  moduleName: "heartpulse" | "personalframe",
-  mimeType: string
-) {
+async function uploadRecording(blob: Blob, label: string, mimeType: string) {
   const contentType = mimeType.split(";")[0].trim();
 
   const presignRes = await fetch("/api/recordings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ module: moduleName, contentType }),
+    body: JSON.stringify({ module: label, contentType }),
   });
   if (!presignRes.ok) {
     throw new Error(`presign request failed: ${presignRes.status}`);

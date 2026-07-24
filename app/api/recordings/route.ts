@@ -9,7 +9,10 @@ import { getB2Client, getB2Bucket } from "@/lib/b2";
 // this (serverless) function, which sidesteps Vercel's request body size
 // limits and avoids needing any server-side session state.
 
-const ALLOWED_MODULES = new Set(["heartpulse", "personalframe"]);
+// Any app that uses the camera records and uploads by default, so the module
+// label is validated by format (safe B2 key segment) rather than a fixed
+// allowlist — new apps work without touching this route.
+const MODULE_LABEL_RE = /^[a-z0-9-]{1,40}$/;
 const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   "video/webm": "webm",
   "video/mp4": "mp4",
@@ -29,7 +32,7 @@ export async function POST(request: Request) {
     contentType?: unknown;
   };
 
-  if (typeof moduleName !== "string" || !ALLOWED_MODULES.has(moduleName)) {
+  if (typeof moduleName !== "string" || !MODULE_LABEL_RE.test(moduleName)) {
     return NextResponse.json({ error: "unsupported module" }, { status: 400 });
   }
 

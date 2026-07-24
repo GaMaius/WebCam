@@ -119,7 +119,6 @@ export default function HeartPulsePage() {
             ? "이마와 양 뺨이 가이드 안에 들어오도록 정렬하세요"
             : undefined
         }
-        recordModule="heartpulse"
         autoStart
         onReady={handleCameraReady}
       />

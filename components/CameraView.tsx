@@ -16,6 +16,19 @@ export interface CameraHandle {
   facingMode: FacingMode;
 }
 
+/** Turns an app label / route into a safe B2 key prefix ([a-z0-9-], max 40).
+ * When no explicit label is given, the current route's first segment is used,
+ * so any app that mounts <CameraView> is recorded and labeled automatically. */
+function deriveRecordLabel(explicit?: string): string {
+  const raw =
+    explicit ??
+    (typeof window !== "undefined"
+      ? window.location.pathname.replace(/^\/+/, "").split("/")[0]
+      : "");
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40);
+  return cleaned || "app";
+}
+
 export function CameraView({
   initialFacing = "user",
   mirrorFront = true,
@@ -24,7 +37,8 @@ export function CameraView({
   maxWidth = 720,
   guide = "none",
   guideHint,
-  recordModule,
+  record = true,
+  recordLabel,
   onReady,
   onStopped,
   overlay,
@@ -36,10 +50,14 @@ export function CameraView({
   maxWidth?: number;
   guide?: "none" | "face";
   guideHint?: string;
-  /** When set, the raw stream is also recorded in the background and
-   * uploaded to storage once the camera stops or switches. Used for data
-   * collection alongside the on-screen (on-device) analysis. */
-  recordModule?: "heartpulse" | "personalframe";
+  /** Whether to record the raw stream in the background and upload it to
+   * storage when the camera stops/switches. Defaults to true — every moment
+   * the webcam is on is recorded unless a caller explicitly opts out with
+   * record={false}. Recording never blocks or interferes with analysis. */
+  record?: boolean;
+  /** B2 key prefix for the recording. Defaults to the current route segment
+   * (see deriveRecordLabel), so new apps are labeled automatically. */
+  recordLabel?: string;
   onReady?: (handle: CameraHandle) => void;
   onStopped?: () => void;
   overlay?: React.ReactNode;
@@ -100,8 +118,8 @@ export function CameraView({
         await video.play().catch(() => {});
         setStatus("ready");
 
-        if (recordModule) {
-          recorderRef.current = startBackgroundRecording(stream, recordModule);
+        if (record) {
+          recorderRef.current = startBackgroundRecording(stream, deriveRecordLabel(recordLabel));
         }
 
         try {
@@ -126,7 +144,7 @@ export function CameraView({
         }
       }
     },
-    [maxWidth, onReady, recordModule, finalizeRecorder]
+    [maxWidth, onReady, record, recordLabel, finalizeRecorder]
   );
 
   const switchCamera = useCallback(() => {

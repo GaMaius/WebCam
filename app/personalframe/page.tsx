@@ -126,7 +126,6 @@ export default function PersonalFramePage() {
             ? "얼굴 전체가 가이드 안에 들어오도록 맞춰주세요"
             : undefined
         }
-        recordModule="personalframe"
         autoStart
         onReady={handleReady}
       />
