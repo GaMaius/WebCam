@@ -6,7 +6,7 @@
 // route) — the home page renders straight from this list, so it scales without
 // touching layout code.
 
-export type AppIconKey = "pulse" | "palette";
+export type AppIconKey = "pulse" | "palette" | "pokeball";
 
 export interface AppMeta {
   /** Route slug under "/" (e.g. "heartpulse" -> /heartpulse). */
@@ -39,5 +39,13 @@ export const APPS: AppMeta[] = [
     desc: "전·후면 순차 스캔으로 조명을 보정하고, 퍼스널 컬러 톤과 얼굴 골격·비율을 진단합니다.",
     accent: "#4b6b3a",
     icon: "palette",
+  },
+  {
+    slug: "pokematch",
+    title: "PokéMatch",
+    subtitle: "AI · 닮은꼴",
+    desc: "얼굴을 스캔해 시각적 특징이 가장 닮은 포켓몬 5마리를 찾아주는 재미용 앱입니다.",
+    accent: "#d64541",
+    icon: "pokeball",
   },
 ];

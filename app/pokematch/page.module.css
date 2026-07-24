@@ -1,0 +1,160 @@
+.startCard,
+.statusCard,
+.resultCard,
+.errorCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.startTitle {
+  font-size: 20px;
+}
+.startDesc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.startActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.startBtn {
+  padding: 13px 22px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--text);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 15px;
+  font-weight: 700;
+}
+.linkBtn {
+  padding: 13px 18px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.statusCard {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid var(--accent-soft);
+  border-top-color: var(--m-accent, var(--accent));
+  animation: spin 0.8s linear infinite;
+  flex: none;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progressTrack {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--m-accent, var(--accent));
+  transition: width 0.15s ease;
+}
+
+.resultTitle {
+  font-size: 18px;
+}
+.matchList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.match {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg-base);
+  border: 2px solid var(--border);
+}
+.matchTop {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sticker-sm);
+}
+.thumb {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  border: 1.5px solid var(--border);
+  flex: none;
+}
+.matchBody {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.matchName {
+  font-size: 16px;
+  font-weight: 800;
+}
+.matchName .en {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 13px;
+}
+.matchPct {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.matchPct b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.badge {
+  padding: 3px 11px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.retryBtn {
+  align-self: flex-start;
+  padding: 11px 20px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.modalTips {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.7;
+}

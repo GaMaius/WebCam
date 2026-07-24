@@ -30,6 +30,14 @@ export function AppIcon({ name, size = 26 }: { name: AppIconKey; size?: number }
           <path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1.1.9-2 2-2h2.4A4.6 4.6 0 0 0 22 10.4C22 5.7 17.5 2 12 2z" />
         </svg>
       );
+    case "pokeball":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h6M15 12h6" />
+          <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+        </svg>
+      );
     default:
       return null;
   }

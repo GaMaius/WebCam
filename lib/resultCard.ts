@@ -3,6 +3,7 @@
 // image. One renderer per app; they share the shell, palette, and helpers.
 
 import type { HeartPulseResult, PersonalFrameResult } from "./types";
+import { typeColor } from "./typeColors";
 
 export interface PersonalFrameLabels {
   season: Record<string, string>;
@@ -304,6 +305,108 @@ export function drawPersonalFrameCard(
     ctx.font = `500 17px ${SANS}`;
     ctx.fillText("후면 카메라 조명 보정 없이 진행된 결과입니다", innerX, statsY + 130 + gap + 130 + 32);
   }
+
+  drawFooter(ctx);
+}
+
+// --- PokéMatch card ---------------------------------------------------------
+// Minimal shape of a match (decoupled from lib/pokematch/matcher so this file
+// stays free of the onnxruntime dependency).
+interface PokematchCardMatch {
+  slug: string;
+  percent: number;
+  entry: {
+    nameKo: string | null;
+    nameEn: string;
+    dex: number | null;
+    typesKo: string[];
+  } | null;
+}
+
+const POKEMATCH_ACCENT = "#d64541";
+const POKEMATCH_IMG_BASE = "/pokemon/img";
+
+function loadImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+export async function drawPokematchCard(
+  canvas: HTMLCanvasElement,
+  matches: PokematchCardMatch[]
+): Promise<void> {
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  drawShell(ctx, { appName: "PokéMatch", accent: POKEMATCH_ACCENT });
+
+  const imgs = await Promise.all(matches.map((m) => loadImage(`${POKEMATCH_IMG_BASE}/${m.slug}.webp`)));
+
+  const cardX = PAD;
+  const cardW = W - PAD * 2;
+  let y = 232;
+  const rowH = 196;
+  matches.slice(0, 5).forEach((m, idx) => {
+    const e = m.entry;
+    const rowY = y;
+    roundRect(ctx, cardX, rowY, cardW, rowH - 16, 24);
+    ctx.fillStyle = idx === 0 ? COL.surface : COL.base;
+    ctx.fill();
+    ctx.strokeStyle = idx === 0 ? COL.surfaceBorder : COL.baseBorder;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const pad = 26;
+    const thumb = rowH - 16 - pad * 2;
+    const img = imgs[idx];
+    if (img) {
+      ctx.save();
+      roundRect(ctx, cardX + pad, rowY + pad, thumb, thumb, 16);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.clip();
+      const s = Math.min(thumb / img.width, thumb / img.height);
+      const iw = img.width * s;
+      const ih = img.height * s;
+      ctx.drawImage(img, cardX + pad + (thumb - iw) / 2, rowY + pad + (thumb - ih) / 2, iw, ih);
+      ctx.restore();
+    }
+
+    const tx = cardX + pad + thumb + 30;
+    let ty = rowY + pad + 44;
+    const nameKo = e?.nameKo ?? e?.nameEn ?? m.slug;
+    const dex = e?.dex ? `#${e.dex} ` : "";
+    ctx.fillStyle = COL.text;
+    ctx.font = `800 40px ${SANS}`;
+    ctx.fillText(`${dex}${nameKo}`, tx, ty);
+
+    ty += 40;
+    ctx.fillStyle = COL.textDim;
+    ctx.font = `600 26px ${SANS}`;
+    ctx.fillText(`닮은 정도 ${m.percent}%`, tx, ty);
+
+    ty += 30;
+    let bx = tx;
+    for (const t of e?.typesKo ?? []) {
+      const c = typeColor(t);
+      ctx.font = `700 22px ${SANS}`;
+      const w = ctx.measureText(t).width + 28;
+      roundRect(ctx, bx, ty, w, 38, 19);
+      ctx.fillStyle = c.bg;
+      ctx.fill();
+      ctx.fillStyle = c.fg;
+      ctx.fillText(t, bx + 14, ty + 26);
+      bx += w + 10;
+    }
+
+    y += rowH;
+  });
 
   drawFooter(ctx);
 }

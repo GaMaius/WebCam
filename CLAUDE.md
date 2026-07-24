@@ -10,6 +10,7 @@
 - **VL-3** PersonalFrame: 전/후면 순차 스캔 → CIELAB 퍼스널컬러 + 얼굴형 분석 (MediaPipe 랜드마크 인덱스는 공식 소스에서 검증)
 - **VL-4** ~~통합 결과지~~ → **앱별 결과 저장으로 전환**(2026-07-24): 제품을 "독립 앱 런처" 모델로 재구성. 홈은 `lib/apps.ts` 레지스트리를 렌더링(앱 추가 = 항목 1개 + `app/<slug>` 라우트). 각 앱이 자기 결과를 Canvas 이미지로 저장/공유(`components/ResultActions.tsx` + `lib/resultCard.ts`의 `drawHeartPulseCard`/`drawPersonalFrameCard`, Web Share API + 다운로드 폴백). 두 앱을 합치던 `/summary` 라우트와 `lib/summaryCard.ts`는 제거함(이 모델과 충돌). `ModuleCard`는 `status:"soon"`으로 준비 중 앱 표시 지원.
 - **VL-5** Vercel 배포: 완료, 아래 참고
+- **VL-6** PokéMatch("닮은 포켓몬 찾기", 진행 중): 임베딩 최근접 + **인기편향 제거 z-score 재랭킹**(원시 코사인은 '파라스'가 누구든 1등이 되어 무의미 → `z=(cos−μ_p)/σ_p`). 인코더 MobileCLIP2-S0(가중치 동결) ONNX를 onnxruntime-web로, 얼굴은 MediaPipe로 crop. 결과=닮은 상위 5 + 타입색 배지. 앱코드 완료(`app/pokematch`, `lib/pokematch/matcher.ts`, `hooks/usePokematchScan.ts`, `lib/typeColors.ts`, `drawPokematchCard`). **자산은 Colab(`ml/pokematch/prepare_pokematch.ipynb`)로 생성해 `public/models/pokemon_encoder.onnx`·`public/pokemon/{gallery.bin,gallery.json,pokedex.json}`·`public/pokemon/img/<slug>.webp`에 배치해야 동작**(기본종만; 메가·패러독스 제외). 데이터셋은 리포에 포함 안 함.
 
 단위 테스트 46/46 통과 (`npm test`, Node 내장 `node --test`, `.ts` 파일 직접 실행).
 

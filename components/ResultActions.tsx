@@ -17,7 +17,7 @@ export function ResultActions({
   shareText,
   hint = "이 결과를 이미지로 저장하거나 공유할 수 있어요.",
 }: {
-  render: () => HTMLCanvasElement;
+  render: () => HTMLCanvasElement | Promise<HTMLCanvasElement>;
   filename: string;
   shareTitle: string;
   shareText: string;
@@ -33,7 +33,7 @@ export function ResultActions({
   }, []);
 
   const makeBlob = useCallback(async () => {
-    const canvas = renderRef.current();
+    const canvas = await renderRef.current();
     return canvasToPngBlob(canvas);
   }, []);
 
