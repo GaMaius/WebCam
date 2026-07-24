@@ -7,7 +7,13 @@ import { Card } from "@/components/Card";
 import { InfoModal } from "@/components/InfoModal";
 import { ResultActions } from "@/components/ResultActions";
 import { usePokematchScan } from "@/hooks/usePokematchScan";
-import { pokemonImageUrl, type PokematchMatch } from "@/lib/pokematch/matcher";
+import {
+  pokemonImageUrl,
+  loadEncoder,
+  loadGallery,
+  loadPokedex,
+  type PokematchMatch,
+} from "@/lib/pokematch/matcher";
 import { drawPokematchCard } from "@/lib/resultCard";
 import { typeColor } from "@/lib/typeColors";
 import styles from "./page.module.css";
@@ -34,6 +40,15 @@ export default function PokematchPage() {
     } catch {
       setModalOpen(true);
     }
+  }, []);
+
+  // Warm the model + gallery caches while the user reads the intro, so the
+  // scan starts without waiting on the (biggest) download. Fire-and-forget;
+  // the scan reuses these cached promises.
+  useEffect(() => {
+    void loadEncoder().catch(() => {});
+    void loadGallery().catch(() => {});
+    void loadPokedex().catch(() => {});
   }, []);
 
   const handleReady = useCallback(
