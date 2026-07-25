@@ -75,16 +75,15 @@ export function CameraView({
   const [error, setError] = useState<string>("");
   const [hasMultiple, setHasMultiple] = useState(false);
 
-  const finalizeRecorder = useCallback(() => {
-    if (recorderRef.current) {
-      const recording = recorderRef.current;
-      recorderRef.current = null;
-      void recording.finish();
-    }
+  const finalizeRecorder = useCallback((): Promise<void> => {
+    const recording = recorderRef.current;
+    recorderRef.current = null;
+    return recording ? recording.finish() : Promise.resolve();
   }, []);
 
-  const stop = useCallback(() => {
-    finalizeRecorder();
+  const stop = useCallback(async () => {
+    // Flush + upload the recording before tearing the tracks down.
+    await finalizeRecorder();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -104,9 +103,10 @@ export function CameraView({
       setStatus("requesting");
       setError("");
       // Release any previous stream before requesting a new facing mode —
-      // finalize its recording first, since stopping tracks first would
-      // cut the recorder off mid-stream.
-      finalizeRecorder();
+      // finalize its recording first (awaited), since stopping the tracks
+      // would otherwise cut the recorder off before its final segment
+      // flushes and uploads.
+      await finalizeRecorder();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;

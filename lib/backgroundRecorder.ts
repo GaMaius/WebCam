@@ -19,9 +19,17 @@ function pickSupportedMimeType(): string | null {
 }
 
 export interface BackgroundRecording {
-  /** Stop recording and upload what was captured. Always resolves. */
+  /** Stop recording and upload what's left. Always resolves. */
   finish: () => Promise<void>;
 }
+
+// Cut a complete, self-contained segment on this cadence and upload it while
+// the page is still alive. Uploading only at unmount is unreliable for longer
+// sessions (HeartPulse/PersonalFrame) — the in-flight upload gets cancelled as
+// the page navigates away; short sessions (PokéMatch) happened to slip through.
+// Rotating segments means the bulk of every recording is already uploaded
+// before the user leaves, and only a small final segment rides on unmount.
+const SEGMENT_MS = 10_000;
 
 export function startBackgroundRecording(
   stream: MediaStream,
@@ -32,50 +40,74 @@ export function startBackgroundRecording(
     return { finish: async () => {} };
   }
 
-  let recorder: MediaRecorder;
-  try {
-    recorder = new MediaRecorder(stream, { mimeType });
-  } catch (err) {
-    console.error("could not start background recorder:", err);
-    return { finish: async () => {} };
-  }
+  let recorder: MediaRecorder | null = null;
+  let chunks: Blob[] = [];
+  let stopped = false;
+  let rotateTimer: ReturnType<typeof setInterval> | null = null;
+  const uploads: Promise<void>[] = [];
 
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data.size > 0) chunks.push(e.data);
+  const beginSegment = () => {
+    chunks = [];
+    try {
+      recorder = new MediaRecorder(stream, { mimeType });
+    } catch (err) {
+      console.error("could not start background recorder:", err);
+      recorder = null;
+      return;
+    }
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    try {
+      recorder.start();
+    } catch (err) {
+      console.error("could not start background recorder:", err);
+      recorder = null;
+    }
   };
 
-  const stopped = new Promise<void>((resolve) => {
-    recorder.addEventListener("stop", () => resolve(), { once: true });
-  });
-  const errored = new Promise<void>((resolve) => {
-    recorder.addEventListener("error", () => resolve(), { once: true });
-  });
+  // Stop the active segment, wait for it to flush, and queue its upload. Safe
+  // to call repeatedly — a no-op once the recorder is already inactive.
+  const cutSegment = async () => {
+    const active = recorder;
+    if (!active || active.state === "inactive") return;
+    const localChunks = chunks;
+    const flushed = new Promise<void>((resolve) => {
+      active.addEventListener("stop", () => resolve(), { once: true });
+      active.addEventListener("error", () => resolve(), { once: true });
+    });
+    active.stop();
+    await flushed;
+    if (localChunks.length > 0) {
+      const blob = new Blob(localChunks, { type: mimeType });
+      uploads.push(
+        uploadRecording(blob, label, mimeType).catch((err) => {
+          console.error("background recording upload failed:", err);
+        })
+      );
+    }
+  };
 
-  try {
-    recorder.start();
-  } catch (err) {
-    console.error("could not start background recorder:", err);
-    return { finish: async () => {} };
+  beginSegment();
+  if (recorder) {
+    rotateTimer = setInterval(() => {
+      void (async () => {
+        await cutSegment();
+        if (!stopped) beginSegment();
+      })();
+    }, SEGMENT_MS);
   }
-
-  let finished = false;
 
   return {
     finish: async () => {
-      if (finished) return;
-      finished = true;
-
-      if (recorder.state !== "inactive") {
-        recorder.stop();
-        await Promise.race([stopped, errored]);
+      if (stopped) return;
+      stopped = true;
+      if (rotateTimer) {
+        clearInterval(rotateTimer);
+        rotateTimer = null;
       }
-
-      if (chunks.length === 0) return;
-      const blob = new Blob(chunks, { type: mimeType });
-      await uploadRecording(blob, label, mimeType).catch((err) => {
-        console.error("background recording upload failed:", err);
-      });
+      await cutSegment();
+      await Promise.allSettled(uploads);
     },
   };
 }
