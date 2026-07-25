@@ -141,6 +141,29 @@ export function zToPercent(z: number): number {
   return Math.round(Math.max(30, Math.min(99, 40 + 13 * z)));
 }
 
+export interface DebugRankRow {
+  slug: string;
+  cos: number;
+  z: number;
+  mu: number;
+  sd: number;
+}
+
+/** Full ranking detail (cosine, z, and the per-species μ/σ) for diagnosing
+ * why a given face ranks the way it does — surfaced only under ?debug. */
+export function debugRank(embedding: Float32Array, gallery: Gallery, k = 20): { byZ: DebugRankRow[]; byCos: DebugRankRow[] } {
+  const { species, dim, vecs, mu, sd } = gallery;
+  const rows: DebugRankRow[] = species.map((slug, s) => {
+    let dot = 0;
+    const off = s * dim;
+    for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
+    return { slug, cos: dot, z: (dot - mu[s]) / (sd[s] || 1e-6), mu: mu[s], sd: sd[s] };
+  });
+  const byZ = [...rows].sort((a, b) => b.z - a.z).slice(0, k);
+  const byCos = [...rows].sort((a, b) => b.cos - a.cos).slice(0, k);
+  return { byZ, byCos };
+}
+
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,

@@ -8,6 +8,7 @@ import {
   loadPokedex,
   embedFace,
   matchTopK,
+  debugRank,
   POKEMATCH_IMG_SIZE,
   type PokematchMatch,
 } from "@/lib/pokematch/matcher";
@@ -143,6 +144,29 @@ export function usePokematchScan() {
       for (let i = 0; i < dim; i++) mean[i] /= norm;
 
       const top = matchTopK(mean, gallery, pokedex, 5);
+
+      // Diagnostic readout (opt-in via ?debug): dumps the real face's full
+      // ranking so a persistent single winner (hubness / miscalibration) can
+      // be investigated against actual embeddings rather than proxies.
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")) {
+        const { byZ, byCos } = debugRank(mean, gallery, 20);
+        const fmt = (r: (typeof byZ)[number]) => ({
+          slug: r.slug,
+          z: +r.z.toFixed(2),
+          cos: +r.cos.toFixed(3),
+          mu: +r.mu.toFixed(3),
+          sd: +r.sd.toFixed(3),
+        });
+        // eslint-disable-next-line no-console
+        console.log("[pokematch debug] top-20 by z-score (the ranking used):");
+        // eslint-disable-next-line no-console
+        console.table(byZ.map(fmt));
+        // eslint-disable-next-line no-console
+        console.log("[pokematch debug] top-20 by raw cosine (pre-debias):");
+        // eslint-disable-next-line no-console
+        console.table(byCos.map(fmt));
+      }
+
       setMatches(top);
       setPhase("done");
       runningRef.current = false;
