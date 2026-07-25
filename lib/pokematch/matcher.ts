@@ -136,9 +136,12 @@ export async function embedFace(
   return out;
 }
 
-/** Cosmetic mapping of z-score → "닮은 정도 %" (monotonic; ranking unaffected). */
-export function zToPercent(z: number): number {
-  return Math.round(Math.max(30, Math.min(99, 40 + 13 * z)));
+/** Cosmetic mapping of a per-face-standardized z (how far above this face's
+ * own mean the match sits) → "닮은 정도 %". Standardizing per face makes the
+ * shown similarity independent of capture magnitude — a dim/low-cosine
+ * capture no longer floors every match to ~30%. Monotonic; ranking unaffected. */
+export function zToPercent(standardizedZ: number): number {
+  return Math.round(Math.max(45, Math.min(98, 66 + 11 * standardizedZ)));
 }
 
 export interface DebugRankRow {
@@ -172,16 +175,27 @@ export function matchTopK(
   k = 5
 ): PokematchMatch[] {
   const { species, dim, vecs, mu, sd } = gallery;
-  const scored: { i: number; z: number }[] = new Array(species.length);
-  for (let s = 0; s < species.length; s++) {
+  const n = species.length;
+  const scored: { i: number; z: number }[] = new Array(n);
+  let sum = 0;
+  for (let s = 0; s < n; s++) {
     let dot = 0;
     const off = s * dim;
     for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
-    scored[s] = { i: s, z: (dot - mu[s]) / (sd[s] || 1e-6) };
+    const z = (dot - mu[s]) / (sd[s] || 1e-6);
+    scored[s] = { i: s, z };
+    sum += z;
   }
+  // Per-face z standardization for the displayed percent (ranking uses the
+  // raw z, which this transform preserves — it's monotonic).
+  const meanZ = sum / n;
+  let varSum = 0;
+  for (const { z } of scored) varSum += (z - meanZ) ** 2;
+  const stdZ = Math.sqrt(varSum / n) || 1;
+
   scored.sort((a, b) => b.z - a.z);
   return scored.slice(0, k).map(({ i, z }) => {
     const slug = species[i];
-    return { slug, entry: pokedex[slug] ?? null, z, percent: zToPercent(z) };
+    return { slug, entry: pokedex[slug] ?? null, z, percent: zToPercent((z - meanZ) / stdZ) };
   });
 }
