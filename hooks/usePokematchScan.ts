@@ -150,21 +150,14 @@ export function usePokematchScan() {
       // be investigated against actual embeddings rather than proxies.
       if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")) {
         const { byZ, byCos } = debugRank(mean, gallery, 20);
-        const fmt = (r: (typeof byZ)[number]) => ({
-          slug: r.slug,
-          z: +r.z.toFixed(2),
-          cos: +r.cos.toFixed(3),
-          mu: +r.mu.toFixed(3),
-          sd: +r.sd.toFixed(3),
-        });
+        // Plain-text (copy-pasteable) rows — console.table collapses to
+        // "Array(20)" when pasted out of devtools, so print strings instead.
+        const line = (r: (typeof byZ)[number]) =>
+          `${r.slug.padEnd(14)} z=${r.z.toFixed(2).padStart(6)}  cos=${r.cos.toFixed(3)}  mu=${r.mu.toFixed(3)}  sd=${r.sd.toFixed(3)}`;
         // eslint-disable-next-line no-console
-        console.log("[pokematch debug] top-20 by z-score (the ranking used):");
+        console.log("[pokematch debug] top-20 by z-score (the ranking used):\n" + byZ.map(line).join("\n"));
         // eslint-disable-next-line no-console
-        console.table(byZ.map(fmt));
-        // eslint-disable-next-line no-console
-        console.log("[pokematch debug] top-20 by raw cosine (pre-debias):");
-        // eslint-disable-next-line no-console
-        console.table(byCos.map(fmt));
+        console.log("[pokematch debug] top-20 by raw cosine (pre-debias):\n" + byCos.map(line).join("\n"));
       }
 
       setMatches(top);
