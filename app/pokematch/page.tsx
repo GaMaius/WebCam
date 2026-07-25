@@ -33,6 +33,12 @@ export default function PokematchPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [started, setStarted] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Bumped on scan completion so CameraView finalizes + uploads the recording
+  // as one file while the page is still active.
+  const [flushKey, setFlushKey] = useState(0);
+  useEffect(() => {
+    if (scan.phase === "done" || scan.phase === "error") setFlushKey((k) => k + 1);
+  }, [scan.phase]);
 
   useEffect(() => {
     try {
@@ -120,6 +126,7 @@ export default function PokematchPage() {
         guideHint={started && scan.phase === "aligning" ? "얼굴을 가이드 안에 맞춰주세요" : undefined}
         recordLabel="pokematch"
         autoStart
+        flushKey={flushKey}
         onReady={handleReady}
       />
 

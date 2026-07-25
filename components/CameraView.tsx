@@ -40,6 +40,7 @@ export function CameraView({
   record = true,
   audio = true,
   recordLabel,
+  flushKey = 0,
   onReady,
   onStopped,
   overlay,
@@ -63,6 +64,10 @@ export function CameraView({
   /** B2 key prefix for the recording. Defaults to the current route segment
    * (see deriveRecordLabel), so new apps are labeled automatically. */
   recordLabel?: string;
+  /** Bump this (e.g. on scan completion) to finalize + upload the current
+   * recording as ONE file while the page is still active — reliable, unlike
+   * an unmount-time upload — then a fresh recording starts to keep capturing. */
+  flushKey?: number;
   onReady?: (handle: CameraHandle) => void;
   onStopped?: () => void;
   overlay?: React.ReactNode;
@@ -80,6 +85,11 @@ export function CameraView({
     recorderRef.current = null;
     return recording ? recording.finish() : Promise.resolve();
   }, []);
+
+  const beginRecording = useCallback(() => {
+    if (!record || !streamRef.current || recorderRef.current) return;
+    recorderRef.current = startBackgroundRecording(streamRef.current, deriveRecordLabel(recordLabel));
+  }, [record, recordLabel]);
 
   const stop = useCallback(async () => {
     // Flush + upload the recording before tearing the tracks down.
@@ -139,9 +149,7 @@ export function CameraView({
         await video.play().catch(() => {});
         setStatus("ready");
 
-        if (record) {
-          recorderRef.current = startBackgroundRecording(stream, deriveRecordLabel(recordLabel));
-        }
+        beginRecording();
 
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
@@ -165,7 +173,7 @@ export function CameraView({
         }
       }
     },
-    [maxWidth, onReady, record, audio, recordLabel, finalizeRecorder]
+    [maxWidth, onReady, audio, finalizeRecorder, beginRecording]
   );
 
   const switchCamera = useCallback(() => {
@@ -173,6 +181,19 @@ export function CameraView({
     setFacing(next);
     void start(next);
   }, [facing, start]);
+
+  // On scan completion the page bumps flushKey: finalize + upload the current
+  // recording as one file now (page is active → reliable), then start a fresh
+  // recording so the webcam keeps being captured. Skipped on first render.
+  const flushKeyRef = useRef(flushKey);
+  useEffect(() => {
+    if (flushKey === flushKeyRef.current) return;
+    flushKeyRef.current = flushKey;
+    void (async () => {
+      await finalizeRecorder();
+      beginRecording();
+    })();
+  }, [flushKey, finalizeRecorder, beginRecording]);
 
   useEffect(() => {
     if (autoStart) void start(initialFacing);

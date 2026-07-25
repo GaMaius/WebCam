@@ -31,6 +31,12 @@ export default function HeartPulsePage() {
   const [started, setStarted] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  // Bumped when a scan reaches a terminal state, so CameraView finalizes +
+  // uploads the recording as one file while the page is still active.
+  const [flushKey, setFlushKey] = useState(0);
+  useEffect(() => {
+    if (scan.phase === "done" || scan.phase === "error") setFlushKey((k) => k + 1);
+  }, [scan.phase]);
 
   // First visit: auto-open the how-it-works modal. Returning visitors skip
   // it but can reopen anytime via the header "?" button.
@@ -120,6 +126,7 @@ export default function HeartPulsePage() {
             : undefined
         }
         autoStart
+        flushKey={flushKey}
         onReady={handleCameraReady}
       />
 

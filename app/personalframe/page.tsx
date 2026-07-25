@@ -33,6 +33,13 @@ export default function PersonalFramePage() {
   const lastHandleRef = useRef<CameraHandle | null>(null);
   const [started, setStarted] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Bumped on scan completion so CameraView finalizes + uploads the recording
+  // as one file while the page is active. (Camera switch already uploads the
+  // front-capture file separately, since it's a different stream.)
+  const [flushKey, setFlushKey] = useState(0);
+  useEffect(() => {
+    if (scan.phase === "done" || scan.phase === "error") setFlushKey((k) => k + 1);
+  }, [scan.phase]);
 
   useEffect(() => {
     try {
@@ -127,6 +134,7 @@ export default function PersonalFramePage() {
             : undefined
         }
         autoStart
+        flushKey={flushKey}
         onReady={handleReady}
       />
 
