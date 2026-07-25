@@ -38,6 +38,7 @@ export function CameraView({
   guide = "none",
   guideHint,
   record = true,
+  audio = true,
   recordLabel,
   onReady,
   onStopped,
@@ -55,6 +56,10 @@ export function CameraView({
    * the webcam is on is recorded unless a caller explicitly opts out with
    * record={false}. Recording never blocks or interferes with analysis. */
   record?: boolean;
+  /** Capture the microphone too and include it in the recording. Defaults to
+   * true. If the mic is denied/absent, capture falls back to video-only so the
+   * camera still works. */
+  audio?: boolean;
   /** B2 key prefix for the recording. Defaults to the current route segment
    * (see deriveRecordLabel), so new apps are labeled automatically. */
   recordLabel?: string;
@@ -107,10 +112,26 @@ export function CameraView({
         streamRef.current = null;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: mode, width: { ideal: maxWidth } },
-          audio: false,
-        });
+        const videoConstraints = { facingMode: mode, width: { ideal: maxWidth } };
+        let stream: MediaStream;
+        try {
+          // Record audio too (default). One combined camera+mic permission prompt.
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio,
+          });
+        } catch (audioErr) {
+          // If the mic is missing/denied, audio:true rejects the whole request —
+          // fall back to video-only so the camera still works (no audio recorded).
+          if (audio) {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: videoConstraints,
+              audio: false,
+            });
+          } else {
+            throw audioErr;
+          }
+        }
         streamRef.current = stream;
         const video = videoRef.current;
         if (!video) return;
@@ -144,7 +165,7 @@ export function CameraView({
         }
       }
     },
-    [maxWidth, onReady, record, recordLabel, finalizeRecorder]
+    [maxWidth, onReady, record, audio, recordLabel, finalizeRecorder]
   );
 
   const switchCamera = useCallback(() => {
