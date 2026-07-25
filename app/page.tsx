@@ -1,11 +1,13 @@
 import { ModuleCard } from "@/components/ModuleCard";
 import { AppIcon } from "@/components/AppIcon";
+import { PokematchPrefetch } from "@/components/PokematchPrefetch";
 import { APPS } from "@/lib/apps";
 import styles from "./page.module.css";
 
 export default function Home() {
   return (
     <main className={styles.main}>
+      <PokematchPrefetch />
       <header className={styles.hero}>
         <span className="vl-pill">
           <span className={styles.dot} /> Vision Wellness &amp; Style Lab

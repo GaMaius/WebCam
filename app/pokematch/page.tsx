@@ -212,7 +212,7 @@ function MatchRow({ match, top }: { match: PokematchMatch; top: boolean }) {
       <div className={styles.matchBody}>
         <span className={styles.matchName}>
           {dex}
-          {nameKo} {e?.nameEn && <span className="en">({e.nameEn.toLowerCase()})</span>}
+          {nameKo} {e?.nameEn && <span className={styles.en}>({e.nameEn.toLowerCase()})</span>}
         </span>
         <span className={styles.matchPct}>
           닮은 정도: <b>{match.percent}%</b>

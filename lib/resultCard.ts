@@ -351,20 +351,21 @@ export async function drawPokematchCard(
 
   const cardX = PAD;
   const cardW = W - PAD * 2;
-  let y = 232;
-  const rowH = 196;
+  const rowH = 204; // row stride
+  const boxH = rowH - 20; // card height (leaves a gap between rows)
+  let y = 224;
   matches.slice(0, 5).forEach((m, idx) => {
     const e = m.entry;
     const rowY = y;
-    roundRect(ctx, cardX, rowY, cardW, rowH - 16, 24);
+    roundRect(ctx, cardX, rowY, cardW, boxH, 24);
     ctx.fillStyle = idx === 0 ? COL.surface : COL.base;
     ctx.fill();
     ctx.strokeStyle = idx === 0 ? COL.surfaceBorder : COL.baseBorder;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const pad = 26;
-    const thumb = rowH - 16 - pad * 2;
+    const pad = 24;
+    const thumb = boxH - pad * 2;
     const img = imgs[idx];
     if (img) {
       ctx.save();
@@ -380,29 +381,29 @@ export async function drawPokematchCard(
     }
 
     const tx = cardX + pad + thumb + 30;
-    let ty = rowY + pad + 44;
     const nameKo = e?.nameKo ?? e?.nameEn ?? m.slug;
     const dex = e?.dex ? `#${e.dex} ` : "";
     ctx.fillStyle = COL.text;
-    ctx.font = `800 40px ${SANS}`;
-    ctx.fillText(`${dex}${nameKo}`, tx, ty);
+    ctx.font = `800 38px ${SANS}`;
+    ctx.fillText(`${dex}${nameKo}`, tx, rowY + 60);
 
-    ty += 40;
     ctx.fillStyle = COL.textDim;
-    ctx.font = `600 26px ${SANS}`;
-    ctx.fillText(`닮은 정도 ${m.percent}%`, tx, ty);
+    ctx.font = `600 25px ${SANS}`;
+    ctx.fillText(`닮은 정도 ${m.percent}%`, tx, rowY + 98);
 
-    ty += 30;
+    // Type badges — kept well inside the box (bottom ≈ rowY+150 vs box ${boxH}).
+    const badgeTop = rowY + 116;
+    const badgeH = 34;
     let bx = tx;
     for (const t of e?.typesKo ?? []) {
+      ctx.font = `700 21px ${SANS}`;
+      const w = ctx.measureText(t).width + 26;
+      roundRect(ctx, bx, badgeTop, w, badgeH, 17);
       const c = typeColor(t);
-      ctx.font = `700 22px ${SANS}`;
-      const w = ctx.measureText(t).width + 28;
-      roundRect(ctx, bx, ty, w, 38, 19);
       ctx.fillStyle = c.bg;
       ctx.fill();
       ctx.fillStyle = c.fg;
-      ctx.fillText(t, bx + 14, ty + 26);
+      ctx.fillText(t, bx + 13, badgeTop + 23);
       bx += w + 10;
     }
 
