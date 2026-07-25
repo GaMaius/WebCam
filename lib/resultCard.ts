@@ -112,7 +112,7 @@ function drawShell(
   let y = 96;
   ctx.fillStyle = opts.accent;
   ctx.font = `700 26px ${SANS}`;
-  ctx.fillText("VISIONLAB AI", PAD, y);
+  ctx.fillText("VISIONLAB", PAD, y);
 
   y += 58;
   ctx.fillStyle = COL.text;

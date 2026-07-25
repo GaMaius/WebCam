@@ -172,7 +172,7 @@ export default function PokematchPage() {
           <ResultActions
             render={renderCard}
             filename={`visionlab-pokematch-${Date.now()}.png`}
-            shareTitle="VisionLab AI · 닮은 포켓몬"
+            shareTitle="VisionLab · 닮은 포켓몬"
             shareText="내가 닮은 포켓몬을 찾아봤어요!"
           />
           <button className={styles.retryBtn} onClick={handleRetry}>

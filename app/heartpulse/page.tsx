@@ -226,8 +226,8 @@ export default function HeartPulsePage() {
           <ResultActions
             render={renderResultCard}
             filename={`visionlab-heartpulse-${Date.now()}.png`}
-            shareTitle="VisionLab AI · HeartPulse 결과"
-            shareText="VisionLab AI로 측정한 나의 심박·스트레스 결과예요."
+            shareTitle="VisionLab · HeartPulse 결과"
+            shareText="VisionLab으로 측정한 나의 심박·스트레스 결과예요."
           />
 
           <button className={styles.retryBtn} onClick={handleRetry}>

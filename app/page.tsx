@@ -13,7 +13,7 @@ export default function Home() {
           <span className={styles.dot} /> Vision Wellness &amp; Style Lab
         </span>
         <h1 className={styles.title}>
-          VisionLab <span className={styles.accent}>AI</span>
+          Vision<span className={styles.accent}>Lab</span>
         </h1>
         <p className={styles.lede}>
           카메라 하나로 나를 읽는 셀프 스캔 앱 모음이에요. 원하는 앱을 골라 측정하고,
@@ -42,7 +42,7 @@ export default function Home() {
       </p>
 
       <footer className={styles.footer}>
-        <span className="vl-mono">VisionLab AI</span>
+        <span className="vl-mono">VisionLab</span>
         <span>DeepPhys rPPG · MediaPipe · CIELAB</span>
       </footer>
     </main>

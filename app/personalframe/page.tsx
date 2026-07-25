@@ -277,8 +277,8 @@ export default function PersonalFramePage() {
             <ResultActions
               render={renderResultCard}
               filename={`visionlab-personalframe-${Date.now()}.png`}
-              shareTitle="VisionLab AI · PersonalFrame 결과"
-              shareText="VisionLab AI로 진단한 나의 퍼스널 컬러·얼굴형 결과예요."
+              shareTitle="VisionLab · PersonalFrame 결과"
+              shareText="VisionLab으로 진단한 나의 퍼스널 컬러·얼굴형 결과예요."
             />
 
             <button className={styles.retryBtn} onClick={handleRetry}>

@@ -1,4 +1,4 @@
-// Shared result types across VisionLab AI apps.
+// Shared result types across VisionLab apps.
 // Each app also persists its latest result to sessionStorage (SESSION_KEYS)
 // so a reload within the session can restore it.
 
