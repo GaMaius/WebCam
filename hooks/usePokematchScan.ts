@@ -158,6 +158,20 @@ export function usePokematchScan() {
         console.log("[pokematch debug] top-20 by z-score (the ranking used):\n" + byZ.map(line).join("\n"));
         // eslint-disable-next-line no-console
         console.log("[pokematch debug] top-20 by raw cosine (pre-debias):\n" + byCos.map(line).join("\n"));
+
+        // Full per-species cosine in gallery.species order (x1000, integer) —
+        // paste this from several different people so the webcam-face mean can
+        // be measured and the LFW-based mu recalibrated to the real query
+        // distribution (the actual root cause of the shared winner).
+        const dim = gallery.dim;
+        const full = gallery.species.map((_, s) => {
+          let dot = 0;
+          const off = s * dim;
+          for (let d = 0; d < dim; d++) dot += gallery.vecs[off + d] * mean[d];
+          return Math.round(dot * 1000);
+        });
+        // eslint-disable-next-line no-console
+        console.log("[pokematch debug] FULLCOS(species-order x1000):\n" + full.join(","));
       }
 
       setMatches(top);
