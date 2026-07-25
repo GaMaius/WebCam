@@ -185,6 +185,21 @@ export default function PokematchPage() {
           <button className={styles.retryBtn} onClick={handleRetry}>
             다시 찾기
           </button>
+
+          {scan.debugText && (
+            <div className={styles.debugBox}>
+              <div className={styles.debugHead}>
+                <span>디버그 데이터 (개발용)</span>
+                <button
+                  className={styles.debugCopy}
+                  onClick={() => navigator.clipboard?.writeText(scan.debugText ?? "")}
+                >
+                  전체 복사
+                </button>
+              </div>
+              <textarea className={styles.debugText} readOnly value={scan.debugText} onFocus={(e) => e.currentTarget.select()} />
+            </div>
+          )}
         </Card>
       )}
 

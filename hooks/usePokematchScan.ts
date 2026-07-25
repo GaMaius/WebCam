@@ -50,6 +50,7 @@ export function usePokematchScan() {
   const [progress, setProgress] = useState(0);
   const [matches, setMatches] = useState<PokematchMatch[] | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [debugText, setDebugText] = useState<string | null>(null);
   const runningRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -59,6 +60,7 @@ export function usePokematchScan() {
     setProgress(0);
     setMatches(null);
     setErrorMessage("");
+    setDebugText(null);
   }, []);
 
   const start = useCallback(async (video: HTMLVideoElement) => {
@@ -150,18 +152,11 @@ export function usePokematchScan() {
       // be investigated against actual embeddings rather than proxies.
       if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")) {
         const { byZ, byCos } = debugRank(mean, gallery, 20);
-        // Plain-text (copy-pasteable) rows — console.table collapses to
-        // "Array(20)" when pasted out of devtools, so print strings instead.
         const line = (r: (typeof byZ)[number]) =>
           `${r.slug.padEnd(14)} z=${r.z.toFixed(2).padStart(6)}  cos=${r.cos.toFixed(3)}  mu=${r.mu.toFixed(3)}  sd=${r.sd.toFixed(3)}`;
-        // eslint-disable-next-line no-console
-        console.log("[pokematch debug] top-20 by z-score (the ranking used):\n" + byZ.map(line).join("\n"));
-        // eslint-disable-next-line no-console
-        console.log("[pokematch debug] top-20 by raw cosine (pre-debias):\n" + byCos.map(line).join("\n"));
-
         // Full per-species cosine in gallery.species order (x1000, integer) —
-        // paste this from several different people so the webcam-face mean can
-        // be measured and the LFW-based mu recalibrated to the real query
+        // collect this from several different people so the webcam-face mean
+        // can be measured and the LFW-based mu recalibrated to the real query
         // distribution (the actual root cause of the shared winner).
         const dim = gallery.dim;
         const full = gallery.species.map((_, s) => {
@@ -170,8 +165,16 @@ export function usePokematchScan() {
           for (let d = 0; d < dim; d++) dot += gallery.vecs[off + d] * mean[d];
           return Math.round(dot * 1000);
         });
-        // eslint-disable-next-line no-console
-        console.log("[pokematch debug] FULLCOS(species-order x1000):\n" + full.join(","));
+        // Surface it on the page (a copyable textarea) rather than only the
+        // console — MediaPipe's wasm logs flood devtools and bury it.
+        setDebugText(
+          "TOP20 by z-score:\n" +
+            byZ.map(line).join("\n") +
+            "\n\nTOP20 by raw cosine:\n" +
+            byCos.map(line).join("\n") +
+            "\n\nFULLCOS(species-order x1000):\n" +
+            full.join(",")
+        );
       }
 
       setMatches(top);
@@ -185,5 +188,5 @@ export function usePokematchScan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { phase, progress, matches, errorMessage, start, reset };
+  return { phase, progress, matches, errorMessage, debugText, start, reset };
 }
