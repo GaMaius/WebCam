@@ -50,7 +50,10 @@
    - 증상: 영상이 여전히 조금씩 쪼개져 올라가는 느낌. `cddfa1e`에서 10초 로테이션을 없애고 "세션당 1파일(스캔 완료 시 flush)"로 바꿨지만, `CameraView`의 `flushKey`가 스캔 완료마다 발동 → **완료 후에도 새 녹화가 시작돼 idle 꼬리 파일**이 생기고, PersonalFrame은 전/후면 전환으로 애초에 2파일. 재측정(다시 하기)마다 파일이 하나 더 생김. → flush 후 불필요한 재시작을 줄이거나, 한 세션의 세그먼트를 하나로 묶는 방안 검토.
    - 파일명: 현재 B2 키가 `<label>/<YYYY-MM-DD>/<uuid>.webm`(`app/api/recordings/route.ts`)이라 사람이 구분 불가. → 사람이 읽을 수 있는 이름 필요(예: `<label>/<날짜>/<시각>-<모듈>-<짧은id>.webm`, 혹은 세션/유저 힌트 포함). presigned key 생성부(route.ts)와 `deriveRecordLabel`을 함께 손볼 것.
 
-2. **PokéMatch — 전혀 안 닮은 포켓몬이 나오기 시작**: 웹캠 μ 재보정(`9ab3bab`, μ_eff=0.3·muRaw+0.7·webcam_mean, faces=4, σ-floor p30) 이후 "다들 뮤" 편중은 사라졌지만, 이제 **엉뚱한 결과**(예: spidops/onix/blastoise)가 나옴. 원인 후보: (a) faces=4로 웹캠 평균이 과적합/노이즈, (b) λ=0.7이 과해 개인 신호까지 깎임, (c) σ-floor로 소수 종이 튐. → `?debug` FULLCOS를 더 모아(테스터↑) webcam_mean 안정화, λ 하향(0.5 등) 재검증, 그래도 안 되면 인코더 도메인 한계이므로 raw-cosine와의 블렌드/상위후보 리랭킹 등 대안 검토. `scratch_faces/`(gitignore)로 leave-one-out 재검증.
+2. **PokéMatch — 전혀 안 닮은 포켓몬이 나오기 시작 (⚠️ 디버깅 진행 중, 이어서 할 것)**: 웹캠 μ 재보정(`9ab3bab`, μ_eff=0.3·muRaw+0.7·webcam_mean, faces=4, σ-floor p30) 이후 "다들 뮤" 편중은 사라졌지만, 이제 **엉뚱한 결과**(예: spidops/onix/blastoise)가 나옴. 원인 후보: (a) faces=4로 웹캠 평균이 과적합/노이즈, (b) λ=0.7이 과해 개인 신호까지 깎임, (c) σ-floor로 소수 종이 튐, (d) 인코더 도메인 한계(얼굴 구분력 자체가 약함).
+   - **전체 맥락·데이터·재현 스크립트·다음 시도 순서를 [`ml/pokematch/calibration/README.md`](ml/pokematch/calibration/README.md)에 촘촘히 기록해둠 — 이어서 디버깅할 땐 그 파일부터 읽을 것.**
+   - 데이터/도구(이제 리포에 커밋됨, `scratch_faces/`는 폐기): 테스터 4명 FULLCOS = `ml/pokematch/calibration/faces/face0{1..4}.txt`, 재보정 = `recalibrate.mjs`(dry-run/`write`), 검증 = `validate_loo.mjs`(λ 0.5/0.7/1.0 스윕). `gallery.json`엔 `muRaw`/`sdRaw` 보존돼 언제든 원본에서 재계산 가능.
+   - 다음 스텝 요약: ① `?debug`로 테스터 더 모아 `faces/faceNN.txt` 추가 → ② `validate_loo.mjs`로 "shared: none" + 종 그럴듯함 동시 확인 → ③ 좋으면 `recalibrate.mjs write`로 굽기, 아니면 λ 하향(0.4~0.6) 스윕 → ④ 그래도 안 되면 인코더 한계로 보고 raw-cosine 블렌드/후보 제한 등 전략 변경.
 
 3. **HeartPulse — 심박 측정 정확도가 많이 떨어지는 듯**: (사용자 지시로 이제 착수) 실제 심박 대비 오차 큼. 점검 대상: DeepPhys 경로 실제 사용 여부/전처리, POS 폴백 빈도, 밴드패스·피크검출·`estimateBpmAndHrv`의 FFT 지배주파수 산출, 30초 창/프레임레이트 추정(`effectiveFps`), 조명·움직임 영향. 가능하면 알려진 BPM(맥박계)과 비교할 수 있게 사용자에게 기준값 요청.
 
