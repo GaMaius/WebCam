@@ -46,9 +46,9 @@
 
 우선순위 높은 미해결 5건. 각 항목은 사용자가 실기기에서 관찰한 증상이며, 세션 샌드박스는 실제 카메라 접근이 막혀 있어 재현이 어렵다는 점 유의(로직·데이터 위주로 파고들 것).
 
-1. **녹화 업로드 — 세그먼트 분할 느낌 + 파일명이 난잡함**:
-   - 증상: 영상이 여전히 조금씩 쪼개져 올라가는 느낌. `cddfa1e`에서 10초 로테이션을 없애고 "세션당 1파일(스캔 완료 시 flush)"로 바꿨지만, `CameraView`의 `flushKey`가 스캔 완료마다 발동 → **완료 후에도 새 녹화가 시작돼 idle 꼬리 파일**이 생기고, PersonalFrame은 전/후면 전환으로 애초에 2파일. 재측정(다시 하기)마다 파일이 하나 더 생김. → flush 후 불필요한 재시작을 줄이거나, 한 세션의 세그먼트를 하나로 묶는 방안 검토.
-   - 파일명: 현재 B2 키가 `<label>/<YYYY-MM-DD>/<uuid>.webm`(`app/api/recordings/route.ts`)이라 사람이 구분 불가. → 사람이 읽을 수 있는 이름 필요(예: `<label>/<날짜>/<시각>-<모듈>-<짧은id>.webm`, 혹은 세션/유저 힌트 포함). presigned key 생성부(route.ts)와 `deriveRecordLabel`을 함께 손볼 것.
+1. **녹화 업로드 — 파일명 난잡 (2026-07-26 수정됨). 분할은 의도적으로 유지**:
+   - **파일명 수정**: `route.ts`의 B2 키를 `<label>/<YYYY-MM-DD>/<HHMMSS>-<label>-<shortid>.<ext>`(날짜·시각 **KST**)로 변경 → 사람이 읽을 수 있음. 예: `heartpulse/2026-07-26/143022-heartpulse-a1b2c3d4.webm`.
+   - **분할은 감수(2026-07-26 사용자 재확인)**: 잠깐 "flush 후 재시작 제거"로 세션당 1파일을 시도했으나, 사용자가 **"웹캠이 켜져 있으면 그 순간들은 무조건 다 녹화"**를 우선함(재스캔·idle 포함). 그래서 flush 후 **재시작을 유지**(`CameraView` flushKey `useEffect`가 finalize→beginRecording) → 완료 후 idle/재스캔도 계속 녹화되고, 그만큼 파일이 여러 개로 나뉘는 건 **의도된 트레이드오프**. PersonalFrame 전/후면 2파일도 정상. 이 동작(전원=녹화)을 임의로 되돌리지 말 것.
 
 2. **PokéMatch — 전혀 안 닮은 포켓몬이 나오기 시작 (⚠️ 디버깅 진행 중, 이어서 할 것)**: 웹캠 μ 재보정(`9ab3bab`, μ_eff=0.3·muRaw+0.7·webcam_mean, faces=4, σ-floor p30) 이후 "다들 뮤" 편중은 사라졌지만, 이제 **엉뚱한 결과**(예: spidops/onix/blastoise)가 나옴. 원인 후보: (a) faces=4로 웹캠 평균이 과적합/노이즈, (b) λ=0.7이 과해 개인 신호까지 깎임, (c) σ-floor로 소수 종이 튐, (d) 인코더 도메인 한계(얼굴 구분력 자체가 약함).
    - **전체 맥락·데이터·재현 스크립트·다음 시도 순서를 [`ml/pokematch/calibration/README.md`](ml/pokematch/calibration/README.md)에 촘촘히 기록해둠 — 이어서 디버깅할 땐 그 파일부터 읽을 것.**

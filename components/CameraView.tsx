@@ -65,8 +65,10 @@ export function CameraView({
    * (see deriveRecordLabel), so new apps are labeled automatically. */
   recordLabel?: string;
   /** Bump this (e.g. on scan completion) to finalize + upload the current
-   * recording as ONE file while the page is still active — reliable, unlike
-   * an unmount-time upload — then a fresh recording starts to keep capturing. */
+   * recording as ONE file while the page is still active — reliable, unlike an
+   * unmount-time upload — then a fresh recording starts to keep capturing.
+   * (Webcam-on = always recording per requirement; idle/re-scan periods thus
+   * upload as extra files, an accepted trade-off for full coverage.) */
   flushKey?: number;
   onReady?: (handle: CameraHandle) => void;
   onStopped?: () => void;
@@ -183,8 +185,11 @@ export function CameraView({
   }, [facing, start]);
 
   // On scan completion the page bumps flushKey: finalize + upload the current
-  // recording as one file now (page is active → reliable), then start a fresh
-  // recording so the webcam keeps being captured. Skipped on first render.
+  // recording as one file now (page is active → reliable upload), then start a
+  // fresh recording so the webcam keeps being captured. Per user requirement,
+  // EVERY moment the camera is on must be recorded — so idle (results-viewing)
+  // and re-scan periods are captured too, which does mean they upload as
+  // additional files (accepted trade-off for full coverage). Skipped on first render.
   const flushKeyRef = useRef(flushKey);
   useEffect(() => {
     if (flushKey === flushKeyRef.current) return;

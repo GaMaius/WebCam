@@ -43,11 +43,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unsupported content type" }, { status: 400 });
   }
 
-  const now = new Date();
-  const datePrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(
-    now.getUTCDate()
-  ).padStart(2, "0")}`;
-  const key = `${moduleName}/${datePrefix}/${randomUUID()}.${ext}`;
+  // Human-readable key: <label>/<YYYY-MM-DD>/<HHMMSS>-<label>-<shortid>.<ext>,
+  // with date/time in KST so it matches the user's wall clock (not UTC).
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .map((x) => [x.type, x.value])
+  ) as Record<string, string>;
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const time = `${parts.hour}${parts.minute}${parts.second}`;
+  const shortId = randomUUID().slice(0, 8);
+  const key = `${moduleName}/${date}/${time}-${moduleName}-${shortId}.${ext}`;
 
   let uploadUrl: string;
   try {
