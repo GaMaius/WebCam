@@ -50,10 +50,10 @@
    - **파일명 수정**: `route.ts`의 B2 키를 `<label>/<YYYY-MM-DD>/<HHMMSS>-<label>-<shortid>.<ext>`(날짜·시각 **KST**)로 변경 → 사람이 읽을 수 있음. 예: `heartpulse/2026-07-26/143022-heartpulse-a1b2c3d4.webm`.
    - **분할은 감수(2026-07-26 사용자 재확인)**: 잠깐 "flush 후 재시작 제거"로 세션당 1파일을 시도했으나, 사용자가 **"웹캠이 켜져 있으면 그 순간들은 무조건 다 녹화"**를 우선함(재스캔·idle 포함). 그래서 flush 후 **재시작을 유지**(`CameraView` flushKey `useEffect`가 finalize→beginRecording) → 완료 후 idle/재스캔도 계속 녹화되고, 그만큼 파일이 여러 개로 나뉘는 건 **의도된 트레이드오프**. PersonalFrame 전/후면 2파일도 정상. 이 동작(전원=녹화)을 임의로 되돌리지 말 것.
 
-2. **PokéMatch — 전혀 안 닮은 포켓몬이 나오기 시작 (⚠️ 디버깅 진행 중, 이어서 할 것)**: 웹캠 μ 재보정(`9ab3bab`, μ_eff=0.3·muRaw+0.7·webcam_mean, faces=4, σ-floor p30) 이후 "다들 뮤" 편중은 사라졌지만, 이제 **엉뚱한 결과**(예: spidops/onix/blastoise)가 나옴. 원인 후보: (a) faces=4로 웹캠 평균이 과적합/노이즈, (b) λ=0.7이 과해 개인 신호까지 깎임, (c) σ-floor로 소수 종이 튐, (d) 인코더 도메인 한계(얼굴 구분력 자체가 약함).
-   - **전체 맥락·데이터·재현 스크립트·다음 시도 순서를 [`ml/pokematch/calibration/README.md`](ml/pokematch/calibration/README.md)에 촘촘히 기록해둠 — 이어서 디버깅할 땐 그 파일부터 읽을 것.**
-   - 데이터/도구(이제 리포에 커밋됨, `scratch_faces/`는 폐기): 테스터 4명 FULLCOS = `ml/pokematch/calibration/faces/face0{1..4}.txt`, 재보정 = `recalibrate.mjs`(dry-run/`write`), 검증 = `validate_loo.mjs`(λ 0.5/0.7/1.0 스윕). `gallery.json`엔 `muRaw`/`sdRaw` 보존돼 언제든 원본에서 재계산 가능.
-   - 다음 스텝 요약: ① `?debug`로 테스터 더 모아 `faces/faceNN.txt` 추가 → ② `validate_loo.mjs`로 "shared: none" + 종 그럴듯함 동시 확인 → ③ 좋으면 `recalibrate.mjs write`로 굽기, 아니면 λ 하향(0.4~0.6) 스윕 → ④ 그래도 안 되면 인코더 한계로 보고 raw-cosine 블렌드/후보 제한 등 전략 변경.
+2. **PokéMatch — 안 닮은 포켓몬 (2026-07-26 완화됨: λ 0.7→0.4)**: λ=0.7 재보정이 "다들 뮤"는 없앴지만 결과가 무작위(onix/spidops)였음. 4명 FULLCOS 분석에서 **근본 원인 규명 = 인코더 도메인 한계**: 얼굴 4명의 FULLCOS 상호 코사인이 **0.9985**(인코더가 사람 얼굴을 거의 구별 못 함 → 개인 신호 ≈0.15%). λ가 크면 이 0.15% 노이즈를 증폭해 무작위가 됨.
+   - **조치**: **λ 0.7 → 0.4**로 낮춰 재보정(`recalibrate.mjs write`, 기본 LAMBDA=0.4). 그럴듯한 얼굴형 풀(jigglypuff·diancie·gothitelle·vulpix…) 유지 + mew를 #1에서 강등(하위 3/4, #1은 사람마다 다름). 이 인코더에서 도달 가능한 "그럴듯함 vs 변별" 최적 균형.
+   - **한계(솔직)**: 0.9985 유사도라 "진짜 닮음 변별"은 이 인코더로 불가 — 결과는 *그럴듯 + 느슨한 개인차*(재미 앱엔 충분). 더 올리려면 (a) 얼굴형 후보군 제한(pokedex `shape`/LFW-z 상위) 또는 (b) 더 강한/얼굴특화 인코더 필요.
+   - 데이터/도구/전체 분석은 [`ml/pokematch/calibration/README.md`](ml/pokematch/calibration/README.md) 참조. `gallery.json`은 `muRaw`/`sdRaw` 보존 → λ 재조정은 `LAMBDA=<값> node recalibrate.mjs write`.
 
 3. **HeartPulse — 심박 측정 정확도가 많이 떨어지는 듯**: (사용자 지시로 이제 착수) 실제 심박 대비 오차 큼. 점검 대상: DeepPhys 경로 실제 사용 여부/전처리, POS 폴백 빈도, 밴드패스·피크검출·`estimateBpmAndHrv`의 FFT 지배주파수 산출, 30초 창/프레임레이트 추정(`effectiveFps`), 조명·움직임 영향. 가능하면 알려진 BPM(맥박계)과 비교할 수 있게 사용자에게 기준값 요청.
 

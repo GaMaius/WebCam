@@ -20,7 +20,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const LAMBDA = 0.7; // mu_eff = (1-λ)·muRaw + λ·webcamMean   (lower = trust LFW more)
+const LAMBDA = Number(process.env.LAMBDA ?? 0.4); // mu_eff = (1-λ)·muRaw + λ·webcamMean (lower = trust LFW/plausible more). 0.7 over-subtracted → random; 0.4 keeps face-like species while demoting the shared hub.
 const FLOOR_PCT = 0.3; // sd floored at this percentile of sdRaw
 
 const GALLERY = "public/pokemon/gallery.json";

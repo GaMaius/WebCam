@@ -29,34 +29,51 @@ lives (CLAUDE.md "알려진 문제" #2).
      (capture-brightness independent).
    - LOO over the 4 faces: **0 species shared** across held-out top-lists.
 
-3. **CURRENT OPEN BUG (#2): "이제 전혀 안 닮은 포켓몬이 나온다."** After the
-   λ=0.7 recal, Mew-domination is gone but results look *random/unrelated*
-   (e.g. spidops, onix, blastoise). Likely causes:
-   - **Overfit / noise:** webcamMean is from only **4 faces** → noisy per
-     species; λ=0.7 leans hard on it and over-subtracts personal signal.
-   - **σ-floor side effects** pushing odd species up.
-   - Or a fundamental **domain-gap ceiling** — a pokémon-image CLIP encoder
-     barely separates real faces (all z compressed), so once the shared bias
-     is removed there isn't much *real* signal left to rank on.
+3. **"이제 전혀 안 닮은 포켓몬이 나온다" (λ=0.7) — MITIGATED by λ=0.4 (2026-07-26).**
+   Diagnosis (analysis over the 4 faces):
+   - **Domain-gap ceiling is the root cause, now quantified:** the 4 faces'
+     FULLCOS profiles have **mean pairwise cosine 0.9985** — the encoder sees
+     all human faces as ~identical relative to pokémon, so real person-specific
+     signal is ~0.15% of the vector. Any strong debias (high λ) amplifies that
+     tiny residual = **noise → random species (onix/spidops)**.
+   - **What each regime gives:** raw cosine → same hub for everyone
+     (paras/kabuto). LFW-z (λ=0) → *plausible* cute/round species
+     (jigglypuff/diancie/gothitelle/vulpix…) but a shared `mew` hub. λ=0.7 →
+     hub gone but random.
+   - **Fix applied:** lower **λ 0.7 → 0.4**. Keeps the plausible face-like pool,
+     demotes `mew` out of #1 (now appears lower in ~3/4 lists, never #1), and
+     each person's #1 differs (jigglypuff / diancie / gothitelle / diancie).
+     Best plausible-vs-unique balance reachable at this encoder ceiling.
+     Re-baked via `recalibrate.mjs write` (LAMBDA default now 0.4).
+   - **Honest limitation:** with 0.9985 face-similarity, "true" resemblance
+     discrimination is not achievable with this encoder — results are
+     *plausible + loosely varied*, which is right for a fun app. Materially
+     better would need a stronger/face-aware encoder or a curated candidate
+     subset (see next).
 
-## What to try next (in order)
+## Current state (2026-07-26)
 
-1. **Collect more faces.** Have several people open `/pokematch?debug=1`,
-   scan, hit "전체 복사" on the result panel, and paste the `FULLCOS:` line.
-   Save each as `faces/faceNN.txt` (just the comma-separated integers).
-   More faces → stabler webcamMean → less overfit.
-2. **Re-run + re-validate:**
-   ```
-   node ml/pokematch/calibration/validate_loo.mjs      # check λ=0.5/0.7/1.0, want "shared: none" AND sensible species
-   node ml/pokematch/calibration/recalibrate.mjs       # dry-run rankings
-   node ml/pokematch/calibration/recalibrate.mjs write # bake into gallery.json
-   ```
-3. **Lower λ** (edit `recalibrate.mjs`): λ=0.5 keeps more LFW prior and looked
-   less extreme in LOO (jigglypuff/wigglytuff partially return but still
-   varied). Sweep λ ∈ {0.4, 0.5, 0.6} and eyeball plausibility.
-4. **If still bad → accept the encoder ceiling** and change strategy: blend
-   z-rank with raw-cosine rank, or restrict candidates to a curated
-   face-plausible subset, or show top-K with lower confidence wording.
+Deployed calibration = **λ=0.4**, σ-floor p30 (baked in `gallery.json`).
+Results are plausible + loosely person-varied. Good enough for the fun app;
+the encoder ceiling (0.9985) is the hard limit.
+
+## What to try next (only if better resemblance is still wanted)
+
+1. **Collect more faces** (needs real devices — sandbox has no camera): open
+   `/pokematch?debug=1`, scan, "전체 복사", paste the `FULLCOS:` line as
+   `faces/faceNN.txt`. More faces → stabler webcamMean. Then re-tune λ:
+   `LAMBDA=0.4 node ml/pokematch/calibration/recalibrate.mjs` (dry-run) /
+   `... recalibrate.mjs write` (bake). `validate_loo.mjs` for held-out check.
+   (Note: more faces mainly stabilizes the hub estimate; it can't beat the
+   0.9985 separability ceiling.)
+2. **Curated candidate subset (biggest quality lever without a new encoder):**
+   restrict ranking to face-plausible species (round/cute/humanoid — derivable
+   from `pokedex.json` `shape`, or the species that score high in LFW-z) so the
+   result is *always* a plausible pokémon; z only picks within that pool.
+3. **Stronger/face-aware encoder** (bigger CLIP / a face-tuned model) — the
+   only thing that actually raises the 0.15% person signal. Heavy.
+4. Soften UX wording ("오늘의 닮은 포켓몬", 재미 강조) to match the real
+   confidence level.
 
 ## Files
 
