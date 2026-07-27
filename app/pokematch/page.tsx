@@ -31,8 +31,11 @@ function stepForPhase(phase: string, started: boolean): number {
 export default function PokematchPage() {
   const scan = usePokematchScan();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [started, setStarted] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+
   // Bumped on scan completion so CameraView finalizes + uploads the recording
   // as one file while the page is still active.
   const [flushKey, setFlushKey] = useState(0);
@@ -60,13 +63,15 @@ export default function PokematchPage() {
   const handleReady = useCallback(
     (handle: CameraHandle) => {
       videoRef.current = handle.video;
-      if (started && scan.phase === "idle") void scan.start(handle.video);
+      if (started && scan.phase === "idle" && !uploadPreview) void scan.start(handle.video);
     },
-    [started, scan]
+    [started, scan, uploadPreview]
   );
 
   useEffect(() => {
-    if (started && videoRef.current && scan.phase === "idle") void scan.start(videoRef.current);
+    if (started && videoRef.current && scan.phase === "idle" && !uploadPreview) {
+      void scan.start(videoRef.current);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started]);
 
@@ -76,10 +81,45 @@ export default function PokematchPage() {
     } catch {
       /* ignore */
     }
+    setUploadPreview(null);
     setStarted(true);
   }, []);
 
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      setUploadPreview(url);
+      setStarted(true);
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        void scan.startWithImage(img);
+      };
+      img.onerror = () => {
+        scan.reset();
+      };
+      img.src = url;
+    },
+    [scan]
+  );
+
+  const triggerUpload = useCallback(() => {
+    try {
+      localStorage.setItem(ONBOARD_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  }, []);
+
   const handleRetry = useCallback(() => {
+    setUploadPreview(null);
     if (videoRef.current) void scan.start(videoRef.current);
     else scan.reset();
   }, [scan]);
@@ -100,6 +140,14 @@ export default function PokematchPage() {
       activeStep={stepForPhase(scan.phase, started)}
       onHelp={() => setModalOpen(true)}
     >
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
+
       <InfoModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -111,19 +159,19 @@ export default function PokematchPage() {
         onPrimary={!started ? begin : undefined}
       >
         <p>
-          카메라로 얼굴을 찍으면, AI가 얼굴의 시각적 특징을 벡터로 뽑아 포켓몬 1000여 종의 특징과
+          카메라로 얼굴을 찍거나 사진을 업로드하면, AI가 얼굴의 시각적 특징을 벡터로 뽑아 포켓몬 1000여 종의 특징과
           비교해 가장 닮은 순으로 5마리를 보여줘요.
         </p>
         <ul className={styles.modalTips}>
           <li>재미로 보는 결과예요 — 정밀한 얼굴 분석이 아니라 전체 인상 기반이에요.</li>
-          <li>밝은 곳에서 정면을 바라봐 주세요. 잠깐 움직이지 않으면 더 정확해요.</li>
+          <li>밝은 곳에서 정면이 잘 보이는 사진이나 위치를 권장해요.</li>
         </ul>
       </InfoModal>
 
       <CameraView
         initialFacing="user"
         guide={started ? "face" : "none"}
-        guideHint={started && scan.phase === "aligning" ? "얼굴을 가이드 안에 맞춰주세요" : undefined}
+        guideHint={started && scan.phase === "aligning" && !uploadPreview ? "얼굴을 가이드 안에 맞춰주세요" : undefined}
         recordLabel="pokematch"
         autoStart
         flushKey={flushKey}
@@ -133,10 +181,15 @@ export default function PokematchPage() {
       {!started && !modalOpen && (
         <Card className={styles.startCard}>
           <h3 className={styles.startTitle}>닮은 포켓몬 찾기</h3>
-          <p className={styles.startDesc}>얼굴을 스캔해서 가장 닮은 포켓몬 5마리를 찾아드려요.</p>
+          <p className={styles.startDesc}>
+            카메라로 얼굴을 스캔하거나 사진을 업로드해서 가장 닮은 포켓몬 5마리를 찾아드려요.
+          </p>
           <div className={styles.startActions}>
             <button className={styles.startBtn} onClick={begin}>
-              시작하기
+              📷 카메라 스캔
+            </button>
+            <button className={styles.uploadBtn} onClick={triggerUpload}>
+              🖼️ 사진 업로드
             </button>
             <button className={styles.linkBtn} onClick={() => setModalOpen(true)}>
               어떻게 찾나요?
@@ -147,14 +200,19 @@ export default function PokematchPage() {
 
       {started && (scan.phase === "loading" || scan.phase === "aligning") && (
         <Card className={styles.statusCard}>
+          {uploadPreview && <img src={uploadPreview} className={styles.previewThumb} alt="선택한 얼굴 사진" />}
           <span className={styles.spinner} />
-          {scan.phase === "loading" ? "모델을 불러오는 중이에요…" : "얼굴을 찾는 중이에요 — 정면을 봐주세요."}
+          {scan.phase === "loading"
+            ? "모델을 불러오는 중이에요…"
+            : uploadPreview
+            ? "사진에서 얼굴을 인식하는 중이에요…"
+            : "얼굴을 찾는 중이에요 — 정면을 봐주세요."}
         </Card>
       )}
 
       {started && scan.phase === "scanning" && (
         <Card className={styles.resultCard}>
-          <span>얼굴을 분석하는 중이에요… 잠깐 움직이지 마세요.</span>
+          <span>얼굴을 분석하는 중이에요… 잠깐만 기다려주세요.</span>
           <div className={styles.progressTrack}>
             <div className={styles.progressFill} style={{ width: `${Math.round(scan.progress * 100)}%` }} />
           </div>
@@ -163,6 +221,7 @@ export default function PokematchPage() {
 
       {started && scan.phase === "analyzing" && (
         <Card className={styles.statusCard}>
+          {uploadPreview && <img src={uploadPreview} className={styles.previewThumb} alt="선택한 얼굴 사진" />}
           <span className={styles.spinner} />
           닮은 포켓몬을 찾는 중이에요…
         </Card>
@@ -182,9 +241,14 @@ export default function PokematchPage() {
             shareTitle="VisionLab · 닮은 포켓몬"
             shareText="내가 닮은 포켓몬을 찾아봤어요!"
           />
-          <button className={styles.retryBtn} onClick={handleRetry}>
-            다시 찾기
-          </button>
+          <div className={styles.startActions}>
+            <button className={styles.retryBtn} onClick={handleRetry}>
+              📷 카메라로 다시 찾기
+            </button>
+            <button className={styles.uploadBtn} onClick={triggerUpload}>
+              🖼️ 다른 사진 업로드
+            </button>
+          </div>
 
           {scan.debugText && (
             <div className={styles.debugBox}>
@@ -206,9 +270,14 @@ export default function PokematchPage() {
       {started && scan.phase === "error" && (
         <Card className={styles.errorCard}>
           <p>{scan.errorMessage}</p>
-          <button className={styles.retryBtn} onClick={handleRetry}>
-            다시 시도
-          </button>
+          <div className={styles.startActions}>
+            <button className={styles.retryBtn} onClick={handleRetry}>
+              📷 카메라로 다시 시도
+            </button>
+            <button className={styles.uploadBtn} onClick={triggerUpload}>
+              🖼️ 다른 사진 업로드
+            </button>
+          </div>
         </Card>
       )}
     </ModuleShell>

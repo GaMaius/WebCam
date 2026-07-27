@@ -188,5 +188,100 @@ export function usePokematchScan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { phase, progress, matches, errorMessage, debugText, start, reset };
+  const startWithImage = useCallback(async (image: HTMLImageElement) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setPhase("loading");
+    setProgress(0);
+    setMatches(null);
+    setErrorMessage("");
+
+    try {
+      const [session, gallery, pokedex, landmarker] = await Promise.all([
+        loadEncoder(),
+        loadGallery(),
+        loadPokedex(),
+        loadFaceLandmarker(),
+      ]);
+
+      if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+      const canvas = canvasRef.current;
+      canvas.width = POKEMATCH_IMG_SIZE;
+      canvas.height = POKEMATCH_IMG_SIZE;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) throw new Error("no 2d context");
+
+      setPhase("aligning");
+
+      const iw = image.naturalWidth || image.width;
+      const ih = image.naturalHeight || image.height;
+      if (!iw || !ih) throw new Error("이미지 크기를 읽을 수 없습니다.");
+
+      let box: FaceBox | null = null;
+      try {
+        const res = landmarker.detectForVideo
+          ? landmarker.detectForVideo(image, performance.now())
+          : landmarker.detect(image);
+        const lm = res.faceLandmarks?.[0];
+        if (lm) box = squareCrop(lm, iw, ih);
+      } catch {
+        try {
+          const res = landmarker.detect(image);
+          const lm = res.faceLandmarks?.[0];
+          if (lm) box = squareCrop(lm, iw, ih);
+        } catch (e) {
+          console.warn("Face detection error on image:", e);
+        }
+      }
+
+      if (!box) {
+        throw new Error("사진에서 얼굴을 찾지 못했어요. 정면이 잘 보이는 얼굴 사진을 선택해 주세요.");
+      }
+
+      setPhase("scanning");
+      setProgress(0.5);
+
+      const sx = Math.max(0, box.x);
+      const sy = Math.max(0, box.y);
+      const sSide = Math.min(box.side, iw - sx, ih - sy);
+      ctx.drawImage(image, sx, sy, sSide, sSide, 0, 0, POKEMATCH_IMG_SIZE, POKEMATCH_IMG_SIZE);
+
+      const embedding = await embedFace(session, canvas);
+      setProgress(1);
+
+      setPhase("analyzing");
+      const top = matchTopK(embedding, gallery, pokedex, 5);
+
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")) {
+        const { byZ, byCos } = debugRank(embedding, gallery, 20);
+        const line = (r: (typeof byZ)[number]) =>
+          `${r.slug.padEnd(14)} z=${r.z.toFixed(2).padStart(6)}  cos=${r.cos.toFixed(3)}  mu=${r.mu.toFixed(3)}  sd=${r.sd.toFixed(3)}`;
+        const dim = gallery.dim;
+        const full = gallery.species.map((_, s) => {
+          let dot = 0;
+          const off = s * dim;
+          for (let d = 0; d < dim; d++) dot += gallery.vecs[off + d] * embedding[d];
+          return Math.round(dot * 1000);
+        });
+        setDebugText(
+          "TOP20 by z-score:\n" +
+            byZ.map(line).join("\n") +
+            "\n\nTOP20 by raw cosine:\n" +
+            byCos.map(line).join("\n") +
+            "\n\nFULLCOS(species-order x1000):\n" +
+            full.join(",")
+        );
+      }
+
+      setMatches(top);
+      setPhase("done");
+      runningRef.current = false;
+    } catch (err) {
+      runningRef.current = false;
+      setPhase("error");
+      setErrorMessage((err as Error)?.message || "사진 분석 중 오류가 발생했어요.");
+    }
+  }, []);
+
+  return { phase, progress, matches, errorMessage, debugText, start, startWithImage, reset };
 }
