@@ -82,6 +82,20 @@ function drawMaskedFaceCrop(
   ctx.restore();
 }
 
+/** Computes face aspect ratio (height / width) from MediaPipe landmarks. */
+function computeFaceAspect(landmarks?: { x: number; y: number }[]): number {
+  if (!landmarks || landmarks.length < 455) return 1.15;
+  const top = landmarks[10] ?? landmarks[0];
+  const chin = landmarks[152] ?? landmarks[landmarks.length - 1];
+  const faceH = Math.hypot(chin.x - top.x, chin.y - top.y);
+
+  const rCheek = landmarks[234] ?? landmarks[0];
+  const lCheek = landmarks[454] ?? landmarks[landmarks.length - 1];
+  const faceW = Math.hypot(lCheek.x - rCheek.x, lCheek.y - rCheek.y);
+
+  return faceW > 0 ? faceH / faceW : 1.15;
+}
+
 export function usePokematchScan() {
   const [phase, setPhase] = useState<PokematchPhase>("idle");
   const [progress, setProgress] = useState(0);
@@ -90,6 +104,7 @@ export function usePokematchScan() {
   const [debugText, setDebugText] = useState<string | null>(null);
   const runningRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const faceAspectRef = useRef<number>(1.15);
 
   const reset = useCallback(() => {
     runningRef.current = false;
@@ -98,6 +113,7 @@ export function usePokematchScan() {
     setMatches(null);
     setErrorMessage("");
     setDebugText(null);
+    faceAspectRef.current = 1.15;
   }, []);
 
   const start = useCallback(async (video: HTMLVideoElement) => {
@@ -138,7 +154,10 @@ export function usePokematchScan() {
           try {
             const res = landmarker.detectForVideo(video, performance.now());
             const lm = res.faceLandmarks?.[0];
-            if (lm) box = squareCrop(lm, vw, vh);
+            if (lm) {
+              box = squareCrop(lm, vw, vh);
+              faceAspectRef.current = computeFaceAspect(lm);
+            }
           } catch {
             /* transient detect error — keep trying */
           }
@@ -178,7 +197,7 @@ export function usePokematchScan() {
       norm = Math.sqrt(norm) || 1;
       for (let i = 0; i < dim; i++) mean[i] /= norm;
 
-      const top = matchTopK(mean, gallery, pokedex, 5);
+      const top = matchTopK(mean, gallery, pokedex, 5, { faceAspect: faceAspectRef.current });
 
       // Diagnostic readout (opt-in via ?debug): dumps the real face's full
       // ranking so a persistent single winner (hubness / miscalibration) can
@@ -256,12 +275,18 @@ export function usePokematchScan() {
           ? landmarker.detectForVideo(image, performance.now())
           : landmarker.detect(image);
         const lm = res.faceLandmarks?.[0];
-        if (lm) box = squareCrop(lm, iw, ih);
+        if (lm) {
+          box = squareCrop(lm, iw, ih);
+          faceAspectRef.current = computeFaceAspect(lm);
+        }
       } catch {
         try {
           const res = landmarker.detect(image);
           const lm = res.faceLandmarks?.[0];
-          if (lm) box = squareCrop(lm, iw, ih);
+          if (lm) {
+            box = squareCrop(lm, iw, ih);
+            faceAspectRef.current = computeFaceAspect(lm);
+          }
         } catch (e) {
           console.warn("Face detection error on image:", e);
         }
@@ -280,7 +305,7 @@ export function usePokematchScan() {
       setProgress(1);
 
       setPhase("analyzing");
-      const top = matchTopK(embedding, gallery, pokedex, 5);
+      const top = matchTopK(embedding, gallery, pokedex, 5, { faceAspect: faceAspectRef.current });
 
       if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")) {
         const { byZ, byCos } = debugRank(embedding, gallery, 20);

@@ -171,31 +171,60 @@ export function debugRank(embedding: Float32Array, gallery: Gallery, k = 20): { 
 }
 
 const CHAR_SHAPE_BOOST: Record<string, number> = {
-  humanoid: 0.22,
+  humanoid: 0.24,
   upright: 0.18,
-  heads: 0.18,
-  arms: 0.14,
-  blob: 0.10,
+  heads: 0.16,
+  arms: 0.12,
 };
+
+const ROUND_BALL_SLUGS = new Set([
+  "jigglypuff",
+  "wigglytuff",
+  "voltorb",
+  "electrode",
+  "solosis",
+  "duosion",
+  "reuniclus",
+  "gulpin",
+  "swalot",
+]);
 
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
   gallery: Gallery,
   pokedex: Record<string, PokedexEntry>,
-  k = 5
+  k = 5,
+  options?: { faceAspect?: number }
 ): PokematchMatch[] {
   const { species, dim, vecs, mu, sd } = gallery;
   const n = species.length;
   const scored: { i: number; z: number }[] = new Array(n);
+  const faceAspect = options?.faceAspect ?? 1.15;
   let sum = 0;
+
   for (let s = 0; s < n; s++) {
     let dot = 0;
     const off = s * dim;
     for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
     const rawZ = (dot - mu[s]) / (sd[s] || 1e-6);
-    const shape = pokedex[species[s]]?.shape ?? "";
-    const boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+    const slug = species[s];
+    const shape = pokedex[slug]?.shape ?? "";
+    let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+
+    // Adapt to facial geometry (long/oblong vs round)
+    if (faceAspect > 1.18) {
+      if (shape === "ball" || shape === "blob" || ROUND_BALL_SLUGS.has(slug)) {
+        boost -= 0.85; // Demote round ball pokemons for long/oblong faces
+      } else if (shape === "humanoid" || shape === "upright") {
+        boost += 0.15; // Extra boost for sleek humanoid character pokemons
+      }
+    } else if (faceAspect < 1.05) {
+      if (shape === "ball" || shape === "blob" || ROUND_BALL_SLUGS.has(slug)) {
+        boost += 0.15;
+      }
+    }
+
     const z = rawZ + boost;
     scored[s] = { i: s, z };
     sum += z;
