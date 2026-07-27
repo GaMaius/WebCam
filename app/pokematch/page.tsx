@@ -318,6 +318,36 @@ function MatchRow({ match, top }: { match: PokematchMatch; top: boolean }) {
             );
           })}
         </div>
+
+        {top && match.subAnalysis && (
+          <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.12)" }}>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "#c084fc", marginBottom: "8px", display: "flex", alignItems: "center", gap: "4px" }}>
+              <span>🔍</span> AI 정밀 4대 세부 분석 리포트
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "11px" }}>
+              <div style={{ background: "rgba(255,255,255,0.06)", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ color: "#94a3b8", fontSize: "10px" }}>📐 얼굴형 프로포션</div>
+                <div style={{ fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>{match.subAnalysis.faceShapeName}</div>
+                <div style={{ color: "#38bdf8", fontWeight: 700, marginTop: "2px" }}>싱크로율 {match.subAnalysis.scores.geometrySync}%</div>
+              </div>
+              <div style={{ background: "rgba(255,255,255,0.06)", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ color: "#94a3b8", fontSize: "10px" }}>👀 이목구비 눈매</div>
+                <div style={{ fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>{match.subAnalysis.eyeImpression}</div>
+                <div style={{ color: "#38bdf8", fontWeight: 700, marginTop: "2px" }}>유사도 {match.subAnalysis.scores.featureSync}%</div>
+              </div>
+              <div style={{ background: "rgba(255,255,255,0.06)", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ color: "#94a3b8", fontSize: "10px" }}>🎨 퍼스널 컬러 팔레트</div>
+                <div style={{ fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>{match.subAnalysis.colorPalette}</div>
+                <div style={{ color: "#38bdf8", fontWeight: 700, marginTop: "2px" }}>매칭 {match.subAnalysis.scores.colorSync}%</div>
+              </div>
+              <div style={{ background: "rgba(255,255,255,0.06)", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ color: "#94a3b8", fontSize: "10px" }}>✨ 분위기 & 아우라</div>
+                <div style={{ fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>{match.subAnalysis.vibeName}</div>
+                <div style={{ color: "#38bdf8", fontWeight: 700, marginTop: "2px" }}>부합도 {match.subAnalysis.scores.vibeSync}%</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

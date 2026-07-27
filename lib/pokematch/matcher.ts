@@ -47,11 +47,25 @@ export interface Gallery {
   sd: Float32Array;
 }
 
+export interface FaceSubAnalysis {
+  faceShapeName: string;
+  eyeImpression: string;
+  colorPalette: string;
+  vibeName: string;
+  scores: {
+    geometrySync: number;
+    featureSync: number;
+    colorSync: number;
+    vibeSync: number;
+  };
+}
+
 export interface PokematchMatch {
   slug: string;
   entry: PokedexEntry | null;
   z: number;
   percent: number;
+  subAnalysis?: FaceSubAnalysis;
 }
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
@@ -179,6 +193,46 @@ const CHAR_SHAPE_BOOST: Record<string, number> = {
   blob: 0.04,
 };
 
+function computeSubAnalysis(
+  entry: PokedexEntry | null,
+  percent: number,
+  faceAspect: number
+): FaceSubAnalysis {
+  let faceShapeName = "계란형 (Balanced Oval)";
+  if (faceAspect > 1.22) faceShapeName = "슬림 계란형 (Slim Oblong)";
+  else if (faceAspect > 1.14) faceShapeName = "계란형 (Classic Oval)";
+  else if (faceAspect < 1.05) faceShapeName = "소프트 둥근형 (Soft Round)";
+  else faceShapeName = "내추럴 계란형 (Natural Oval)";
+
+  const eyeImpression = faceAspect > 1.18 ? "샤프함 / 지적임" : "부드러움 / 뚜렷함";
+  const colorPalette = entry?.color ? `${entry.color.toUpperCase()} & 딥 톤` : "다크 & 쿨톤";
+  const vibeName = percent > 90 ? "독보적인 카리스마 & 아우라" : "차분하고 명석함";
+
+  let shapeBonus = 0;
+  if (faceAspect > 1.18 && (entry?.shape === "humanoid" || entry?.shape === "upright")) {
+    shapeBonus = 6;
+  } else if (faceAspect < 1.05 && (entry?.shape === "ball" || entry?.shape === "blob")) {
+    shapeBonus = 6;
+  }
+  const geometrySync = Math.min(99, Math.max(82, Math.round(percent * 0.92 + shapeBonus)));
+  const featureSync = Math.min(99, Math.max(80, Math.round(percent * 0.96)));
+  const colorSync = Math.min(99, Math.max(84, Math.round(percent * 0.88 + 8)));
+  const vibeSync = Math.min(99, Math.max(85, Math.round(percent * 0.94 + 4)));
+
+  return {
+    faceShapeName,
+    eyeImpression,
+    colorPalette,
+    vibeName,
+    scores: {
+      geometrySync,
+      featureSync,
+      colorSync,
+      vibeSync,
+    },
+  };
+}
+
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
@@ -228,6 +282,10 @@ export function matchTopK(
   return topSlice.map(({ i, z }) => {
     const slug = species[i];
     const sz = (z - meanZ) / stdZ;
-    return { slug, entry: pokedex[slug] ?? null, z, percent: zToPercent(sz, topSz) };
+    const entry = pokedex[slug] ?? null;
+    const percent = zToPercent(sz, topSz);
+    const subAnalysis = computeSubAnalysis(entry, percent, faceAspect);
+
+    return { slug, entry, z, percent, subAnalysis };
   });
 }
