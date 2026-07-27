@@ -130,7 +130,7 @@ export default function HeartPulsePage() {
         onReady={handleCameraReady}
       />
 
-      {!started && !modalOpen && (
+      {!started && (
         <Card className={styles.startCard}>
           <div>
             <h3 className={styles.startTitle}>측정 준비됐어요</h3>
@@ -149,10 +149,12 @@ export default function HeartPulsePage() {
         </Card>
       )}
 
-      {started && scan.phase === "aligning" && (
+      {started && (scan.phase === "idle" || scan.phase === "aligning") && (
         <Card className={styles.statusCard}>
           <span className={styles.spinner} />
-          얼굴을 찾는 중입니다 — 가이드 안에 얼굴을 맞춰주세요.
+          {scan.phase === "idle"
+            ? "카메라를 연결하는 중입니다..."
+            : "얼굴을 찾는 중입니다 — 가이드 안에 얼굴을 맞춰주세요."}
         </Card>
       )}
 

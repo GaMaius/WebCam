@@ -178,7 +178,7 @@ export default function PokematchPage() {
         onReady={handleReady}
       />
 
-      {!started && !modalOpen && (
+      {!started && (
         <Card className={styles.startCard}>
           <h3 className={styles.startTitle}>닮은 포켓몬 찾기</h3>
           <p className={styles.startDesc}>
@@ -198,12 +198,12 @@ export default function PokematchPage() {
         </Card>
       )}
 
-      {started && (scan.phase === "loading" || scan.phase === "aligning") && (
+      {started && (scan.phase === "idle" || scan.phase === "loading" || scan.phase === "aligning") && (
         <Card className={styles.statusCard}>
           {uploadPreview && <img src={uploadPreview} className={styles.previewThumb} alt="선택한 얼굴 사진" />}
           <span className={styles.spinner} />
-          {scan.phase === "loading"
-            ? "모델을 불러오는 중이에요…"
+          {scan.phase === "loading" || scan.phase === "idle"
+            ? "카메라 및 모델을 준비하는 중이에요…"
             : uploadPreview
             ? "사진에서 얼굴을 인식하는 중이에요…"
             : "얼굴을 찾는 중이에요 — 정면을 봐주세요."}
