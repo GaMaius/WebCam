@@ -19,8 +19,8 @@ test("computeFaceGeometry derives sensible facial thirds and length/width ratio"
     152: { x: 0, y: 90 }, // chin
     234: { x: -40, y: 40 }, // cheek right
     454: { x: 40, y: 40 }, // cheek left
-    172: { x: -35, y: 80 },
-    397: { x: 35, y: 80 },
+    58: { x: -35, y: 80 },
+    288: { x: 35, y: 80 },
     2: { x: 0, y: 60 }, // nose base
   });
   const geometry = computeFaceGeometry(landmarks);
@@ -43,8 +43,8 @@ test("classifyFaceShape identifies an oblong (long) face", () => {
     152: { x: 0, y: 160 }, // very long face
     234: { x: -40, y: 40 },
     454: { x: 40, y: 40 },
-    172: { x: -35, y: 140 },
-    397: { x: 35, y: 140 },
+    58: { x: -35, y: 140 },
+    288: { x: 35, y: 140 },
     54: { x: -38, y: 10 },
     284: { x: 38, y: 10 },
   });
@@ -57,8 +57,8 @@ test("classifyFaceShape identifies a square (wide, flat jaw) face", () => {
     152: { x: 0, y: 100 },
     234: { x: -40, y: 40 },
     454: { x: 40, y: 40 },
-    172: { x: -38, y: 85 },
-    397: { x: 38, y: 85 },
+    58: { x: -38, y: 85 },
+    288: { x: 38, y: 85 },
     54: { x: -38, y: 10 },
     284: { x: 38, y: 10 },
   });
@@ -71,8 +71,8 @@ test("classifyFaceShape identifies a round face (short, similar width, soft jaw)
     152: { x: 0, y: 85 },
     234: { x: -40, y: 35 },
     454: { x: 40, y: 35 },
-    172: { x: -36, y: 75 },
-    397: { x: 36, y: 75 },
+    58: { x: -36, y: 75 },
+    288: { x: 36, y: 75 },
     54: { x: -30, y: 10 },
     284: { x: 30, y: 10 },
   });
@@ -85,8 +85,8 @@ test("classifyFaceShape identifies a heart face (wide forehead, narrow jaw)", ()
     152: { x: 0, y: 110 },
     234: { x: -40, y: 40 },
     454: { x: 40, y: 40 },
-    172: { x: -19, y: 90 },
-    397: { x: 19, y: 90 },
+    58: { x: -19, y: 90 },
+    288: { x: 19, y: 90 },
     54: { x: -40, y: 10 },
     284: { x: 40, y: 10 },
   });
@@ -99,8 +99,8 @@ test("classifyFaceShape identifies a diamond face (narrow forehead and jaw, wide
     152: { x: 0, y: 110 },
     234: { x: -45, y: 40 },
     454: { x: 45, y: 40 },
-    172: { x: -30, y: 90 },
-    397: { x: 30, y: 90 },
+    58: { x: -30, y: 90 },
+    288: { x: 30, y: 90 },
     54: { x: -30, y: 10 },
     284: { x: 30, y: 10 },
   });
@@ -113,8 +113,8 @@ test("classifyFaceShape falls back to oval for balanced proportions", () => {
     152: { x: 0, y: 104 },
     234: { x: -40, y: 40 },
     454: { x: 40, y: 40 },
-    172: { x: -34, y: 88 },
-    397: { x: 34, y: 88 },
+    58: { x: -34, y: 88 },
+    288: { x: 34, y: 88 },
     54: { x: -36.8, y: 10 },
     284: { x: 36.8, y: 10 },
   });

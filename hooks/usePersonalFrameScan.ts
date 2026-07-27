@@ -299,7 +299,14 @@ export function usePersonalFrameScan() {
           };
           frontSkinRatioRef.current = skinRatios.reduce((a, b) => a + b, 0) / skinRatios.length;
           frontStdDevRef.current = rgbSampleStdDev(skinSamples);
-          frontGeometryRef.current = lastLandmarks;
+          // Store landmarks in PIXEL space. MediaPipe returns per-axis
+          // normalized coords (x by width, y by height); feeding those to the
+          // angle/length-ratio math distorts jawAngle & lengthToWidth by the
+          // frame's aspect ratio (device-dependent, nonsensical values).
+          // Scaling by the actual frame size makes the geometry aspect-correct.
+          frontGeometryRef.current = lastLandmarks
+            ? lastLandmarks.map((p) => ({ x: p.x * canvas.width, y: p.y * canvas.height }))
+            : null;
           stopLoop();
           setState((s) => ({ ...s, phase: "awaiting-switch", progress: 1 }));
           return;

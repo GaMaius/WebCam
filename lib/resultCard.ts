@@ -5,6 +5,7 @@
 import type { HeartPulseResult, PersonalFrameResult } from "./types";
 import { typeColor } from "./typeColors";
 import { pokemonImageUrl } from "./pokematch/assets";
+import { SEASON_GUIDE, FACE_SHAPE_TIP } from "./guidance";
 
 export interface PersonalFrameLabels {
   season: Record<string, string>;
@@ -15,7 +16,7 @@ export interface PersonalFrameLabels {
 
 const W = 1080;
 const H = 1350;
-const PAD = 64;
+const PAD = 48;
 
 const SANS = "'Segoe UI', system-ui, 'Noto Sans KR', sans-serif";
 const MONO = "'SFMono-Regular', ui-monospace, 'JetBrains Mono', monospace";
@@ -57,6 +58,41 @@ function roundRect(
   ctx.closePath();
 }
 
+function wrapTextKo(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2
+): number {
+  let line = "";
+  let linesCount = 0;
+  let currentY = y;
+
+  for (let i = 0; i < text.length; i++) {
+    const testLine = line + text[i];
+    if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+      if (linesCount === maxLines - 1) {
+        ctx.fillText(line.trimEnd() + "…", x, currentY);
+        return currentY + lineHeight;
+      }
+      ctx.fillText(line, x, currentY);
+      line = text[i];
+      currentY += lineHeight;
+      linesCount++;
+    } else {
+      line = testLine;
+    }
+  }
+  if (line.length > 0 && linesCount < maxLines) {
+    ctx.fillText(line, x, currentY);
+    currentY += lineHeight;
+  }
+  return currentY;
+}
+
 function drawStat(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -95,13 +131,14 @@ function drawStat(
  * app title, date) and returns the Y offset where the body should start. */
 function drawShell(
   ctx: CanvasRenderingContext2D,
-  opts: { appName: string; accent: string; measuredAt?: string }
+  opts: { appName: string; accent: string; measuredAt?: string; h?: number }
 ): number {
-  const bg = ctx.createLinearGradient(0, 0, W, H);
+  const h = opts.h ?? H;
+  const bg = ctx.createLinearGradient(0, 0, W, h);
   bg.addColorStop(0, COL.bg1);
   bg.addColorStop(1, COL.bg2);
   ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, W, h);
 
   const glow = ctx.createRadialGradient(W * 0.85, 20, 40, W * 0.85, 20, 760);
   glow.addColorStop(0, hexToRgba(opts.accent, 0.14));
@@ -109,17 +146,17 @@ function drawShell(
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
 
-  let y = 96;
+  let y = 84;
   ctx.fillStyle = opts.accent;
-  ctx.font = `700 26px ${SANS}`;
+  ctx.font = `700 24px ${SANS}`;
   ctx.fillText("VISIONLAB", PAD, y);
 
-  y += 58;
+  y += 50;
   ctx.fillStyle = COL.text;
-  ctx.font = `700 52px ${SANS}`;
+  ctx.font = `700 46px ${SANS}`;
   ctx.fillText(opts.appName, PAD, y);
 
-  y += 40;
+  y += 36;
   const dateLabel = opts.measuredAt
     ? new Date(opts.measuredAt).toLocaleDateString("ko-KR", {
         year: "numeric",
@@ -128,10 +165,10 @@ function drawShell(
       })
     : "";
   ctx.fillStyle = COL.textDim;
-  ctx.font = `400 22px ${SANS}`;
+  ctx.font = `400 20px ${SANS}`;
   ctx.fillText(dateLabel, PAD, y);
 
-  return y + 56;
+  return y + 42;
 }
 
 function drawFooter(ctx: CanvasRenderingContext2D) {
@@ -230,81 +267,258 @@ export function drawPersonalFrameCard(
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  let y = drawShell(ctx, { appName: "PersonalFrame", accent, measuredAt: result.measuredAt });
+  const startY = drawShell(ctx, { appName: "PersonalFrame", accent, measuredAt: result.measuredAt });
 
+  const guide = SEASON_GUIDE[result.season];
   const cardX = PAD;
   const cardW = W - PAD * 2;
-  const cardY = y;
-  const cardH = result.ambientCorrected ? 720 : 760;
+  const innerX = cardX + 32;
 
-  roundRect(ctx, cardX, cardY, cardW, cardH, 28);
+  // --- BLOCK 1: Tone & Color Summary Card (Y: startY, H: 260) ---
+  const b1Y = startY;
+  const b1H = 260;
+  roundRect(ctx, cardX, b1Y, cardW, b1H, 24);
   ctx.fillStyle = COL.surface;
   ctx.fill();
   ctx.strokeStyle = COL.surfaceBorder;
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  const innerX = cardX + 40;
-  const iy = cardY + 60;
-  ctx.fillStyle = COL.textMuted;
-  ctx.font = `600 18px ${SANS}`;
-  ctx.textAlign = "right";
-  ctx.fillText(`측정 신뢰도 ${result.confidence}%`, cardX + cardW - 40, iy);
-  ctx.textAlign = "left";
-
-  const swatchSize = 96;
+  // Swatch Box
+  const swatchSize = 72;
   const swatchX = innerX;
-  const swatchY = iy - 4;
-  roundRect(ctx, swatchX, swatchY, swatchSize, swatchSize, 20);
+  const swatchY = b1Y + 28;
+  roundRect(ctx, swatchX, swatchY, swatchSize, swatchSize, 16);
   ctx.fillStyle = result.skinHex;
   ctx.fill();
   ctx.strokeStyle = COL.surfaceBorder;
   ctx.lineWidth = 2;
   ctx.stroke();
 
+  // Hex & Lab
   ctx.fillStyle = COL.text;
-  ctx.font = `700 34px ${MONO}`;
-  ctx.fillText(result.skinHex.toUpperCase(), swatchX + swatchSize + 28, swatchY + 40);
+  ctx.font = `700 28px ${MONO}`;
+  ctx.fillText(result.skinHex.toUpperCase(), swatchX + swatchSize + 20, swatchY + 30);
   ctx.fillStyle = COL.textDim;
-  ctx.font = `500 22px ${MONO}`;
+  ctx.font = `500 18px ${MONO}`;
   ctx.fillText(
     `L ${result.lab.L}  a ${result.lab.a}  b ${result.lab.b}`,
-    swatchX + swatchSize + 28,
-    swatchY + 76
+    swatchX + swatchSize + 20,
+    swatchY + 60
   );
 
-  const statsY = swatchY + swatchSize + 44;
-  const gap = 24;
-  const statW = (cardW - 40 * 2 - gap) / 2;
-  drawStat(ctx, innerX, statsY, statW, "언더톤", labels.undertone[result.undertone] ?? result.undertone, {
-    monoValue: false,
-  });
-  drawStat(
-    ctx,
-    innerX + statW + gap,
-    statsY,
-    statW,
-    "시즌 톤",
-    labels.season[result.season] ?? result.season,
-    { monoValue: false }
+  // Confidence Tag (Right Top)
+  ctx.fillStyle = COL.textMuted;
+  ctx.font = `600 16px ${SANS}`;
+  ctx.textAlign = "right";
+  ctx.fillText(
+    `측정 신뢰도 ${result.confidence}%${!result.ambientCorrected ? " (무보정)" : ""}`,
+    cardX + cardW - 32,
+    swatchY + 28
   );
-  drawStat(
-    ctx,
-    innerX,
-    statsY + 130 + gap,
-    statW,
-    "얼굴형",
-    labels.faceShape[result.faceShape] ?? result.faceShape,
-    { monoValue: false }
-  );
-  drawStat(ctx, innerX + statW + gap, statsY + 130 + gap, statW, "ITA° · 톤 깊이", `${result.ita}°`, {
-    unit: labels.ita[result.itaCategory] ?? result.itaCategory,
-  });
+  ctx.textAlign = "left";
 
-  if (!result.ambientCorrected) {
+  // Season & Undertone Title
+  const seasonTitle = `${labels.season[result.season] ?? result.season} · ${labels.undertone[result.undertone] ?? result.undertone}`;
+  ctx.fillStyle = accent;
+  ctx.font = `800 26px ${SANS}`;
+  ctx.fillText(seasonTitle, innerX, b1Y + 134);
+
+  // Season Summary Text
+  ctx.fillStyle = COL.textDim;
+  ctx.font = `400 16px ${SANS}`;
+  wrapTextKo(ctx, guide.summary, innerX, b1Y + 164, cardW - 64, 22, 1);
+
+  // Mini Stats Row inside Block 1
+  const miniY = b1Y + 196;
+  const miniH = 46;
+  const miniGap = 12;
+  const miniW = (cardW - 64 - miniGap * 3) / 4;
+  const miniItems = [
+    { label: "언더톤", val: labels.undertone[result.undertone] ?? result.undertone },
+    { label: "시즌", val: labels.season[result.season] ?? result.season },
+    { label: "얼굴형", val: labels.faceShape[result.faceShape] ?? result.faceShape },
+    { label: "ITA°", val: `${result.ita}°` },
+  ];
+  miniItems.forEach((item, idx) => {
+    const mx = innerX + idx * (miniW + miniGap);
+    roundRect(ctx, mx, miniY, miniW, miniH, 12);
+    ctx.fillStyle = COL.base;
+    ctx.fill();
+    ctx.strokeStyle = COL.baseBorder;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
     ctx.fillStyle = COL.textMuted;
-    ctx.font = `500 17px ${SANS}`;
-    ctx.fillText("후면 카메라 조명 보정 없이 진행된 결과입니다", innerX, statsY + 130 + gap + 130 + 32);
+    ctx.font = `500 13px ${SANS}`;
+    ctx.fillText(item.label, mx + 12, miniY + 18);
+    ctx.fillStyle = COL.text;
+    ctx.font = `700 15px ${SANS}`;
+    ctx.fillText(item.val, mx + 12, miniY + 36);
+  });
+
+  // --- BLOCK 2: Palette Cards (Best & Avoid) (Y: b1Y + b1H + 16, H: 220) ---
+  const b2Y = b1Y + b1H + 16;
+  const b2H = 220;
+  roundRect(ctx, cardX, b2Y, cardW, b2H, 24);
+  ctx.fillStyle = COL.surface;
+  ctx.fill();
+  ctx.strokeStyle = COL.surfaceBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Section 2A: Best Colors
+  ctx.fillStyle = accent;
+  ctx.font = `700 18px ${SANS}`;
+  ctx.fillText("어울리는 대표 컬러", innerX, b2Y + 34);
+
+  let chipX = innerX;
+  const chipY1 = b2Y + 48;
+  const chipH = 34;
+  const chipRadius = 10;
+
+  guide.palette.slice(0, 5).forEach((c) => {
+    ctx.font = `600 15px ${SANS}`;
+    const textW = ctx.measureText(c.name).width;
+    const cWidth = textW + 36;
+    if (chipX + cWidth > cardX + cardW - 32) return;
+
+    roundRect(ctx, chipX, chipY1, cWidth, chipH, chipRadius);
+    ctx.fillStyle = COL.base;
+    ctx.fill();
+    ctx.strokeStyle = COL.baseBorder;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Color dot
+    ctx.beginPath();
+    ctx.arc(chipX + 18, chipY1 + 17, 7, 0, Math.PI * 2);
+    ctx.fillStyle = c.hex;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.15)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = COL.text;
+    ctx.fillText(c.name, chipX + 30, chipY1 + 22);
+
+    chipX += cWidth + 10;
+  });
+
+  // Section 2B: Avoid Colors
+  ctx.fillStyle = "#8b4a3e";
+  ctx.font = `700 18px ${SANS}`;
+  ctx.fillText("피해야 할 컬러", innerX, b2Y + 124);
+
+  let avoidX = innerX;
+  const chipY2 = b2Y + 138;
+
+  guide.avoid.slice(0, 4).forEach((c) => {
+    ctx.font = `600 15px ${SANS}`;
+    const textW = ctx.measureText(c.name).width;
+    const cWidth = textW + 36;
+    if (avoidX + cWidth > cardX + cardW - 32) return;
+
+    roundRect(ctx, avoidX, chipY2, cWidth, chipH, chipRadius);
+    ctx.fillStyle = COL.base;
+    ctx.fill();
+    ctx.strokeStyle = COL.baseBorder;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(avoidX + 18, chipY2 + 17, 7, 0, Math.PI * 2);
+    ctx.fillStyle = c.hex;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.15)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = COL.textDim;
+    ctx.fillText(c.name, avoidX + 30, chipY2 + 22);
+
+    avoidX += cWidth + 10;
+  });
+
+  // --- BLOCK 3: Style Recommendations (Y: b2Y + b2H + 16, H: 275) ---
+  const b3Y = b2Y + b2H + 16;
+  const b3H = 275;
+  roundRect(ctx, cardX, b3Y, cardW, b3H, 24);
+  ctx.fillStyle = COL.surface;
+  ctx.fill();
+  ctx.strokeStyle = COL.surfaceBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = COL.text;
+  ctx.font = `700 19px ${SANS}`;
+  ctx.fillText("이 톤, 이렇게 활용하세요", innerX, b3Y + 34);
+
+  const styleRows = [
+    { label: "메이크업", val: guide.makeup },
+    { label: "헤어", val: guide.hair },
+    { label: "액세서리", val: `${guide.metal} 계열 연출이 잘 어울려요.` },
+    { label: "패션", val: guide.fashion },
+  ];
+
+  let rY = b3Y + 48;
+  styleRows.forEach((row) => {
+    ctx.fillStyle = accent;
+    ctx.font = `700 15px ${SANS}`;
+    ctx.fillText(row.label, innerX, rY + 18);
+
+    ctx.fillStyle = COL.textDim;
+    ctx.font = `400 15px ${SANS}`;
+    wrapTextKo(ctx, row.val, innerX + 90, rY + 18, cardW - 154, 20, 2);
+    rY += 54;
+  });
+
+  // --- BLOCK 4: Facial Geometry & Metrics (Y: b3Y + b3H + 16, H: 200) ---
+  const b4Y = b3Y + b3H + 16;
+  const b4H = 200;
+  roundRect(ctx, cardX, b4Y, cardW, b4H, 24);
+  ctx.fillStyle = COL.surface;
+  ctx.fill();
+  ctx.strokeStyle = COL.surfaceBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = COL.text;
+  ctx.font = `700 19px ${SANS}`;
+  ctx.fillText("얼굴형 & 골격 지표", innerX, b4Y + 34);
+
+  const geoW = (cardW - 64 - 16 * 2) / 3;
+  const geoY = b4Y + 48;
+  const geoH = 62;
+  const geoItems = [
+    { label: "얼굴형", val: labels.faceShape[result.faceShape] ?? result.faceShape },
+    { label: "길이/너비", val: `${result.metrics.lengthToWidth}` },
+    { label: "턱선 형성각", val: `${result.metrics.jawAngle}°` },
+  ];
+
+  geoItems.forEach((g, idx) => {
+    const gx = innerX + idx * (geoW + 16);
+    roundRect(ctx, gx, geoY, geoW, geoH, 14);
+    ctx.fillStyle = COL.base;
+    ctx.fill();
+    ctx.strokeStyle = COL.baseBorder;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = COL.textMuted;
+    ctx.font = `500 13px ${SANS}`;
+    ctx.fillText(g.label, gx + 16, geoY + 22);
+    ctx.fillStyle = COL.text;
+    ctx.font = `700 18px ${SANS}`;
+    ctx.fillText(g.val, gx + 16, geoY + 48);
+  });
+
+  // Face Shape Tip Text
+  const shapeTip = FACE_SHAPE_TIP[result.faceShape];
+  if (shapeTip) {
+    ctx.fillStyle = COL.textDim;
+    ctx.font = `400 15px ${SANS}`;
+    wrapTextKo(ctx, `💡 ${shapeTip}`, innerX, b4Y + 138, cardW - 64, 21, 2);
   }
 
   drawFooter(ctx);

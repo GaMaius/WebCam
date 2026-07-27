@@ -19,8 +19,8 @@ const LM = {
   CHIN: 152,
   CHEEK_RIGHT: 234,
   CHEEK_LEFT: 454,
-  JAW_RIGHT: 172,
-  JAW_LEFT: 397,
+  JAW_RIGHT: 58,
+  JAW_LEFT: 288,
   TEMPLE_RIGHT: 54,
   TEMPLE_LEFT: 284,
   NOSE_BASE: 2,
@@ -63,6 +63,10 @@ function angleBetween(v1: Point2D, v2: Point2D): number {
   return (Math.acos(cos) * 180) / Math.PI;
 }
 
+/** NOTE: `landmarks` must be in ASPECT-CORRECT (pixel) coordinates, not
+ * MediaPipe's per-axis normalized [0,1] coords — otherwise jawAngle and
+ * lengthToWidth are skewed by the frame's aspect ratio. The caller scales
+ * x·width / y·height before calling (see usePersonalFrameScan). */
 export function computeFaceGeometry(landmarks: FaceLandmarkArray): FaceGeometry {
   const foreheadTop = landmarks[LM.FOREHEAD_TOP];
   const chin = landmarks[LM.CHIN];
@@ -124,9 +128,9 @@ export function classifyFaceShape(landmarks: FaceLandmarkArray): FaceShape {
   );
 
   if (lengthToWidth > 1.55) return "oblong";
-  if (jawToCheek > 0.9 && foreheadToCheek > 0.9 && jawAngle > 120) return "square";
-  if (lengthToWidth < 1.15 && jawToCheek > 0.85) return "round";
-  if (foreheadToCheek > 0.95 && jawToCheek < 0.75) return "heart";
-  if (foreheadToCheek < 0.9 && jawToCheek < 0.85) return "diamond";
+  if (jawToCheek > 0.88 && foreheadToCheek > 0.88 && jawAngle > 92) return "square";
+  if (lengthToWidth < 1.15 && jawToCheek > 0.82) return "round";
+  if (foreheadToCheek > 0.92 && jawToCheek < 0.78) return "heart";
+  if (foreheadToCheek < 0.88 && jawToCheek < 0.82) return "diamond";
   return "oval";
 }

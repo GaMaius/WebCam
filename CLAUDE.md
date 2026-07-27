@@ -57,9 +57,9 @@
 
 3. **HeartPulse — 심박 측정 정확도가 많이 떨어지는 듯**: (사용자 지시로 이제 착수) 실제 심박 대비 오차 큼. 점검 대상: DeepPhys 경로 실제 사용 여부/전처리, POS 폴백 빈도, 밴드패스·피크검출·`estimateBpmAndHrv`의 FFT 지배주파수 산출, 30초 창/프레임레이트 추정(`effectiveFps`), 조명·움직임 영향. 가능하면 알려진 BPM(맥박계)과 비교할 수 있게 사용자에게 기준값 요청.
 
-4. **PersonalFrame — 턱 각도(jawAngle) 측정이 이상함**: `lib/faceShape.ts`의 `computeFaceGeometry` jawAngle 산출 로직 점검(랜드마크 인덱스/각도 정의/좌우 대칭/라디안·도 변환). 값 범위가 비상식적이면 계산식 또는 사용 랜드마크가 틀렸을 가능성.
+4. **PersonalFrame — 턱 각도(jawAngle) 측정이 이상함 (2026-07-27 수정됨)**: `lib/faceShape.ts`의 `JAW_RIGHT/JAW_LEFT` 랜드마크 인덱스를 `172/397`(하부 중간)에서 `58/288`(MediaPipe 하악각 / Gonion 코너)로 변경하여 Chin(152) 기준 하악각 턱선 형성각이 비상식적 수치(130°~150°) 대신 정상 수치(70°~110°)로 계산되도록 보정함. `classifyFaceShape` 사각턱 임계값도 92°로 재조정.
 
-5. **PersonalFrame — 결과 이미지 저장 내용이 너무 빈약함**: `lib/resultCard.ts`의 `drawPersonalFrameCard`가 담는 정보가 화면 결과(시즌·언더톤·ITA°·팔레트/피할 색·메이크업/헤어/액세서리/패션·얼굴형·지표)에 비해 너무 적음. 화면 결과 카드와 동등한 수준으로 이미지에 포함하도록 확장.
+5. **PersonalFrame — 결과 이미지 저장 내용이 너무 빈약함 (2026-07-27 수정됨)**: `lib/resultCard.ts`의 `drawPersonalFrameCard`를 완전 재설계함. 1080x1350 PNG 내 4개 카드 블록(피부 톤/시즌 요약, 어울리는/피해야 할 대표 컬러 팔레트 칩, 메이크업·헤어·액세서리·패션 스타일 연출 가이드, 얼굴형·길이/너비·턱선형성각 골격 지표)으로 확장하여 화면 결과와 동등한 풍부한 수준으로 생성.
 
 ## 남은 일 (기존)
 
