@@ -189,6 +189,32 @@ const ROUND_BALL_SLUGS = new Set([
   "swalot",
 ]);
 
+const NON_HUMANOID_SHAPES = new Set([
+  "fish",
+  "squiggle",
+  "tentacles",
+  "bug-wings",
+  "wings",
+  "quadruped",
+  "armor",
+]);
+
+const NON_HUMANOID_EXCLUDED_SLUGS = new Set([
+  "jigglypuff",
+  "wigglytuff",
+  "mew",
+  "musharna",
+  "ditto",
+  "voltorb",
+  "electrode",
+  "chansey",
+  "blissey",
+  "pecharunt",
+  "poltchageist",
+  "orthworm",
+  "paldean_wooper",
+]);
+
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
@@ -211,6 +237,11 @@ export function matchTopK(
     const slug = species[s];
     const shape = pokedex[slug]?.shape ?? "";
     let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+
+    // Filter out non-humanoid animals/items for human face matching
+    if (NON_HUMANOID_SHAPES.has(shape) || NON_HUMANOID_EXCLUDED_SLUGS.has(slug)) {
+      boost -= 1.8;
+    }
 
     // Adapt to facial geometry (long/oblong vs round)
     if (faceAspect > 1.18) {
