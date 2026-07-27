@@ -171,49 +171,13 @@ export function debugRank(embedding: Float32Array, gallery: Gallery, k = 20): { 
 }
 
 const CHAR_SHAPE_BOOST: Record<string, number> = {
-  humanoid: 0.24,
-  upright: 0.18,
-  heads: 0.16,
-  arms: 0.12,
+  humanoid: 0.15,
+  upright: 0.12,
+  heads: 0.06,
+  arms: 0.06,
+  legs: 0.06,
+  blob: 0.04,
 };
-
-const ROUND_BALL_SLUGS = new Set([
-  "jigglypuff",
-  "wigglytuff",
-  "voltorb",
-  "electrode",
-  "solosis",
-  "duosion",
-  "reuniclus",
-  "gulpin",
-  "swalot",
-]);
-
-const NON_HUMANOID_SHAPES = new Set([
-  "fish",
-  "squiggle",
-  "tentacles",
-  "bug-wings",
-  "wings",
-  "quadruped",
-  "armor",
-]);
-
-const NON_HUMANOID_EXCLUDED_SLUGS = new Set([
-  "jigglypuff",
-  "wigglytuff",
-  "mew",
-  "musharna",
-  "ditto",
-  "voltorb",
-  "electrode",
-  "chansey",
-  "blissey",
-  "pecharunt",
-  "poltchageist",
-  "orthworm",
-  "paldean_wooper",
-]);
 
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
@@ -233,27 +197,17 @@ export function matchTopK(
     let dot = 0;
     const off = s * dim;
     for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
-    const rawZ = (dot - mu[s]) / (sd[s] || 1e-6);
+    
+    // Variance floor prevents species with tiny standard deviation from spiking unnaturally
+    const sdEff = Math.max(sd[s] || 1e-6, 0.038);
+    const rawZ = (dot - mu[s]) / sdEff;
     const slug = species[s];
     const shape = pokedex[slug]?.shape ?? "";
     let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
 
-    // Filter out non-humanoid animals/items for human face matching
-    if (NON_HUMANOID_SHAPES.has(shape) || NON_HUMANOID_EXCLUDED_SLUGS.has(slug)) {
-      boost -= 1.8;
-    }
-
-    // Adapt to facial geometry (long/oblong vs round)
-    if (faceAspect > 1.18) {
-      if (shape === "ball" || shape === "blob" || ROUND_BALL_SLUGS.has(slug)) {
-        boost -= 0.85; // Demote round ball pokemons for long/oblong faces
-      } else if (shape === "humanoid" || shape === "upright") {
-        boost += 0.15; // Extra boost for sleek humanoid character pokemons
-      }
-    } else if (faceAspect < 1.05) {
-      if (shape === "ball" || shape === "blob" || ROUND_BALL_SLUGS.has(slug)) {
-        boost += 0.15;
-      }
+    // Gentle facial geometry adaptation without negative penalties
+    if (faceAspect > 1.18 && (shape === "humanoid" || shape === "upright")) {
+      boost += 0.05;
     }
 
     const z = rawZ + boost;
