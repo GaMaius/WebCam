@@ -16,7 +16,7 @@ import {
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
 
 const FRAMES_TO_AVERAGE = 8; // averaging several frames stabilizes the match (consistency)
-const CROP_COEF = 1.3; // square face crop margin — mirrors the Colab test crop
+const CROP_COEF = 1.15; // tight face-only crop margin
 const ALIGN_TIMEOUT_MS = 15_000;
 
 interface FaceBox {
@@ -43,6 +43,43 @@ function squareCrop(
   const cy = ((minY + maxY) / 2) * vh;
   const side = Math.max((maxX - minX) * vw, (maxY - minY) * vh) * CROP_COEF;
   return { x: cx - side / 2, y: cy - side / 2, side };
+}
+
+/**
+ * Draws the cropped face onto the canvas using a neutral studio-gray background
+ * and an oval mask centered on the face landmarks. This completely removes
+ * background color leakage (walls, curtains, outdoor lighting) and stabilizes
+ * matches against glasses & head turn variations.
+ */
+function drawMaskedFaceCrop(
+  ctx: CanvasRenderingContext2D,
+  source: HTMLVideoElement | HTMLImageElement,
+  box: FaceBox,
+  vw: number,
+  vh: number,
+  size: number
+) {
+  const sx = Math.max(0, box.x);
+  const sy = Math.max(0, box.y);
+  const sSide = Math.min(box.side, vw - sx, vh - sy);
+
+  // 1. Fill base canvas with neutral studio gray (#808080)
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, size, size);
+
+  // 2. Save context & create smooth oval face clipping path
+  ctx.save();
+  ctx.beginPath();
+  const cx = size / 2;
+  const cy = size / 2;
+  const rx = (size / 2) * 0.92;
+  const ry = (size / 2) * 0.96;
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+  ctx.clip();
+
+  // 3. Draw face crop inside oval clip
+  ctx.drawImage(source, sx, sy, sSide, sSide, 0, 0, size, size);
+  ctx.restore();
 }
 
 export function usePokematchScan() {
@@ -114,11 +151,7 @@ export function usePokematchScan() {
           }
 
           if (phase !== "scanning") setPhase("scanning");
-          // Draw the (clamped) square crop, scaled to the encoder input.
-          const sx = Math.max(0, box.x);
-          const sy = Math.max(0, box.y);
-          const sSide = Math.min(box.side, vw - sx, vh - sy);
-          ctx.drawImage(video, sx, sy, sSide, sSide, 0, 0, POKEMATCH_IMG_SIZE, POKEMATCH_IMG_SIZE);
+          drawMaskedFaceCrop(ctx, video, box, vw, vh, POKEMATCH_IMG_SIZE);
           try {
             embeddings.push(await embedFace(session, canvas));
           } catch (e) {
@@ -241,10 +274,7 @@ export function usePokematchScan() {
       setPhase("scanning");
       setProgress(0.5);
 
-      const sx = Math.max(0, box.x);
-      const sy = Math.max(0, box.y);
-      const sSide = Math.min(box.side, iw - sx, ih - sy);
-      ctx.drawImage(image, sx, sy, sSide, sSide, 0, 0, POKEMATCH_IMG_SIZE, POKEMATCH_IMG_SIZE);
+      drawMaskedFaceCrop(ctx, image, box, iw, ih, POKEMATCH_IMG_SIZE);
 
       const embedding = await embedFace(session, canvas);
       setProgress(1);

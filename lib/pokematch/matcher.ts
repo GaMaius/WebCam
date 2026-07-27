@@ -170,6 +170,14 @@ export function debugRank(embedding: Float32Array, gallery: Gallery, k = 20): { 
   return { byZ, byCos };
 }
 
+const CHAR_SHAPE_BOOST: Record<string, number> = {
+  humanoid: 0.22,
+  upright: 0.18,
+  heads: 0.18,
+  arms: 0.14,
+  blob: 0.10,
+};
+
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
@@ -185,7 +193,10 @@ export function matchTopK(
     let dot = 0;
     const off = s * dim;
     for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
-    const z = (dot - mu[s]) / (sd[s] || 1e-6);
+    const rawZ = (dot - mu[s]) / (sd[s] || 1e-6);
+    const shape = pokedex[species[s]]?.shape ?? "";
+    const boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+    const z = rawZ + boost;
     scored[s] = { i: s, z };
     sum += z;
   }
