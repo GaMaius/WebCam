@@ -270,9 +270,34 @@ const NON_HUMAN_EXCLUDE_SHAPES = new Set([
   "ball",
   "blob",
   "quadruped",
+  "wings",
 ]);
 
 const HUB_EXCLUDE_SLUGS = new Set([
+  "muk",
+  "grimer",
+  "muk_alola",
+  "grimer_alola",
+  "amoonguss",
+  "foongus",
+  "shiinotic",
+  "morelull",
+  "weezing",
+  "koffing",
+  "weezing_galar",
+  "slugma",
+  "magcargo",
+  "gulpin",
+  "swalot",
+  "garbodor",
+  "trubbish",
+  "pincurchin",
+  "pyukumuku",
+  "stunfisk",
+  "stunfisk_galar",
+  "spiritomb",
+  "wooper",
+  "quagsire",
   "jigglypuff",
   "igglybuff",
   "wigglytuff",
@@ -283,7 +308,7 @@ const HUB_EXCLUDE_SLUGS = new Set([
   "seaking",
 ]);
 
-/** Ranks the gallery by z-scored similarity and returns the top K matches. */
+/** Ranks the gallery by hybrid visual similarity (CLIP cosine + floored z-score) and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
   gallery: Gallery,
@@ -293,53 +318,65 @@ export function matchTopK(
 ): PokematchMatch[] {
   const { species, dim, vecs, mu, sd } = gallery;
   const n = species.length;
-  const scored: { i: number; z: number }[] = new Array(n);
   const faceAspect = options?.faceAspect ?? 1.15;
-  let sum = 0;
 
+  const dots = new Float32Array(n);
+  let dotSum = 0;
   for (let s = 0; s < n; s++) {
     let dot = 0;
     const off = s * dim;
     for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
-    
-    // Variance floor prevents species with tiny standard deviation from spiking unnaturally
-    const sdEff = Math.max(sd[s] || 1e-6, 0.038);
-    const rawZ = (dot - mu[s]) / sdEff;
+    dots[s] = dot;
+    dotSum += dot;
+  }
+
+  const cosMean = dotSum / n;
+  let cosVarSum = 0;
+  for (let s = 0; s < n; s++) cosVarSum += (dots[s] - cosMean) ** 2;
+  const cosStd = Math.sqrt(cosVarSum / n) || 1e-6;
+
+  const scored: { i: number; score: number; z: number }[] = new Array(n);
+  let sumScore = 0;
+
+  for (let s = 0; s < n; s++) {
     const slug = species[s];
     const rawShape = pokedex[slug]?.shape ?? "";
     const shape = OVERRIDE_BALL_SLUGS.has(slug) ? "ball" : rawShape;
 
-    // Filter out non-humanoid shapes (fish, ball, bug, quadruped) and persistent false hubs
     if (NON_HUMAN_EXCLUDE_SHAPES.has(shape) || HUB_EXCLUDE_SLUGS.has(slug)) {
-      scored[s] = { i: s, z: -999 };
+      scored[s] = { i: s, score: -999, z: -999 };
       continue;
     }
 
+    const cosNorm = (dots[s] - cosMean) / cosStd;
+    const sdEff = Math.max(sd[s] || 1e-6, 0.055);
+    const zRaw = (dots[s] - mu[s]) / sdEff;
+
     let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
-    if (faceAspect > 1.15) {
-      if (shape === "humanoid" || shape === "upright") {
-        boost += 0.15;
-      }
+    if (faceAspect > 1.15 && (shape === "humanoid" || shape === "upright")) {
+      boost += 0.08;
     }
 
-    const z = rawZ + boost;
-    scored[s] = { i: s, z };
-    sum += z;
+    // Hybrid score: 60% cosine visual similarity + 30% z-score + shape boost
+    const score = 0.6 * cosNorm + 0.3 * zRaw + boost;
+    scored[s] = { i: s, score, z: zRaw };
+    sumScore += score;
   }
-  // Per-face z standardization for the displayed percent (ranking uses the
-  // raw z, which this transform preserves — it's monotonic).
-  const meanZ = sum / n;
-  let varSum = 0;
-  for (const { z } of scored) varSum += (z - meanZ) ** 2;
-  const stdZ = Math.sqrt(varSum / n) || 1;
 
-  scored.sort((a, b) => b.z - a.z);
+  const meanScore = sumScore / n;
+  let varScore = 0;
+  for (const { score } of scored) {
+    if (score > -900) varScore += (score - meanScore) ** 2;
+  }
+  const stdScore = Math.sqrt(varScore / n) || 1;
+
+  scored.sort((a, b) => b.score - a.score);
   const topSlice = scored.slice(0, k);
-  const topSz = topSlice.length > 0 ? (topSlice[0].z - meanZ) / stdZ : 0;
+  const topSz = topSlice.length > 0 ? (topSlice[0].score - meanScore) / stdScore : 0;
 
-  return topSlice.map(({ i, z }) => {
+  return topSlice.map(({ i, score, z }) => {
     const slug = species[i];
-    const sz = (z - meanZ) / stdZ;
+    const sz = (score - meanScore) / stdScore;
     const entry = pokedex[slug] ?? null;
     const percent = zToPercent(sz, topSz);
     const subAnalysis = computeSubAnalysis(entry, percent, faceAspect);

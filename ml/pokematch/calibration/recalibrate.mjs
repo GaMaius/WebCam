@@ -20,8 +20,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const LAMBDA = Number(process.env.LAMBDA ?? 0.4); // mu_eff = (1-λ)·muRaw + λ·webcamMean (lower = trust LFW/plausible more). 0.7 over-subtracted → random; 0.4 keeps face-like species while demoting the shared hub.
-const FLOOR_PCT = 0.3; // sd floored at this percentile of sdRaw
+const LAMBDA = Number(process.env.LAMBDA ?? 0.4); // mu_eff = (1-λ)·muRaw + λ·webcamMean
+const FLOOR_PCT = 0.5; // Floor sd at 50th percentile (approx 0.055) to prevent small-sd outliers (muk/amoonguss) from exploding z-scores
 
 const GALLERY = "public/pokemon/gallery.json";
 const FACES_DIR = "ml/pokematch/calibration/faces";
