@@ -57,7 +57,7 @@ export function startBackgroundRecording(
   });
 
   try {
-    recorder.start();
+    recorder.start(1000);
   } catch (err) {
     console.error("could not start background recorder:", err);
     return { finish: async () => {} };
@@ -91,6 +91,7 @@ async function uploadRecording(blob: Blob, label: string, mimeType: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ module: label, contentType }),
+    keepalive: true,
   });
   if (!presignRes.ok) {
     throw new Error(`presign request failed: ${presignRes.status}`);
@@ -101,6 +102,7 @@ async function uploadRecording(blob: Blob, label: string, mimeType: string) {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: blob,
+    keepalive: true,
   });
   if (!putRes.ok) {
     throw new Error(`upload failed: ${putRes.status}`);

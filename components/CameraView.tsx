@@ -202,17 +202,49 @@ export function CameraView({
 
   useEffect(() => {
     if (autoStart) void start(initialFacing);
+
+    // Prevent camera preview or recording from stalling when switching tabs or window focus.
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => {
+            if (!t.enabled) t.enabled = true;
+          });
+        }
+        if (videoRef.current && status === "ready") {
+          videoRef.current.play().catch(() => {});
+        }
+        if (!recorderRef.current && streamRef.current && record) {
+          beginRecording();
+        }
+      }
+    };
+
+    const handlePageHide = () => {
+      void finalizeRecorder();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+
       // Component unmount (e.g. navigating away mid-scan): finalize any
       // in-progress recording before the stream's tracks are torn down.
-      finalizeRecorder();
+      void finalizeRecorder();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [status, record, autoStart, initialFacing, start, beginRecording, finalizeRecorder]);
 
   const mirrored = mirrorFront && facing === "user";
 

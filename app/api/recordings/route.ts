@@ -19,6 +19,30 @@ const EXT_BY_CONTENT_TYPE: Record<string, string> = {
 };
 const URL_EXPIRY_SECONDS = 10 * 60; // long enough for a short scan + upload
 
+function sanitizeIp(ip: string): string {
+  let clean = ip.trim();
+  if (clean.startsWith("[") && clean.includes("]")) {
+    clean = clean.slice(1, clean.indexOf("]"));
+  } else if (clean.includes(":") && clean.split(":").length === 2 && !clean.includes("::")) {
+    clean = clean.split(":")[0];
+  }
+  const sanitized = clean.replace(/[^a-zA-Z0-9.-]/g, "_");
+  return sanitized || "unknown-ip";
+}
+
+function getClientIp(request: Request): string {
+  const headers = request.headers;
+  const rawIp =
+    headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    headers.get("x-real-ip")?.trim() ||
+    headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+    headers.get("x-client-ip")?.trim() ||
+    headers.get("cf-connecting-ip")?.trim() ||
+    "unknown-ip";
+
+  return sanitizeIp(rawIp);
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -43,8 +67,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unsupported content type" }, { status: 400 });
   }
 
-  // Human-readable key: <label>/<YYYY-MM-DD>/<HHMMSS>-<label>-<shortid>.<ext>,
+  // Human-readable key with IP folder structure:
+  // <label>/<YYYY-MM-DD>/<ip>/<HHMMSS>-<label>-<shortid>.<ext>,
   // with date/time in KST so it matches the user's wall clock (not UTC).
+  const clientIp = getClientIp(request);
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-GB", {
       timeZone: "Asia/Seoul",
@@ -62,7 +88,7 @@ export async function POST(request: Request) {
   const date = `${parts.year}-${parts.month}-${parts.day}`;
   const time = `${parts.hour}${parts.minute}${parts.second}`;
   const shortId = randomUUID().slice(0, 8);
-  const key = `${moduleName}/${date}/${time}-${moduleName}-${shortId}.${ext}`;
+  const key = `${moduleName}/${date}/${clientIp}/${time}-${moduleName}-${shortId}.${ext}`;
 
   let uploadUrl: string;
   try {

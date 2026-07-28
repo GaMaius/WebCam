@@ -184,13 +184,41 @@ export function debugRank(embedding: Float32Array, gallery: Gallery, k = 20): { 
   return { byZ, byCos };
 }
 
+const OVERRIDE_BALL_SLUGS = new Set([
+  "jigglypuff",
+  "igglybuff",
+  "wigglytuff",
+  "clefairy",
+  "cleffa",
+  "clefable",
+  "marill",
+  "azumarill",
+  "chansey",
+  "blissey",
+  "happiny",
+  "spheal",
+  "voltorb",
+  "electrode",
+  "gulpin",
+  "swalot",
+  "solosis",
+  "duosion",
+]);
+
 const CHAR_SHAPE_BOOST: Record<string, number> = {
-  humanoid: 0.15,
-  upright: 0.12,
-  heads: 0.06,
+  humanoid: 0.22,
+  upright: 0.16,
+  heads: 0.08,
   arms: 0.06,
-  legs: 0.06,
-  blob: 0.04,
+  legs: 0.04,
+  blob: -0.05,
+  ball: -0.12,
+  quadruped: -0.10,
+  fish: -0.25,
+  "bug-wings": -0.20,
+  tentacles: -0.20,
+  armor: -0.18,
+  squiggle: -0.25,
 };
 
 function computeSubAnalysis(
@@ -233,6 +261,28 @@ function computeSubAnalysis(
   };
 }
 
+const NON_HUMAN_EXCLUDE_SHAPES = new Set([
+  "fish",
+  "bug-wings",
+  "tentacles",
+  "armor",
+  "squiggle",
+  "ball",
+  "blob",
+  "quadruped",
+]);
+
+const HUB_EXCLUDE_SLUGS = new Set([
+  "jigglypuff",
+  "igglybuff",
+  "wigglytuff",
+  "electrode",
+  "voltorb",
+  "chi_yu",
+  "goldeen",
+  "seaking",
+]);
+
 /** Ranks the gallery by z-scored similarity and returns the top K matches. */
 export function matchTopK(
   embedding: Float32Array,
@@ -256,12 +306,20 @@ export function matchTopK(
     const sdEff = Math.max(sd[s] || 1e-6, 0.038);
     const rawZ = (dot - mu[s]) / sdEff;
     const slug = species[s];
-    const shape = pokedex[slug]?.shape ?? "";
-    let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+    const rawShape = pokedex[slug]?.shape ?? "";
+    const shape = OVERRIDE_BALL_SLUGS.has(slug) ? "ball" : rawShape;
 
-    // Gentle facial geometry adaptation without negative penalties
-    if (faceAspect > 1.18 && (shape === "humanoid" || shape === "upright")) {
-      boost += 0.05;
+    // Filter out non-humanoid shapes (fish, ball, bug, quadruped) and persistent false hubs
+    if (NON_HUMAN_EXCLUDE_SHAPES.has(shape) || HUB_EXCLUDE_SLUGS.has(slug)) {
+      scored[s] = { i: s, z: -999 };
+      continue;
+    }
+
+    let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
+    if (faceAspect > 1.15) {
+      if (shape === "humanoid" || shape === "upright") {
+        boost += 0.15;
+      }
     }
 
     const z = rawZ + boost;
