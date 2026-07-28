@@ -102,7 +102,6 @@ async function uploadRecording(blob: Blob, label: string, mimeType: string) {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: blob,
-    keepalive: true,
   });
   if (!putRes.ok) {
     throw new Error(`upload failed: ${putRes.status}`);
