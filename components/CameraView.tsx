@@ -200,6 +200,11 @@ export function CameraView({
     })();
   }, [flushKey, finalizeRecorder, beginRecording]);
 
+  const statusRef = useRef<Status>(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   useEffect(() => {
     if (autoStart) void start(initialFacing);
 
@@ -211,7 +216,7 @@ export function CameraView({
             if (!t.enabled) t.enabled = true;
           });
         }
-        if (videoRef.current && status === "ready") {
+        if (videoRef.current && statusRef.current === "ready") {
           videoRef.current.play().catch(() => {});
         }
         if (!recorderRef.current && streamRef.current && record) {
@@ -244,7 +249,7 @@ export function CameraView({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, record, autoStart, initialFacing, start, beginRecording, finalizeRecorder]);
+  }, []);
 
   const mirrored = mirrorFront && facing === "user";
 
