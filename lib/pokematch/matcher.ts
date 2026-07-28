@@ -37,6 +37,7 @@ interface GalleryMeta {
   scale: number;
   mu: number[];
   sd: number[];
+  humanMean?: number[];
 }
 
 export interface Gallery {
@@ -45,6 +46,7 @@ export interface Gallery {
   vecs: Float32Array; // [count * dim], dequantized + per-vector L2-normalized
   mu: Float32Array;
   sd: Float32Array;
+  humanMean?: Float32Array;
 }
 
 export interface FaceSubAnalysis {
@@ -87,7 +89,7 @@ export function loadGallery(): Promise<Gallery> {
         fetch(GALLERY_JSON).then((r) => r.json() as Promise<GalleryMeta>),
         fetch(GALLERY_BIN).then((r) => r.arrayBuffer()),
       ]);
-      const { species, dim, scale, mu, sd } = meta;
+      const { species, dim, scale, mu, sd, humanMean } = meta;
       const q = new Int8Array(binBuf);
       const count = species.length;
       const vecs = new Float32Array(count * dim);
@@ -101,7 +103,14 @@ export function loadGallery(): Promise<Gallery> {
         norm = Math.sqrt(norm) || 1;
         for (let d = 0; d < dim; d++) vecs[s * dim + d] /= norm; // renormalize
       }
-      return { species, dim, vecs, mu: Float32Array.from(mu), sd: Float32Array.from(sd) };
+      return {
+        species,
+        dim,
+        vecs,
+        mu: Float32Array.from(mu),
+        sd: Float32Array.from(sd),
+        humanMean: humanMean ? Float32Array.from(humanMean) : undefined,
+      };
     })();
     galleryPromise.catch(() => (galleryPromise = null));
   }
@@ -308,7 +317,7 @@ const HUB_EXCLUDE_SLUGS = new Set([
   "seaking",
 ]);
 
-/** Ranks the gallery by hybrid visual similarity (CLIP cosine + floored z-score) and returns the top K matches. */
+/** Ranks the gallery by person-specific feature deviation (subtracting human mean) + hybrid visual similarity */
 export function matchTopK(
   embedding: Float32Array,
   gallery: Gallery,
@@ -316,24 +325,56 @@ export function matchTopK(
   k = 5,
   options?: { faceAspect?: number }
 ): PokematchMatch[] {
-  const { species, dim, vecs, mu, sd } = gallery;
+  const { species, dim, vecs, mu, sd, humanMean } = gallery;
   const n = species.length;
   const faceAspect = options?.faceAspect ?? 1.15;
 
+  // Extract person's unique trait deviation vector (stripping the 86% generic human face domain baseline)
+  const uniqueEmb = new Float32Array(dim);
+  if (humanMean && humanMean.length === dim) {
+    let diffNorm = 0;
+    for (let d = 0; d < dim; d++) {
+      const v = embedding[d] - humanMean[d];
+      uniqueEmb[d] = v;
+      diffNorm += v * v;
+    }
+    diffNorm = Math.sqrt(diffNorm) || 1;
+    for (let d = 0; d < dim; d++) uniqueEmb[d] /= diffNorm;
+  } else {
+    for (let d = 0; d < dim; d++) uniqueEmb[d] = embedding[d];
+  }
+
   const dots = new Float32Array(n);
+  const uniqueDots = new Float32Array(n);
   let dotSum = 0;
+  let uniqueSum = 0;
+
   for (let s = 0; s < n; s++) {
     let dot = 0;
+    let uDot = 0;
     const off = s * dim;
-    for (let d = 0; d < dim; d++) dot += vecs[off + d] * embedding[d];
+    for (let d = 0; d < dim; d++) {
+      const v = vecs[off + d];
+      dot += v * embedding[d];
+      uDot += v * uniqueEmb[d];
+    }
     dots[s] = dot;
+    uniqueDots[s] = uDot;
     dotSum += dot;
+    uniqueSum += uDot;
   }
 
   const cosMean = dotSum / n;
+  const uniqueMean = uniqueSum / n;
   let cosVarSum = 0;
-  for (let s = 0; s < n; s++) cosVarSum += (dots[s] - cosMean) ** 2;
+  let uniqueVarSum = 0;
+
+  for (let s = 0; s < n; s++) {
+    cosVarSum += (dots[s] - cosMean) ** 2;
+    uniqueVarSum += (uniqueDots[s] - uniqueMean) ** 2;
+  }
   const cosStd = Math.sqrt(cosVarSum / n) || 1e-6;
+  const uniqueStd = Math.sqrt(uniqueVarSum / n) || 1e-6;
 
   const scored: { i: number; score: number; z: number }[] = new Array(n);
   let sumScore = 0;
@@ -348,6 +389,7 @@ export function matchTopK(
       continue;
     }
 
+    const uniqueNorm = (uniqueDots[s] - uniqueMean) / uniqueStd;
     const cosNorm = (dots[s] - cosMean) / cosStd;
     const sdEff = Math.max(sd[s] || 1e-6, 0.055);
     const zRaw = (dots[s] - mu[s]) / sdEff;
@@ -357,8 +399,8 @@ export function matchTopK(
       boost += 0.08;
     }
 
-    // Hybrid score: 60% cosine visual similarity + 30% z-score + shape boost
-    const score = 0.6 * cosNorm + 0.3 * zRaw + boost;
+    // 65% person unique trait deviation + 25% z-score + 10% raw cosine + shape boost
+    const score = 0.65 * uniqueNorm + 0.25 * zRaw + 0.10 * cosNorm + boost;
     scored[s] = { i: s, score, z: zRaw };
     sumScore += score;
   }

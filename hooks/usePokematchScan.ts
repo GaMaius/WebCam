@@ -63,23 +63,9 @@ function drawMaskedFaceCrop(
   const sy = Math.max(0, box.y);
   const sSide = Math.min(box.side, vw - sx, vh - sy);
 
-  // 1. Fill base canvas with neutral studio gray (#808080)
-  ctx.fillStyle = "#808080";
-  ctx.fillRect(0, 0, size, size);
-
-  // 2. Save context & create smooth oval face clipping path
-  ctx.save();
-  ctx.beginPath();
-  const cx = size / 2;
-  const cy = size / 2;
-  const rx = (size / 2) * 0.92;
-  const ry = (size / 2) * 0.96;
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-  ctx.clip();
-
-  // 3. Draw face crop inside oval clip
+  // Clear canvas & draw natural face crop preserving hair, face shape, and color tone
+  ctx.clearRect(0, 0, size, size);
   ctx.drawImage(source, sx, sy, sSide, sSide, 0, 0, size, size);
-  ctx.restore();
 }
 
 /** Computes face aspect ratio (height / width) from MediaPipe landmarks. */

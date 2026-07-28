@@ -47,6 +47,7 @@ def load_data():
     scale = meta["scale"]
     mu = np.array(meta.get("muRaw", meta["mu"]), dtype=np.float32)
     sd = np.array(meta.get("sdRaw", meta["sd"]), dtype=np.float32)
+    human_mean = np.array(meta.get("humanMean", []), dtype=np.float32)
 
     with open(GALLERY_BIN, "rb") as f:
         bin_data = np.frombuffer(f.read(), dtype=np.int8)
@@ -60,7 +61,7 @@ def load_data():
     with open(POKEDEX_JSON, "r", encoding="utf-8") as f:
         pokedex = json.load(f)
 
-    return meta, species, proto_vecs, mu, sd, pokedex
+    return meta, species, proto_vecs, mu, sd, human_mean, pokedex
 
 def embed_image(session, img_path):
     img = Image.open(img_path).convert("RGB")
@@ -76,12 +77,23 @@ def embed_image(session, img_path):
     norm = np.linalg.norm(out)
     return out / (norm if norm > 0 else 1.0)
 
-def match_hybrid(emb, species, proto_vecs, mu_raw, sd_raw, pokedex, k=5, sd_floor=0.055):
+def match_hybrid(emb, species, proto_vecs, mu_raw, sd_raw, human_mean, pokedex, k=5, sd_floor=0.055):
+    if len(human_mean) > 0:
+        diff = emb - human_mean
+        diff_norm = np.linalg.norm(diff)
+        unique_emb = diff / (diff_norm if diff_norm > 0 else 1.0)
+    else:
+        unique_emb = emb
+
+    unique_dots = np.dot(proto_vecs, unique_emb)
+    u_mean = np.mean(unique_dots)
+    u_std = np.std(unique_dots) if np.std(unique_dots) > 0 else 1e-6
+    unique_norm = (unique_dots - u_mean) / u_std
+
     cos = np.dot(proto_vecs, emb)
     sd_eff = np.maximum(sd_raw, sd_floor)
     z_raw = (cos - mu_raw) / sd_eff
     
-    # Standardize cosine similarity across candidates for fair weighting
     cos_mean = np.mean(cos)
     cos_std = np.std(cos) if np.std(cos) > 0 else 1e-6
     cos_norm = (cos - cos_mean) / cos_std
@@ -97,8 +109,8 @@ def match_hybrid(emb, species, proto_vecs, mu_raw, sd_raw, pokedex, k=5, sd_floo
 
         shape_boost = CHAR_SHAPE_BOOST.get(shape, 0.0)
         
-        # Hybrid score: 60% cosine similarity + 30% z-score + 10% shape boost
-        hybrid_score = 0.60 * cos_norm[i] + 0.30 * z_raw[i] + shape_boost
+        # 65% unique trait deviation + 25% z-score + 10% raw cosine + shape boost
+        hybrid_score = 0.65 * unique_norm[i] + 0.25 * z_raw[i] + 0.10 * cos_norm[i] + shape_boost
         candidates.append((slug, hybrid_score, cos[i], z_raw[i]))
 
     candidates.sort(key=lambda x: x[1], reverse=True)
@@ -159,7 +171,7 @@ def create_visual_grid(subj, face_path, matches, pokedex):
     print(f"[*] Visual grid saved to: {out_file}")
 
 def main():
-    meta, species, proto_vecs, mu_raw, sd_raw, pokedex = load_data()
+    meta, species, proto_vecs, mu_raw, sd_raw, human_mean, pokedex = load_data()
     session = ort.InferenceSession(MODEL_ONNX)
 
     subjs = ["S001", "S002", "S003", "S004", "S005", "S006"]
@@ -169,7 +181,7 @@ def main():
             continue
         face_path = imgs[0]
         emb = embed_image(session, face_path)
-        top = match_hybrid(emb, species, proto_vecs, mu_raw, sd_raw, pokedex, k=5)
+        top = match_hybrid(emb, species, proto_vecs, mu_raw, sd_raw, human_mean, pokedex, k=5)
         create_visual_grid(s, face_path, top, pokedex)
 
 if __name__ == "__main__":
