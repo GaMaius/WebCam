@@ -38,6 +38,8 @@ interface GalleryMeta {
   mu: number[];
   sd: number[];
   humanMean?: number[];
+  muUnique?: number[];
+  sdUnique?: number[];
 }
 
 export interface Gallery {
@@ -47,6 +49,8 @@ export interface Gallery {
   mu: Float32Array;
   sd: Float32Array;
   humanMean?: Float32Array;
+  muUnique?: Float32Array;
+  sdUnique?: Float32Array;
 }
 
 export interface FaceSubAnalysis {
@@ -89,7 +93,7 @@ export function loadGallery(): Promise<Gallery> {
         fetch(GALLERY_JSON).then((r) => r.json() as Promise<GalleryMeta>),
         fetch(GALLERY_BIN).then((r) => r.arrayBuffer()),
       ]);
-      const { species, dim, scale, mu, sd, humanMean } = meta;
+      const { species, dim, scale, mu, sd, humanMean, muUnique, sdUnique } = meta;
       const q = new Int8Array(binBuf);
       const count = species.length;
       const vecs = new Float32Array(count * dim);
@@ -110,6 +114,8 @@ export function loadGallery(): Promise<Gallery> {
         mu: Float32Array.from(mu),
         sd: Float32Array.from(sd),
         humanMean: humanMean ? Float32Array.from(humanMean) : undefined,
+        muUnique: muUnique ? Float32Array.from(muUnique) : undefined,
+        sdUnique: sdUnique ? Float32Array.from(sdUnique) : undefined,
       };
     })();
     galleryPromise.catch(() => (galleryPromise = null));
@@ -215,11 +221,11 @@ const OVERRIDE_BALL_SLUGS = new Set([
 ]);
 
 const CHAR_SHAPE_BOOST: Record<string, number> = {
-  humanoid: 0.22,
-  upright: 0.16,
-  heads: 0.08,
-  arms: 0.06,
-  legs: 0.04,
+  humanoid: 0.05,
+  upright: 0.02,
+  heads: 0.01,
+  arms: 0.0,
+  legs: 0.0,
   blob: -0.05,
   ball: -0.12,
   quadruped: -0.10,
@@ -325,7 +331,7 @@ export function matchTopK(
   k = 5,
   options?: { faceAspect?: number }
 ): PokematchMatch[] {
-  const { species, dim, vecs, mu, sd, humanMean } = gallery;
+  const { species, dim, vecs, mu, sd, humanMean, muUnique, sdUnique } = gallery;
   const n = species.length;
   const faceAspect = options?.faceAspect ?? 1.15;
 
@@ -389,18 +395,24 @@ export function matchTopK(
       continue;
     }
 
-    const uniqueNorm = (uniqueDots[s] - uniqueMean) / uniqueStd;
-    const cosNorm = (dots[s] - cosMean) / cosStd;
+    let zUnique = 0;
+    if (muUnique && sdUnique) {
+      const sdU = Math.max(sdUnique[s] || 1e-6, 0.035);
+      zUnique = (uniqueDots[s] - muUnique[s]) / sdU;
+    } else {
+      zUnique = (uniqueDots[s] - uniqueMean) / uniqueStd;
+    }
+
     const sdEff = Math.max(sd[s] || 1e-6, 0.055);
     const zRaw = (dots[s] - mu[s]) / sdEff;
 
     let boost = CHAR_SHAPE_BOOST[shape] ?? 0;
     if (faceAspect > 1.15 && (shape === "humanoid" || shape === "upright")) {
-      boost += 0.08;
+      boost += 0.02;
     }
 
-    // 65% person unique trait deviation + 25% z-score + 10% raw cosine + shape boost
-    const score = 0.65 * uniqueNorm + 0.25 * zRaw + 0.10 * cosNorm + boost;
+    // 60% per-species debiased unique trait z-score + 40% per-species debiased raw z-score + shape boost
+    const score = 0.60 * zUnique + 0.40 * zRaw + boost;
     scored[s] = { i: s, score, z: zRaw };
     sumScore += score;
   }
