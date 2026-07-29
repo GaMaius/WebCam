@@ -321,6 +321,12 @@ const HUB_EXCLUDE_SLUGS = new Set([
   "chi_yu",
   "goldeen",
   "seaking",
+  "koraidon",
+  "mankey",
+  "primeape",
+  "annihilape",
+  "sandslash",
+  "sandshrew",
 ]);
 
 /** Ranks the gallery by person-specific feature deviation (subtracting human mean) + hybrid visual similarity */
@@ -391,6 +397,12 @@ export function matchTopK(
     const shape = OVERRIDE_BALL_SLUGS.has(slug) ? "ball" : rawShape;
 
     if (NON_HUMAN_EXCLUDE_SHAPES.has(shape) || HUB_EXCLUDE_SLUGS.has(slug)) {
+      scored[s] = { i: s, score: -999, z: -999 };
+      continue;
+    }
+
+    // Dampen low-baseline monster outliers (species with mu < 0.25)
+    if (mu[s] < 0.25) {
       scored[s] = { i: s, score: -999, z: -999 };
       continue;
     }
