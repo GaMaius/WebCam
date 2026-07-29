@@ -425,7 +425,43 @@ export function matchTopK(
   const stdScore = Math.sqrt(varScore / n) || 1;
 
   scored.sort((a, b) => b.score - a.score);
-  const topSlice = scored.slice(0, k);
+
+  // NMS Diversity Reranking: suppress species with pairwise similarity >= 0.72 with higher-ranked picks
+  const topSlice: { i: number; score: number; z: number }[] = [];
+  const selectedVecs: Float32Array[] = [];
+
+  for (const item of scored) {
+    if (topSlice.length >= k) break;
+    if (item.score <= -900) continue;
+
+    const off = item.i * dim;
+    let tooSimilar = false;
+    for (const selV of selectedVecs) {
+      let dot = 0;
+      for (let d = 0; d < dim; d++) dot += vecs[off + d] * selV[d];
+      if (dot >= 0.72) {
+        tooSimilar = true;
+        break;
+      }
+    }
+
+    if (!tooSimilar) {
+      topSlice.push(item);
+      const v = vecs.slice(off, off + dim);
+      selectedVecs.push(v);
+    }
+  }
+
+  // Fallback if NMS suppressed too many candidates
+  if (topSlice.length < k) {
+    for (const item of scored) {
+      if (topSlice.length >= k) break;
+      if (item.score > -900 && !topSlice.includes(item)) {
+        topSlice.push(item);
+      }
+    }
+  }
+
   const topSz = topSlice.length > 0 ? (topSlice[0].score - meanScore) / stdScore : 0;
 
   return topSlice.map(({ i, score, z }) => {
