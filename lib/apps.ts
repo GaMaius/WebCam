@@ -6,7 +6,7 @@
 // route) — the home page renders straight from this list, so it scales without
 // touching layout code.
 
-export type AppIconKey = "pulse" | "palette" | "pokeball";
+export type AppIconKey = "pulse" | "palette" | "pokeball" | "vrm";
 
 export interface AppMeta {
   /** Route slug under "/" (e.g. "heartpulse" -> /heartpulse). */
@@ -48,4 +48,13 @@ export const APPS: AppMeta[] = [
     accent: "#d64541",
     icon: "pokeball",
   },
+  {
+    slug: "vrmmotion",
+    title: "VRM Capture",
+    subtitle: "3D · 모션캡쳐",
+    desc: "웹캠으로 내 얼굴과 포즈를 실시간 추적해 VRM 3D 캐릭터 모델을 움직이고 연출합니다.",
+    accent: "#7b52b9",
+    icon: "vrm",
+  },
 ];
+

@@ -627,6 +627,103 @@ export async function drawPokematchCard(
   drawFooter(ctx);
 }
 
+export interface VrmMotionResult {
+  snapshotDataUrl: string;
+  vrmName?: string;
+  fps?: number;
+  faceTracked?: boolean;
+  poseTracked?: boolean;
+  handTracked?: boolean;
+  measuredAt?: string;
+}
+
+const VRM_ACCENT = "#7b52b9";
+
+export async function drawVrmMotionCard(
+  canvas: HTMLCanvasElement,
+  result: VrmMotionResult
+): Promise<void> {
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const startY = drawShell(ctx, { appName: "VRM Capture", accent: VRM_ACCENT, measuredAt: result.measuredAt });
+
+  const cardX = PAD;
+  const cardW = W - PAD * 2;
+
+  // 1. Snapshot Container (Y: startY, H: 640)
+  const snapY = startY;
+  const snapH = 640;
+  roundRect(ctx, cardX, snapY, cardW, snapH, 28);
+  ctx.fillStyle = COL.surface;
+  ctx.fill();
+  ctx.strokeStyle = COL.surfaceBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  if (result.snapshotDataUrl) {
+    const img = await loadImage(result.snapshotDataUrl);
+    if (img) {
+      ctx.save();
+      roundRect(ctx, cardX + 8, snapY + 8, cardW - 16, snapH - 16, 24);
+      ctx.clip();
+      
+      const aspectImg = img.width / img.height;
+      const aspectBox = (cardW - 16) / (snapH - 16);
+      let renderW = cardW - 16;
+      let renderH = snapH - 16;
+      let offX = cardX + 8;
+      let offY = snapY + 8;
+
+      if (aspectImg > aspectBox) {
+        renderW = (snapH - 16) * aspectImg;
+        offX = cardX + 8 - (renderW - (cardW - 16)) / 2;
+      } else {
+        renderH = (cardW - 16) / aspectImg;
+        offY = snapY + 8 - (renderH - (snapH - 16)) / 2;
+      }
+
+      ctx.drawImage(img, offX, offY, renderW, renderH);
+      ctx.restore();
+    }
+  }
+
+  // 2. Motion Stats & Info Block (Y: snapY + snapH + 24, H: 240)
+  const infoY = snapY + snapH + 24;
+  const infoH = 240;
+  roundRect(ctx, cardX, infoY, cardW, infoH, 24);
+  ctx.fillStyle = COL.surface;
+  ctx.fill();
+  ctx.strokeStyle = COL.surfaceBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const innerX = cardX + 32;
+  ctx.fillStyle = VRM_ACCENT;
+  ctx.font = `700 24px ${SANS}`;
+  ctx.fillText("실시간 AI 3D 모션캡쳐 리포트", innerX, infoY + 44);
+
+  const gap = 16;
+  const statW = (cardW - 64 - gap * 2) / 3;
+  const statsY = infoY + 68;
+
+  const vrmLabel = result.vrmName || "Sample Avatar";
+  const fpsLabel = result.fps ? `${Math.round(result.fps)} FPS` : "60 FPS";
+  const trackingModes = [
+    result.faceTracked !== false ? "얼굴" : null,
+    result.poseTracked !== false ? "포즈" : null,
+    result.handTracked ? "손" : null,
+  ].filter(Boolean).join(" · ") || "전신 모션";
+
+  drawStat(ctx, innerX, statsY, statW, "캐릭터 아바타", vrmLabel, { monoValue: false });
+  drawStat(ctx, innerX + statW + gap, statsY, statW, "캡처 프레임", fpsLabel, { monoValue: true });
+  drawStat(ctx, innerX + (statW + gap) * 2, statsY, statW, "트래킹 센서", trackingModes, { monoValue: false });
+
+  drawFooter(ctx);
+}
+
 export function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
