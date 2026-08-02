@@ -2,6 +2,7 @@
 
 import React, { useRef } from "react";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
+import styles from "./VrmControlPanel.module.css";
 
 interface VrmControlPanelProps {
   bgStyle: BgStyle;
@@ -38,33 +39,27 @@ export function VrmControlPanel({
   };
 
   return (
-    <div className="bg-[#161824]/90 backdrop-blur-md border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col gap-4 text-white">
+    <div className={styles.panel} style={{ backgroundColor: "#fffdf7", color: "#1c1f15" }}>
       {/* Header Info */}
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-xs uppercase tracking-wider text-[#92A9E1] font-semibold">
-            Active Avatar
-          </span>
-          <h3 className="text-lg font-bold truncate max-w-[200px] sm:max-w-[300px]">
-            {vrmName}
-          </h3>
+      <div className={styles.panelHeader}>
+        <div className={styles.avatarNameGroup}>
+          <span className={styles.subText} style={{ color: "#7b52b9" }}>Active Avatar</span>
+          <h3 className={styles.vrmTitle} style={{ color: "#1c1f15" }}>{vrmName}</h3>
         </div>
-        <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs font-mono text-emerald-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div className={styles.fpsBadge} style={{ color: "#059669" }}>
+          <span className={styles.fpsDot} />
           {Math.round(fps)} FPS
         </div>
       </div>
 
-      <hr className="border-white/10" />
+      <hr className={styles.divider} />
 
       {/* Controls Group */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className={styles.controlGrid}>
         {/* Background Setting */}
-        <div>
-          <label className="text-xs font-medium text-white/60 mb-1.5 block">
-            배경 모드 (Studio / Chroma)
-          </label>
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-white/5 border border-white/10 rounded-xl">
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>배경 모드 (Studio / Chroma)</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
             {(
               [
                 { id: "dark", label: "스튜디오" },
@@ -75,11 +70,13 @@ export function VrmControlPanel({
               <button
                 key={mode.id}
                 onClick={() => onBgStyleChange(mode.id)}
-                className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
-                  bgStyle === mode.id
-                    ? "bg-[#7b52b9] text-white shadow-md"
-                    : "text-white/70 hover:text-white hover:bg-white/5"
+                className={`${styles.modeBtn} ${
+                  bgStyle === mode.id ? styles.modeBtnActive : ""
                 }`}
+                style={{
+                  color: bgStyle === mode.id ? "#ffffff" : "#444838",
+                  backgroundColor: bgStyle === mode.id ? "#7b52b9" : "transparent"
+                }}
               >
                 {mode.label}
               </button>
@@ -88,24 +85,25 @@ export function VrmControlPanel({
         </div>
 
         {/* Custom VRM Upload */}
-        <div>
-          <label className="text-xs font-medium text-white/60 mb-1.5 block">
-            커스텀 .vrm 아바타
-          </label>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>커스텀 .vrm 아바타</label>
           <input
             ref={fileInputRef}
             type="file"
             accept=".vrm"
             className="hidden"
+            style={{ display: "none" }}
             onChange={handleFileChange}
           />
-          <div className="flex gap-2">
+          <div className={styles.uploadRow}>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex-1 py-1.5 px-3 bg-white/10 hover:bg-white/20 border border-white/15 rounded-xl text-xs font-semibold text-white transition-all flex items-center justify-center gap-1.5"
+              className={styles.uploadBtn}
+              style={{ color: "#1c1f15", backgroundColor: "#fbf7ec" }}
             >
               <svg
-                className="w-4 h-4"
+                width="16"
+                height="16"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -122,7 +120,8 @@ export function VrmControlPanel({
             {isCustomLoaded && (
               <button
                 onClick={onResetDefault}
-                className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 rounded-xl text-xs font-medium transition-all"
+                className={styles.resetBtn}
+                style={{ color: "#dc2626" }}
                 title="기본 아바타로 복원"
               >
                 초기화
@@ -133,12 +132,10 @@ export function VrmControlPanel({
       </div>
 
       {/* Action Button */}
-      <button
-        onClick={onTakeSnapshot}
-        className="w-full py-3 bg-gradient-to-r from-[#7b52b9] to-[#92A9E1] hover:brightness-110 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
-      >
+      <button onClick={onTakeSnapshot} className={styles.captureBtn} style={{ color: "#ffffff", backgroundColor: "#7b52b9" }}>
         <svg
-          className="w-5 h-5"
+          width="20"
+          height="20"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -156,7 +153,7 @@ export function VrmControlPanel({
             d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
           />
         </svg>
-        현재 아바타 포즈 캡처 &amp; 리포트 생성
+        현재 아바타 포즈 캡처 및 리포트 생성
       </button>
     </div>
   );

@@ -10,6 +10,7 @@ import { useVrmMotionScan } from "@/hooks/useVrmMotionScan";
 import { drawVrmMotionCard, VrmMotionResult } from "@/lib/resultCard";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
 import type { VRM } from "@pixiv/three-vrm";
+import styles from "./page.module.css";
 
 const ACCENT = "#7b52b9";
 
@@ -90,32 +91,28 @@ export default function VrmMotionPage() {
   }, [capturedResult]);
 
   return (
-    <ModuleShell
-      eyebrow="3D · 모션캡쳐"
-      title="VRM Capture"
-      accent={ACCENT}
-    >
-      <div className="flex flex-col gap-6 max-w-6xl mx-auto w-full pb-12">
+    <ModuleShell eyebrow="3D · 모션캡쳐" title="VRM Capture" accent={ACCENT}>
+      <div className={styles.container}>
         {/* Main Grid: Camera View + VRM 3D Canvas */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        <div className={styles.grid}>
           {/* Left: Camera Feed */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#92A9E1] flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                Live Camera Input
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <span className={styles.cardTitle}>
+                <span className={styles.liveDot} />
+                실시간 웹캠 입력
               </span>
               <button
                 onClick={() =>
                   setCameraFacing((f) => (f === "user" ? "environment" : "user"))
                 }
-                className="text-xs text-white/70 hover:text-white bg-white/10 px-2.5 py-1 rounded-lg border border-white/10 transition-all"
+                className={styles.switchBtn}
               >
                 {cameraFacing === "user" ? "후면 카메라 전환" : "전면 카메라 전환"}
               </button>
             </div>
 
-            <div className="relative aspect-video sm:aspect-square rounded-2xl overflow-hidden bg-black/60 border border-white/10 shadow-lg">
+            <div className={styles.mediaFrame}>
               <CameraView
                 autoStart={true}
                 initialFacing={cameraFacing}
@@ -123,48 +120,42 @@ export default function VrmMotionPage() {
               />
 
               {/* Status Overlay */}
-              <div className="absolute top-3 left-3 right-3 flex justify-between items-center pointer-events-none">
-                <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full text-xs text-white border border-white/15 flex gap-2 items-center">
+              <div className={styles.statusOverlay}>
+                <div className={styles.sensorTags}>
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      isFaceTracked ? "bg-emerald-400" : "bg-white/30"
+                    className={`${styles.tagDot} ${
+                      isFaceTracked ? styles.tagDotActive : ""
                     }`}
                   />
                   <span>Face</span>
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      isPoseTracked ? "bg-emerald-400" : "bg-white/30"
+                    className={`${styles.tagDot} ${
+                      isPoseTracked ? styles.tagDotActive : ""
                     }`}
                   />
                   <span>Pose</span>
                 </div>
                 {isLoadingModels && (
-                  <div className="bg-[#7b52b9]/90 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-md animate-pulse">
-                    AI 모델 준비 중...
-                  </div>
+                  <div className={styles.loadingBadge}>AI 트래킹 모델 로딩 중...</div>
                 )}
               </div>
             </div>
           </div>
 
           {/* Right: 3D VRM Canvas */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#92A9E1]">
-                3D VRM Avatar View
-              </span>
-              <span className="text-xs text-white/50">
-                마우스 / 터치로 카메라 회전 가능
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <span className={styles.cardTitle}>3D VRM 캐릭터 아바타</span>
+              <span className={styles.switchBtn} style={{ cursor: "default" }}>
+                마우스 드래그로 회전
               </span>
             </div>
-            <div className="w-full aspect-video sm:aspect-square">
-              <VrmCanvas
-                ref={canvasRef}
-                bgStyle={bgStyle}
-                initialVrmUrl="/models/avatar.vrm"
-                onVrmLoaded={handleVrmLoaded}
-              />
-            </div>
+            <VrmCanvas
+              ref={canvasRef}
+              bgStyle={bgStyle}
+              initialVrmUrl="/models/avatar.vrm"
+              onVrmLoaded={handleVrmLoaded}
+            />
           </div>
         </div>
 
@@ -182,51 +173,47 @@ export default function VrmMotionPage() {
 
         {/* Capture Result Modal */}
         {capturedResult && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-[#161824] border border-white/15 rounded-3xl p-6 max-w-lg w-full flex flex-col gap-5 shadow-2xl relative">
-              <div className="flex items-center justify-between">
+          <div className={styles.modalOverlay}>
+            <div className={styles.modalContent}>
+              <div className={styles.modalHeader}>
                 <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#7b52b9]">
-                    VRM Capture Result
-                  </span>
-                  <h2 className="text-xl font-bold text-white">모션 캡쳐 스냅샷 리포트</h2>
+                  <span className={styles.subText}>VRM Capture Result</span>
+                  <h2 className={styles.modalTitle}>모션 캡쳐 스냅샷 리포트</h2>
                 </div>
                 <button
                   onClick={() => setCapturedResult(null)}
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
+                  className={styles.closeBtn}
                 >
                   ✕
                 </button>
               </div>
 
               {/* Preview Image */}
-              <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black/50 aspect-[4/3]">
+              <div className={styles.previewImageFrame}>
                 <img
                   src={capturedResult.snapshotDataUrl}
                   alt="Captured VRM Pose"
-                  className="w-full h-full object-contain"
+                  className={styles.previewImage}
                 />
               </div>
 
               {/* Stats Summary */}
-              <div className="grid grid-cols-3 gap-2 bg-white/5 p-3 rounded-2xl border border-white/10 text-center">
+              <div className={styles.statsGrid}>
                 <div>
-                  <div className="text-[11px] text-white/50">아바타</div>
-                  <div className="text-xs font-bold text-white truncate">
-                    {capturedResult.vrmName}
-                  </div>
+                  <div className={styles.statLabel}>아바타</div>
+                  <div className={styles.statVal}>{capturedResult.vrmName}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] text-white/50">프레임</div>
-                  <div className="text-xs font-bold text-emerald-400">
+                  <div className={styles.statLabel}>프레임</div>
+                  <div className={styles.statVal} style={{ color: "#34d399" }}>
                     {Math.round(capturedResult.fps || 0)} FPS
                   </div>
                 </div>
                 <div>
-                  <div className="text-[11px] text-white/50">트래킹</div>
-                  <div className="text-xs font-bold text-purple-300">
+                  <div className={styles.statLabel}>트래킹 센서</div>
+                  <div className={styles.statVal} style={{ color: "#c084fc" }}>
                     {capturedResult.faceTracked && capturedResult.poseTracked
-                      ? "Face+Pose"
+                      ? "Face + Pose"
                       : capturedResult.faceTracked
                       ? "Face"
                       : "Pose"}

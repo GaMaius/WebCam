@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { VRMSceneManager, BgStyle } from "@/lib/vrm/vrmScene";
 import type { VRM } from "@pixiv/three-vrm";
+import styles from "./VrmCanvas.module.css";
 
 export interface VrmCanvasRef {
   loadVRM: (urlOrBuffer: string | ArrayBuffer) => Promise<VRM>;
@@ -43,6 +44,14 @@ export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
       sceneManagerRef.current = manager;
       manager.setBgStyle(bgStyle);
 
+      // Force initial size calculation
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        manager.resize(rect.width, rect.height);
+      } else {
+        manager.resize(400, 300);
+      }
+
       // Resize observer
       const resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
@@ -52,7 +61,9 @@ export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
           }
         }
       });
-      resizeObserver.observe(canvas.parentElement || canvas);
+      if (canvas.parentElement) {
+        resizeObserver.observe(canvas.parentElement);
+      }
 
       // Load initial model
       if (initialVrmUrl) {
@@ -80,8 +91,8 @@ export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
     }, [bgStyle]);
 
     return (
-      <div className="relative w-full h-full min-h-[350px] bg-[#0f111e] rounded-2xl overflow-hidden shadow-inner border border-white/10">
-        <canvas ref={canvasRef} className="w-full h-full block touch-none" />
+      <div className={styles.canvasWrap}>
+        <canvas ref={canvasRef} className={styles.canvas} />
       </div>
     );
   }
