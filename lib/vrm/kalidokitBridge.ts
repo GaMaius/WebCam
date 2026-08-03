@@ -20,9 +20,9 @@ function getNode(vrm: VRM, boneName: any) {
 }
 
 // Deadzone & Low-Pass Filter constants to eliminate micro-jittering when still
-const ROTATION_DEADZONE_RAD = 0.025; // ~1.4 degrees deadzone threshold
-const SLERP_SPEED = 0.15; // Smooth exponential moving average speed
-const FACE_ROT_SPEED = 0.2;
+const ROTATION_DEADZONE_RAD = 0.02; // ~1.1 degrees deadzone threshold
+const SLERP_SPEED = 0.18; // Smooth exponential moving average speed
+const FACE_ROT_SPEED = 0.25;
 
 /**
  * Apply Kalidokit tracking solved results to a three-vrm instance with Deadzone & Mirroring.
@@ -38,19 +38,17 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (faceRig) {
-      // Head & Neck Rotation with Mirroring (-x Pitch, -y Yaw, -z Roll) & Deadzone
+      // Head & Neck Rotation using Standard Kalidokit YXZ Euler & Deadzone
       rotateHeadAndNeck(vrm, faceRig.head);
 
-      // Expressions (Eye Blink & Mouth Shape with Thresholds)
+      // Expressions (Eye Blink & Mouth Shape)
       if (vrm.expressionManager) {
-        // Correct Eye Mirroring:
-        // User Right Eye -> VRM blinkRight
-        // User Left Eye -> VRM blinkLeft
-        const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+        // Standard eye blink mapping
         const blinkLeft = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
+        const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
 
-        vrm.expressionManager.setValue("blinkRight", blinkRight);
         vrm.expressionManager.setValue("blinkLeft", blinkLeft);
+        vrm.expressionManager.setValue("blinkRight", blinkRight);
 
         // Mouth blendshapes with 0.08 cutoff deadzone
         if (faceRig.mouth && faceRig.mouth.shape) {
@@ -78,24 +76,26 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      // Hips & Spine (Mirror X, Y and Z for mirrored camera view)
-      rotateBoneWithDeadzone(vrm, "hips", mirrorRotation(extractRotation(poseRig.Hips)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "spine", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "chest", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
+      // Hips & Spine
+      rotateBoneWithDeadzone(vrm, "hips", extractRotation(poseRig.Hips), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "spine", extractRotation(poseRig.Spine), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "chest", extractRotation(poseRig.Spine), SLERP_SPEED);
 
-      // Arms (Note: Swap Left & Right for mirrored webcam perspective)
-      rotateBoneWithDeadzone(vrm, "leftUpperArm", mirrorRotation(extractRotation(poseRig.RightUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerArm", mirrorRotation(extractRotation(poseRig.RightLowerArm)), SLERP_SPEED);
+      // Left Arm
+      rotateBoneWithDeadzone(vrm, "leftUpperArm", extractRotation(poseRig.LeftUpperArm), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerArm", extractRotation(poseRig.LeftLowerArm), SLERP_SPEED);
 
-      rotateBoneWithDeadzone(vrm, "rightUpperArm", mirrorRotation(extractRotation(poseRig.LeftUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerArm", mirrorRotation(extractRotation(poseRig.LeftLowerArm)), SLERP_SPEED);
+      // Right Arm
+      rotateBoneWithDeadzone(vrm, "rightUpperArm", extractRotation(poseRig.RightUpperArm), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerArm", extractRotation(poseRig.RightLowerArm), SLERP_SPEED);
 
-      // Legs (Swap Left & Right for mirrored webcam perspective)
-      rotateBoneWithDeadzone(vrm, "leftUpperLeg", mirrorRotation(extractRotation(poseRig.RightUpperLeg)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerLeg", mirrorRotation(extractRotation(poseRig.RightLowerLeg)), SLERP_SPEED);
+      // Left Leg
+      rotateBoneWithDeadzone(vrm, "leftUpperLeg", extractRotation(poseRig.LeftUpperLeg), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerLeg", extractRotation(poseRig.LeftLowerLeg), SLERP_SPEED);
 
-      rotateBoneWithDeadzone(vrm, "rightUpperLeg", mirrorRotation(extractRotation(poseRig.LeftUpperLeg)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerLeg", mirrorRotation(extractRotation(poseRig.LeftLowerLeg)), SLERP_SPEED);
+      // Right Leg
+      rotateBoneWithDeadzone(vrm, "rightUpperLeg", extractRotation(poseRig.RightUpperLeg), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerLeg", extractRotation(poseRig.RightLowerLeg), SLERP_SPEED);
     }
   }
 }
@@ -110,21 +110,12 @@ function clampThreshold(val: number, low: number, high: number): number {
   return (val - low) / (high - low);
 }
 
-function mirrorRotation(rot: { x: number; y: number; z: number } | undefined) {
-  if (!rot) return undefined;
-  return {
-    x: -rot.x,
-    y: -rot.y,
-    z: -rot.z,
-  };
-}
-
 function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number }) {
-  // Mirror X Pitch, Y Yaw, and Z Roll for mirrored selfie webcam tracking
+  // Use standard YXZ Euler rotation order for head kinematics without gimbal flips
   const headNode = getNode(vrm, "head");
   if (headNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(-headRot.x, -headRot.y, -headRot.z, "XYZ")
+      new THREE.Euler(headRot.x, headRot.y, headRot.z, "YXZ")
     );
     if (headNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       headNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
@@ -134,7 +125,7 @@ function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number 
   const neckNode = getNode(vrm, "neck");
   if (neckNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(-headRot.x * 0.3, -headRot.y * 0.3, -headRot.z * 0.3, "XYZ")
+      new THREE.Euler(headRot.x * 0.3, headRot.y * 0.3, headRot.z * 0.3, "YXZ")
     );
     if (neckNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       neckNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
@@ -163,7 +154,8 @@ function rotateBoneWithDeadzone(
   const boneNode = getNode(vrm, boneName);
   if (!boneNode) return;
 
-  const targetEuler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "XYZ");
+  // Use YXZ Euler order for stable bone kinematics
+  const targetEuler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "YXZ");
   const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
 
   // Deadzone filter: Ignore tiny rotational fluctuations
