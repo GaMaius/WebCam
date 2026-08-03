@@ -11,11 +11,12 @@ export interface LandmarkFrameData {
   rightHandLandmarks?: NormalizedLandmark[];
 }
 
-/**
- * Helper to smoothly interpolate angles or vectors to prevent jittering.
- */
-function lerp(current: number, target: number, speed: number = 0.3): number {
-  return current + (target - current) * speed;
+function getNode(vrm: VRM, boneName: any) {
+  if (!vrm.humanoid) return null;
+  return (
+    vrm.humanoid.getNormalizedBoneNode(boneName) ||
+    vrm.humanoid.getRawBoneNode(boneName)
+  );
 }
 
 /**
@@ -33,11 +34,27 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
 
     if (faceRig) {
       // Head Rotation
-      const headNode = vrm.humanoid?.getRawBoneNode("head");
+      const headNode = getNode(vrm, "head");
       if (headNode) {
-        headNode.rotation.x = lerp(headNode.rotation.x, faceRig.head.x, 0.4);
-        headNode.rotation.y = lerp(headNode.rotation.y, faceRig.head.y, 0.4);
-        headNode.rotation.z = lerp(headNode.rotation.z, faceRig.head.z, 0.4);
+        const euler = new THREE.Euler(
+          faceRig.head.x,
+          faceRig.head.y,
+          faceRig.head.z,
+          "XYZ"
+        );
+        headNode.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), 0.4);
+      }
+
+      // Neck Rotation
+      const neckNode = getNode(vrm, "neck");
+      if (neckNode) {
+        const euler = new THREE.Euler(
+          faceRig.head.x * 0.3,
+          faceRig.head.y * 0.3,
+          faceRig.head.z * 0.3,
+          "XYZ"
+        );
+        neckNode.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), 0.4);
       }
 
       // Expressions (Eye Blink, Mouth A/I/U/E/O)
@@ -65,7 +82,7 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      // Spine / Chest / Hips
+      // Hips & Spine
       rotateBone(vrm, "hips", extractRotation(poseRig.Hips), 0.3);
       rotateBone(vrm, "spine", extractRotation(poseRig.Spine), 0.3);
       rotateBone(vrm, "chest", extractRotation(poseRig.Spine), 0.3);
@@ -85,20 +102,6 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
       // Right Leg
       rotateBone(vrm, "rightUpperLeg", extractRotation(poseRig.RightUpperLeg), 0.3);
       rotateBone(vrm, "rightLowerLeg", extractRotation(poseRig.RightLowerLeg), 0.3);
-    }
-  }
-
-  // 3. Hands (Optional)
-  if (frame.leftHandLandmarks) {
-    const leftHandRig = Kalidokit.Hand.solve(frame.leftHandLandmarks, "Left");
-    if (leftHandRig) {
-      applyHandBones(vrm, leftHandRig, "left");
-    }
-  }
-  if (frame.rightHandLandmarks) {
-    const rightHandRig = Kalidokit.Hand.solve(frame.rightHandLandmarks, "Right");
-    if (rightHandRig) {
-      applyHandBones(vrm, rightHandRig, "right");
     }
   }
 }
@@ -121,24 +124,11 @@ function rotateBone(
   speed: number = 0.3
 ) {
   if (!rotation) return;
-  const boneNode = vrm.humanoid?.getRawBoneNode(boneName);
+  const boneNode = getNode(vrm, boneName);
   if (!boneNode) return;
 
   const euler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "XYZ");
   const targetQuaternion = new THREE.Quaternion().setFromEuler(euler);
 
   boneNode.quaternion.slerp(targetQuaternion, speed);
-}
-
-function applyHandBones(vrm: VRM, handRig: any, side: "left" | "right") {
-  const prefix = side === "left" ? "left" : "right";
-
-  // Wrist
-  if (handRig.Wrist) {
-    const wristNode = vrm.humanoid?.getRawBoneNode(`${prefix}Hand` as any);
-    if (wristNode) {
-      const euler = new THREE.Euler(handRig.Wrist.x, handRig.Wrist.y, handRig.Wrist.z);
-      wristNode.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), 0.3);
-    }
-  }
 }

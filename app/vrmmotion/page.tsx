@@ -93,9 +93,9 @@ export default function VrmMotionPage() {
   return (
     <ModuleShell eyebrow="3D · 모션캡쳐" title="VRM Capture" accent={ACCENT}>
       <div className={styles.container}>
-        {/* Main Grid: Camera View + VRM 3D Canvas */}
-        <div className={styles.grid}>
-          {/* Left: Camera Feed */}
+        {/* Main Stack: Top Camera View -> Bottom 3D VRM Canvas */}
+        <div className={styles.stack}>
+          {/* Top: Live Camera Feed */}
           <div className={styles.card}>
             <div className={styles.cardHeader}>
               <span className={styles.cardTitle}>
@@ -142,7 +142,7 @@ export default function VrmMotionPage() {
             </div>
           </div>
 
-          {/* Right: 3D VRM Canvas */}
+          {/* Bottom: 3D VRM Character Avatar */}
           <div className={styles.card}>
             <div className={styles.cardHeader}>
               <span className={styles.cardTitle}>3D VRM 캐릭터 아바타</span>
