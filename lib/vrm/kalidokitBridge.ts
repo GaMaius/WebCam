@@ -19,8 +19,13 @@ function getNode(vrm: VRM, boneName: any) {
   );
 }
 
+// Deadzone & Low-Pass Filter constants to eliminate micro-jittering when still
+const ROTATION_DEADZONE_RAD = 0.025; // ~1.4 degrees deadzone threshold
+const SLERP_SPEED = 0.15; // Smooth exponential moving average speed
+const FACE_ROT_SPEED = 0.2;
+
 /**
- * Apply Kalidokit tracking solved results to a three-vrm instance.
+ * Apply Kalidokit tracking solved results to a three-vrm instance with Deadzone & Smoothing filters.
  */
 export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
   if (!vrm) return;
@@ -33,49 +38,38 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (faceRig) {
-      // Head Rotation
-      const headNode = getNode(vrm, "head");
-      if (headNode) {
-        const euler = new THREE.Euler(
-          faceRig.head.x,
-          faceRig.head.y,
-          faceRig.head.z,
-          "XYZ"
-        );
-        headNode.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), 0.4);
-      }
+      // Head & Neck Rotation with Deadzone
+      rotateHeadAndNeck(vrm, faceRig.head);
 
-      // Neck Rotation
-      const neckNode = getNode(vrm, "neck");
-      if (neckNode) {
-        const euler = new THREE.Euler(
-          faceRig.head.x * 0.3,
-          faceRig.head.y * 0.3,
-          faceRig.head.z * 0.3,
-          "XYZ"
-        );
-        neckNode.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), 0.4);
-      }
-
-      // Expressions (Eye Blink, Mouth A/I/U/E/O)
+      // Expressions (Eye Blink & Mouth Shape with Thresholds)
       if (vrm.expressionManager) {
-        vrm.expressionManager.setValue("blinkLeft", 1 - faceRig.eye.l);
-        vrm.expressionManager.setValue("blinkRight", 1 - faceRig.eye.r);
+        // Eye Blink Thresholds (removes eye flutter)
+        const blinkL = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
+        const blinkR = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
 
-        // Mouth blendshapes
-        if (faceRig.mouth) {
-          vrm.expressionManager.setValue("aa", faceRig.mouth.shape.A);
-          vrm.expressionManager.setValue("ih", faceRig.mouth.shape.I);
-          vrm.expressionManager.setValue("ou", faceRig.mouth.shape.U);
-          vrm.expressionManager.setValue("ee", faceRig.mouth.shape.E);
-          vrm.expressionManager.setValue("oh", faceRig.mouth.shape.O);
+        vrm.expressionManager.setValue("blinkLeft", blinkL);
+        vrm.expressionManager.setValue("blinkRight", blinkR);
+
+        // Mouth blendshapes with 0.08 cutoff deadzone
+        if (faceRig.mouth && faceRig.mouth.shape) {
+          vrm.expressionManager.setValue("aa", cutoff(faceRig.mouth.shape.A, 0.08));
+          vrm.expressionManager.setValue("ih", cutoff(faceRig.mouth.shape.I, 0.08));
+          vrm.expressionManager.setValue("ou", cutoff(faceRig.mouth.shape.U, 0.08));
+          vrm.expressionManager.setValue("ee", cutoff(faceRig.mouth.shape.E, 0.08));
+          vrm.expressionManager.setValue("oh", cutoff(faceRig.mouth.shape.O, 0.08));
         }
       }
     }
   }
 
   // 2. Pose Kinematics
-  if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 0 && frame.poseLandmarks) {
+  if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
+    // Visibility check: if key landmarks are hidden/missing, skip update to prevent ghost motion
+    const hipLandmark = frame.poseLandmarks[23] || frame.poseLandmarks[24];
+    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.25) {
+      return;
+    }
+
     const poseRig = Kalidokit.Pose.solve(frame.poseWorldLandmarks, frame.poseLandmarks, {
       runtime: "mediapipe",
       enableLegs: true,
@@ -83,25 +77,57 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
 
     if (poseRig) {
       // Hips & Spine
-      rotateBone(vrm, "hips", extractRotation(poseRig.Hips), 0.3);
-      rotateBone(vrm, "spine", extractRotation(poseRig.Spine), 0.3);
-      rotateBone(vrm, "chest", extractRotation(poseRig.Spine), 0.3);
+      rotateBoneWithDeadzone(vrm, "hips", extractRotation(poseRig.Hips), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "spine", extractRotation(poseRig.Spine), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "chest", extractRotation(poseRig.Spine), SLERP_SPEED);
 
       // Left Arm
-      rotateBone(vrm, "leftUpperArm", extractRotation(poseRig.LeftUpperArm), 0.4);
-      rotateBone(vrm, "leftLowerArm", extractRotation(poseRig.LeftLowerArm), 0.4);
+      rotateBoneWithDeadzone(vrm, "leftUpperArm", extractRotation(poseRig.LeftUpperArm), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerArm", extractRotation(poseRig.LeftLowerArm), SLERP_SPEED);
 
       // Right Arm
-      rotateBone(vrm, "rightUpperArm", extractRotation(poseRig.RightUpperArm), 0.4);
-      rotateBone(vrm, "rightLowerArm", extractRotation(poseRig.RightLowerArm), 0.4);
+      rotateBoneWithDeadzone(vrm, "rightUpperArm", extractRotation(poseRig.RightUpperArm), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerArm", extractRotation(poseRig.RightLowerArm), SLERP_SPEED);
 
       // Left Leg
-      rotateBone(vrm, "leftUpperLeg", extractRotation(poseRig.LeftUpperLeg), 0.3);
-      rotateBone(vrm, "leftLowerLeg", extractRotation(poseRig.LeftLowerLeg), 0.3);
+      rotateBoneWithDeadzone(vrm, "leftUpperLeg", extractRotation(poseRig.LeftUpperLeg), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerLeg", extractRotation(poseRig.LeftLowerLeg), SLERP_SPEED);
 
       // Right Leg
-      rotateBone(vrm, "rightUpperLeg", extractRotation(poseRig.RightUpperLeg), 0.3);
-      rotateBone(vrm, "rightLowerLeg", extractRotation(poseRig.RightLowerLeg), 0.3);
+      rotateBoneWithDeadzone(vrm, "rightUpperLeg", extractRotation(poseRig.RightUpperLeg), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerLeg", extractRotation(poseRig.RightLowerLeg), SLERP_SPEED);
+    }
+  }
+}
+
+function cutoff(val: number, threshold: number): number {
+  return val < threshold ? 0 : val;
+}
+
+function clampThreshold(val: number, low: number, high: number): number {
+  if (val <= low) return 0;
+  if (val >= high) return 1;
+  return (val - low) / (high - low);
+}
+
+function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number }) {
+  const headNode = getNode(vrm, "head");
+  if (headNode) {
+    const targetQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(headRot.x, headRot.y, headRot.z, "XYZ")
+    );
+    if (headNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
+      headNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
+    }
+  }
+
+  const neckNode = getNode(vrm, "neck");
+  if (neckNode) {
+    const targetQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(headRot.x * 0.3, headRot.y * 0.3, headRot.z * 0.3, "XYZ")
+    );
+    if (neckNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
+      neckNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
     }
   }
 }
@@ -117,18 +143,21 @@ function extractRotation(item: any): { x: number; y: number; z: number } | undef
   return undefined;
 }
 
-function rotateBone(
+function rotateBoneWithDeadzone(
   vrm: VRM,
   boneName: any,
   rotation: { x: number; y: number; z: number } | undefined,
-  speed: number = 0.3
+  speed: number = SLERP_SPEED
 ) {
   if (!rotation) return;
   const boneNode = getNode(vrm, boneName);
   if (!boneNode) return;
 
-  const euler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "XYZ");
-  const targetQuaternion = new THREE.Quaternion().setFromEuler(euler);
+  const targetEuler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "XYZ");
+  const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
 
-  boneNode.quaternion.slerp(targetQuaternion, speed);
+  // Deadzone filter: Ignore tiny rotational fluctuations to keep character completely still when idle
+  if (boneNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
+    boneNode.quaternion.slerp(targetQuat, speed);
+  }
 }
