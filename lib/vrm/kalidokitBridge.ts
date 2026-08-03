@@ -38,17 +38,19 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (faceRig) {
-      // Head & Neck Rotation with Mirroring (-y, -z) & Deadzone
+      // Head & Neck Rotation with Mirroring (-x Pitch, -y Yaw, -z Roll) & Deadzone
       rotateHeadAndNeck(vrm, faceRig.head);
 
       // Expressions (Eye Blink & Mouth Shape with Thresholds)
       if (vrm.expressionManager) {
-        // Eye Blink Thresholds (removes eye flutter, note mirror L/R for eye blink)
-        const blinkL = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
-        const blinkR = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
+        // Correct Eye Mirroring:
+        // User Right Eye -> VRM blinkRight
+        // User Left Eye -> VRM blinkLeft
+        const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+        const blinkLeft = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
 
-        vrm.expressionManager.setValue("blinkLeft", blinkL);
-        vrm.expressionManager.setValue("blinkRight", blinkR);
+        vrm.expressionManager.setValue("blinkRight", blinkRight);
+        vrm.expressionManager.setValue("blinkLeft", blinkLeft);
 
         // Mouth blendshapes with 0.08 cutoff deadzone
         if (faceRig.mouth && faceRig.mouth.shape) {
@@ -76,7 +78,7 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      // Hips & Spine (Mirror Y and Z for mirrored camera view)
+      // Hips & Spine (Mirror X, Y and Z for mirrored camera view)
       rotateBoneWithDeadzone(vrm, "hips", mirrorRotation(extractRotation(poseRig.Hips)), SLERP_SPEED);
       rotateBoneWithDeadzone(vrm, "spine", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
       rotateBoneWithDeadzone(vrm, "chest", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
@@ -111,18 +113,18 @@ function clampThreshold(val: number, low: number, high: number): number {
 function mirrorRotation(rot: { x: number; y: number; z: number } | undefined) {
   if (!rot) return undefined;
   return {
-    x: rot.x,
+    x: -rot.x,
     y: -rot.y,
     z: -rot.z,
   };
 }
 
 function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number }) {
-  // Mirror Y and Z for mirrored selfie webcam tracking
+  // Mirror X Pitch, Y Yaw, and Z Roll for mirrored selfie webcam tracking
   const headNode = getNode(vrm, "head");
   if (headNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(headRot.x, -headRot.y, -headRot.z, "XYZ")
+      new THREE.Euler(-headRot.x, -headRot.y, -headRot.z, "XYZ")
     );
     if (headNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       headNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
@@ -132,7 +134,7 @@ function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number 
   const neckNode = getNode(vrm, "neck");
   if (neckNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(headRot.x * 0.3, -headRot.y * 0.3, -headRot.z * 0.3, "XYZ")
+      new THREE.Euler(-headRot.x * 0.3, -headRot.y * 0.3, -headRot.z * 0.3, "XYZ")
     );
     if (neckNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       neckNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
