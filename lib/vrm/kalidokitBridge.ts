@@ -25,7 +25,7 @@ const SLERP_SPEED = 0.15; // Smooth exponential moving average speed
 const FACE_ROT_SPEED = 0.2;
 
 /**
- * Apply Kalidokit tracking solved results to a three-vrm instance with Deadzone & Smoothing filters.
+ * Apply Kalidokit tracking solved results to a three-vrm instance with Deadzone & Mirroring.
  */
 export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
   if (!vrm) return;
@@ -38,14 +38,14 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (faceRig) {
-      // Head & Neck Rotation with Deadzone
+      // Head & Neck Rotation with Mirroring (-y, -z) & Deadzone
       rotateHeadAndNeck(vrm, faceRig.head);
 
       // Expressions (Eye Blink & Mouth Shape with Thresholds)
       if (vrm.expressionManager) {
-        // Eye Blink Thresholds (removes eye flutter)
-        const blinkL = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
-        const blinkR = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+        // Eye Blink Thresholds (removes eye flutter, note mirror L/R for eye blink)
+        const blinkL = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+        const blinkR = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
 
         vrm.expressionManager.setValue("blinkLeft", blinkL);
         vrm.expressionManager.setValue("blinkRight", blinkR);
@@ -76,26 +76,24 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      // Hips & Spine
-      rotateBoneWithDeadzone(vrm, "hips", extractRotation(poseRig.Hips), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "spine", extractRotation(poseRig.Spine), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "chest", extractRotation(poseRig.Spine), SLERP_SPEED);
+      // Hips & Spine (Mirror Y and Z for mirrored camera view)
+      rotateBoneWithDeadzone(vrm, "hips", mirrorRotation(extractRotation(poseRig.Hips)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "spine", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "chest", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
 
-      // Left Arm
-      rotateBoneWithDeadzone(vrm, "leftUpperArm", extractRotation(poseRig.LeftUpperArm), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerArm", extractRotation(poseRig.LeftLowerArm), SLERP_SPEED);
+      // Arms (Note: Swap Left & Right for mirrored webcam perspective)
+      rotateBoneWithDeadzone(vrm, "leftUpperArm", mirrorRotation(extractRotation(poseRig.RightUpperArm)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerArm", mirrorRotation(extractRotation(poseRig.RightLowerArm)), SLERP_SPEED);
 
-      // Right Arm
-      rotateBoneWithDeadzone(vrm, "rightUpperArm", extractRotation(poseRig.RightUpperArm), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerArm", extractRotation(poseRig.RightLowerArm), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightUpperArm", mirrorRotation(extractRotation(poseRig.LeftUpperArm)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerArm", mirrorRotation(extractRotation(poseRig.LeftLowerArm)), SLERP_SPEED);
 
-      // Left Leg
-      rotateBoneWithDeadzone(vrm, "leftUpperLeg", extractRotation(poseRig.LeftUpperLeg), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerLeg", extractRotation(poseRig.LeftLowerLeg), SLERP_SPEED);
+      // Legs (Swap Left & Right for mirrored webcam perspective)
+      rotateBoneWithDeadzone(vrm, "leftUpperLeg", mirrorRotation(extractRotation(poseRig.RightUpperLeg)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerLeg", mirrorRotation(extractRotation(poseRig.RightLowerLeg)), SLERP_SPEED);
 
-      // Right Leg
-      rotateBoneWithDeadzone(vrm, "rightUpperLeg", extractRotation(poseRig.RightUpperLeg), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerLeg", extractRotation(poseRig.RightLowerLeg), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightUpperLeg", mirrorRotation(extractRotation(poseRig.LeftUpperLeg)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerLeg", mirrorRotation(extractRotation(poseRig.LeftLowerLeg)), SLERP_SPEED);
     }
   }
 }
@@ -110,11 +108,21 @@ function clampThreshold(val: number, low: number, high: number): number {
   return (val - low) / (high - low);
 }
 
+function mirrorRotation(rot: { x: number; y: number; z: number } | undefined) {
+  if (!rot) return undefined;
+  return {
+    x: rot.x,
+    y: -rot.y,
+    z: -rot.z,
+  };
+}
+
 function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number }) {
+  // Mirror Y and Z for mirrored selfie webcam tracking
   const headNode = getNode(vrm, "head");
   if (headNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(headRot.x, headRot.y, headRot.z, "XYZ")
+      new THREE.Euler(headRot.x, -headRot.y, -headRot.z, "XYZ")
     );
     if (headNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       headNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
@@ -124,7 +132,7 @@ function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number 
   const neckNode = getNode(vrm, "neck");
   if (neckNode) {
     const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(headRot.x * 0.3, headRot.y * 0.3, headRot.z * 0.3, "XYZ")
+      new THREE.Euler(headRot.x * 0.3, -headRot.y * 0.3, -headRot.z * 0.3, "XYZ")
     );
     if (neckNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
       neckNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
@@ -156,7 +164,7 @@ function rotateBoneWithDeadzone(
   const targetEuler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "XYZ");
   const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
 
-  // Deadzone filter: Ignore tiny rotational fluctuations to keep character completely still when idle
+  // Deadzone filter: Ignore tiny rotational fluctuations
   if (boneNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
     boneNode.quaternion.slerp(targetQuat, speed);
   }
