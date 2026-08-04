@@ -18,6 +18,8 @@ export function getB2Client(): S3Client {
     endpoint,
     region,
     credentials: { accessKeyId, secretAccessKey },
+    // Enable forcePathStyle for maximum compatibility with Backblaze B2 S3 API endpoints
+    forcePathStyle: true,
     // Some B2 S3-compatible endpoints reject the checksum headers the AWS
     // SDK v3 adds by default; only send them when the operation requires it.
     requestChecksumCalculation: "WHEN_REQUIRED",

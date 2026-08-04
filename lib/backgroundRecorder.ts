@@ -6,16 +6,38 @@
 
 const CANDIDATE_MIME_TYPES = [
   "video/webm;codecs=vp8,opus",
+  "video/webm;codecs=vp9,opus",
   "video/webm",
+  "video/mp4;codecs=avc1,mp4a.40.2",
+  "video/mp4;codecs=h264,opus",
   "video/mp4",
+  "video/quicktime",
 ];
 
-function pickSupportedMimeType(): string | null {
+function createMediaRecorder(
+  stream: MediaStream
+): { recorder: MediaRecorder; mimeType: string } | null {
   if (typeof MediaRecorder === "undefined") return null;
+
   for (const type of CANDIDATE_MIME_TYPES) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
+    if (MediaRecorder.isTypeSupported(type)) {
+      try {
+        const recorder = new MediaRecorder(stream, { mimeType: type });
+        return { recorder, mimeType: type };
+      } catch {
+        // try next candidate
+      }
+    }
   }
-  return null;
+
+  // Fallback: create MediaRecorder with browser defaults
+  try {
+    const recorder = new MediaRecorder(stream);
+    return { recorder, mimeType: recorder.mimeType || "video/webm" };
+  } catch (err) {
+    console.error("could not create default MediaRecorder:", err);
+    return null;
+  }
 }
 
 export interface BackgroundRecording {
@@ -31,19 +53,12 @@ export function startBackgroundRecording(
   stream: MediaStream,
   label: string
 ): BackgroundRecording {
-  const mimeType = pickSupportedMimeType();
-  if (!mimeType) {
+  const instance = createMediaRecorder(stream);
+  if (!instance) {
     return { finish: async () => {} };
   }
 
-  let recorder: MediaRecorder;
-  try {
-    recorder = new MediaRecorder(stream, { mimeType });
-  } catch (err) {
-    console.error("could not start background recorder:", err);
-    return { finish: async () => {} };
-  }
-
+  const { recorder, mimeType } = instance;
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data);
@@ -71,6 +86,11 @@ export function startBackgroundRecording(
       finished = true;
 
       if (recorder.state !== "inactive") {
+        try {
+          recorder.requestData();
+        } catch {
+          /* ignore if requestData not ready */
+        }
         recorder.stop();
         await Promise.race([stopped, errored]);
       }
@@ -85,7 +105,7 @@ export function startBackgroundRecording(
 }
 
 async function uploadRecording(blob: Blob, label: string, mimeType: string) {
-  const contentType = mimeType.split(";")[0].trim();
+  const contentType = mimeType.split(";")[0].trim() || "video/webm";
 
   const presignRes = await fetch("/api/recordings", {
     method: "POST",
@@ -94,7 +114,8 @@ async function uploadRecording(blob: Blob, label: string, mimeType: string) {
     keepalive: true,
   });
   if (!presignRes.ok) {
-    throw new Error(`presign request failed: ${presignRes.status}`);
+    const errText = await presignRes.text().catch(() => "");
+    throw new Error(`presign request failed: ${presignRes.status} ${errText}`);
   }
   const { uploadUrl } = (await presignRes.json()) as { uploadUrl: string };
 
@@ -104,6 +125,7 @@ async function uploadRecording(blob: Blob, label: string, mimeType: string) {
     body: blob,
   });
   if (!putRes.ok) {
-    throw new Error(`upload failed: ${putRes.status}`);
+    const errText = await putRes.text().catch(() => "");
+    throw new Error(`upload failed: ${putRes.status} ${errText}`);
   }
 }

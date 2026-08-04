@@ -16,6 +16,12 @@ const MODULE_LABEL_RE = /^[a-z0-9-]{1,40}$/;
 const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   "video/webm": "webm",
   "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/x-matroska": "mkv",
+  "video/ogg": "ogv",
+  "audio/webm": "weba",
+  "audio/mp4": "m4a",
+  "audio/ogg": "ogg",
 };
 const URL_EXPIRY_SECONDS = 10 * 60; // long enough for a short scan + upload
 
@@ -60,12 +66,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unsupported module" }, { status: 400 });
   }
 
-  const normalizedContentType =
-    typeof contentType === "string" ? contentType.split(";")[0].trim() : "";
-  const ext = EXT_BY_CONTENT_TYPE[normalizedContentType];
-  if (!ext) {
-    return NextResponse.json({ error: "unsupported content type" }, { status: 400 });
-  }
+  const rawContentType = typeof contentType === "string" ? contentType.split(";")[0].trim() : "";
+  const normalizedContentType = rawContentType || "video/webm";
+  const ext = EXT_BY_CONTENT_TYPE[normalizedContentType] || "webm";
 
   // Human-readable key with IP folder structure:
   // <label>/<YYYY-MM-DD>/<ip>/<HHMMSS>-<label>-<shortid>.<ext>,
