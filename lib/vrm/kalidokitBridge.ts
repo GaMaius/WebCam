@@ -22,6 +22,7 @@ function getNode(vrm: VRM, boneName: any) {
 // Deadzone & Low-Pass Filter constants to eliminate micro-jittering when still
 const ROTATION_DEADZONE_RAD = 0.02; // ~1.1 degrees deadzone threshold
 const SLERP_SPEED = 0.18; // Smooth exponential moving average speed
+const LEG_SLERP_SPEED = 0.12; // Extra smooth damping for legs to prevent popping
 const FACE_ROT_SPEED = 0.25;
 
 /**
@@ -66,9 +67,9 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
 
   // 2. Pose Kinematics
   if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
-    // Visibility check: if key landmarks are hidden/missing, skip update to prevent ghost motion
+    // Visibility check: if hip/spine landmarks are hidden/missing, skip update to prevent ghost motion
     const hipLandmark = frame.poseLandmarks[23] || frame.poseLandmarks[24];
-    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.25) {
+    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.3) {
       return;
     }
 
@@ -83,19 +84,26 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
       rotateBoneWithDeadzone(vrm, "spine", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
       rotateBoneWithDeadzone(vrm, "chest", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
 
-      // Arms (Swapped for mirrored webcam view)
-      rotateBoneWithDeadzone(vrm, "leftUpperArm", mirrorRotation(extractRotation(poseRig.RightUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerArm", mirrorRotation(extractRotation(poseRig.RightLowerArm)), SLERP_SPEED);
+      // Arms (Pitch X is preserved for natural up/down motion, Y and Z are mirrored)
+      rotateBoneWithDeadzone(vrm, "leftUpperArm", mirrorArmRotation(extractRotation(poseRig.RightUpperArm)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "leftLowerArm", mirrorArmRotation(extractRotation(poseRig.RightLowerArm)), SLERP_SPEED);
 
-      rotateBoneWithDeadzone(vrm, "rightUpperArm", mirrorRotation(extractRotation(poseRig.LeftUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerArm", mirrorRotation(extractRotation(poseRig.LeftLowerArm)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightUpperArm", mirrorArmRotation(extractRotation(poseRig.LeftUpperArm)), SLERP_SPEED);
+      rotateBoneWithDeadzone(vrm, "rightLowerArm", mirrorArmRotation(extractRotation(poseRig.LeftLowerArm)), SLERP_SPEED);
 
-      // Legs (Swapped for mirrored webcam view)
-      rotateBoneWithDeadzone(vrm, "leftUpperLeg", mirrorRotation(extractRotation(poseRig.RightUpperLeg)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerLeg", mirrorRotation(extractRotation(poseRig.RightLowerLeg)), SLERP_SPEED);
+      // Legs (Leg visibility check & damped rotation to eliminate full-body leg popping)
+      const kneeLandmarkLeft = frame.poseLandmarks[25];
+      const kneeLandmarkRight = frame.poseLandmarks[26];
+      const isLegsVisible =
+        (kneeLandmarkLeft?.visibility ?? 1) > 0.4 && (kneeLandmarkRight?.visibility ?? 1) > 0.4;
 
-      rotateBoneWithDeadzone(vrm, "rightUpperLeg", mirrorRotation(extractRotation(poseRig.LeftUpperLeg)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerLeg", mirrorRotation(extractRotation(poseRig.LeftUpperLeg)), SLERP_SPEED);
+      if (isLegsVisible) {
+        rotateBoneWithDeadzone(vrm, "leftUpperLeg", mirrorLegRotation(extractRotation(poseRig.RightUpperLeg)), LEG_SLERP_SPEED);
+        rotateBoneWithDeadzone(vrm, "leftLowerLeg", mirrorLegRotation(extractRotation(poseRig.RightLowerLeg)), LEG_SLERP_SPEED);
+
+        rotateBoneWithDeadzone(vrm, "rightUpperLeg", mirrorLegRotation(extractRotation(poseRig.LeftUpperLeg)), LEG_SLERP_SPEED);
+        rotateBoneWithDeadzone(vrm, "rightLowerLeg", mirrorLegRotation(extractRotation(poseRig.LeftLowerLeg)), LEG_SLERP_SPEED);
+      }
     }
   }
 }
@@ -114,6 +122,24 @@ function mirrorRotation(rot: { x: number; y: number; z: number } | undefined) {
   if (!rot) return undefined;
   return {
     x: -rot.x,
+    y: -rot.y,
+    z: -rot.z,
+  };
+}
+
+function mirrorArmRotation(rot: { x: number; y: number; z: number } | undefined) {
+  if (!rot) return undefined;
+  return {
+    x: rot.x, // Pitch X is preserved so raising arms moves up, lowering moves down
+    y: -rot.y,
+    z: -rot.z,
+  };
+}
+
+function mirrorLegRotation(rot: { x: number; y: number; z: number } | undefined) {
+  if (!rot) return undefined;
+  return {
+    x: rot.x * 0.7, // Damped pitch to prevent sudden leg popping
     y: -rot.y,
     z: -rot.z,
   };
