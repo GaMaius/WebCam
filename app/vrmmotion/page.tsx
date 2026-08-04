@@ -25,6 +25,7 @@ export default function VrmMotionPage() {
 
   const [capturedResult, setCapturedResult] = useState<VrmMotionResult | null>(null);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [flushKey, setFlushKey] = useState(0);
 
   // Motion Tracking Hook
   const { isLoadingModels, fps, isFaceTracked, isPoseTracked } = useVrmMotionScan(
@@ -80,6 +81,8 @@ export default function VrmMotionPage() {
       measuredAt: new Date().toISOString(),
     };
     setCapturedResult(result);
+    // Flush current recording clip to B2 immediately while page is active (iOS Safari safety)
+    setFlushKey((k) => k + 1);
   };
 
   const handleRenderCard = useCallback(async () => {
@@ -117,6 +120,7 @@ export default function VrmMotionPage() {
                 autoStart={true}
                 initialFacing={cameraFacing}
                 recordLabel="vrmmotion"
+                flushKey={flushKey}
                 onReady={handleCameraReady}
               />
 

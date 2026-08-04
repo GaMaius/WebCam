@@ -41,6 +41,7 @@ export function CameraView({
   audio = true,
   recordLabel,
   flushKey = 0,
+  autoFlushIntervalMs = 20000,
   onReady,
   onStopped,
   overlay,
@@ -64,12 +65,14 @@ export function CameraView({
   /** B2 key prefix for the recording. Defaults to the current route segment
    * (see deriveRecordLabel), so new apps are labeled automatically. */
   recordLabel?: string;
-  /** Bump this (e.g. on scan completion) to finalize + upload the current
+  /** Bump this (e.g. on scan completion or snapshot) to finalize + upload the current
    * recording as ONE file while the page is still active — reliable, unlike an
-   * unmount-time upload — then a fresh recording starts to keep capturing.
-   * (Webcam-on = always recording per requirement; idle/re-scan periods thus
-   * upload as extra files, an accepted trade-off for full coverage.) */
+   * unmount-time upload on iOS Safari — then a fresh recording starts to keep capturing. */
   flushKey?: number;
+  /** Automatically flush & upload recording clips periodically (default: 20 seconds).
+   * Essential for continuous apps like VRMMotion so iOS Safari devices reliably upload
+   * video clips before pagehide/unmount cancels in-flight fetches. Set to 0 to disable. */
+  autoFlushIntervalMs?: number;
   onReady?: (handle: CameraHandle) => void;
   onStopped?: () => void;
   overlay?: React.ReactNode;
@@ -184,12 +187,8 @@ export function CameraView({
     void start(next);
   }, [facing, start]);
 
-  // On scan completion the page bumps flushKey: finalize + upload the current
-  // recording as one file now (page is active → reliable upload), then start a
-  // fresh recording so the webcam keeps being captured. Per user requirement,
-  // EVERY moment the camera is on must be recorded — so idle (results-viewing)
-  // and re-scan periods are captured too, which does mean they upload as
-  // additional files (accepted trade-off for full coverage). Skipped on first render.
+  // On scan completion or snapshot, caller bumps flushKey: finalize + upload the current
+  // recording as one file now while page is active (reliable, especially on iOS Safari).
   const flushKeyRef = useRef(flushKey);
   useEffect(() => {
     if (flushKey === flushKeyRef.current) return;
@@ -199,6 +198,22 @@ export function CameraView({
       beginRecording();
     })();
   }, [flushKey, finalizeRecorder, beginRecording]);
+
+  // Periodic Auto-Flush: Automatically flushes and uploads recording every N seconds (default: 20s)
+  // so continuous apps like VRMMotion reliably upload video clips while the page is active,
+  // preventing iOS Safari from cancelling unmount-time uploads.
+  useEffect(() => {
+    if (!autoFlushIntervalMs || autoFlushIntervalMs <= 0 || status !== "ready") return;
+
+    const timer = setInterval(() => {
+      void (async () => {
+        await finalizeRecorder();
+        beginRecording();
+      })();
+    }, autoFlushIntervalMs);
+
+    return () => clearInterval(timer);
+  }, [autoFlushIntervalMs, status, finalizeRecorder, beginRecording]);
 
   const statusRef = useRef<Status>(status);
   useEffect(() => {
@@ -240,8 +255,7 @@ export function CameraView({
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("beforeunload", handlePageHide);
 
-      // Component unmount (e.g. navigating away mid-scan): finalize any
-      // in-progress recording before the stream's tracks are torn down.
+      // Component unmount: finalize any in-progress recording.
       void finalizeRecorder();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
