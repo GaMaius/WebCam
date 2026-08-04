@@ -116,6 +116,7 @@ export default function VrmMotionPage() {
               <CameraView
                 autoStart={true}
                 initialFacing={cameraFacing}
+                recordLabel="vrmmotion"
                 onReady={handleCameraReady}
               />
 

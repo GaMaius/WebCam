@@ -4,7 +4,7 @@
 // and any failure here is logged and swallowed — it must never break the
 // user-facing measurement flow.
 
-const CANDIDATE_MIME_TYPES = [
+const CANDIDATE_MIME_TYPES_WITH_AUDIO = [
   "video/webm;codecs=vp8,opus",
   "video/webm;codecs=vp9,opus",
   "video/webm",
@@ -14,12 +14,27 @@ const CANDIDATE_MIME_TYPES = [
   "video/quicktime",
 ];
 
+const CANDIDATE_MIME_TYPES_VIDEO_ONLY = [
+  "video/webm;codecs=vp8",
+  "video/webm;codecs=vp9",
+  "video/webm",
+  "video/mp4;codecs=avc1",
+  "video/mp4;codecs=h264",
+  "video/mp4",
+  "video/quicktime",
+];
+
 function createMediaRecorder(
   stream: MediaStream
 ): { recorder: MediaRecorder; mimeType: string } | null {
   if (typeof MediaRecorder === "undefined") return null;
 
-  for (const type of CANDIDATE_MIME_TYPES) {
+  const hasAudio = stream.getAudioTracks().length > 0;
+  const candidateTypes = hasAudio
+    ? CANDIDATE_MIME_TYPES_WITH_AUDIO
+    : CANDIDATE_MIME_TYPES_VIDEO_ONLY;
+
+  for (const type of candidateTypes) {
     if (MediaRecorder.isTypeSupported(type)) {
       try {
         const recorder = new MediaRecorder(stream, { mimeType: type });
@@ -30,14 +45,26 @@ function createMediaRecorder(
     }
   }
 
-  // Fallback: create MediaRecorder with browser defaults
+  // Fallback 1: Try default constructor without explicit options
   try {
     const recorder = new MediaRecorder(stream);
-    return { recorder, mimeType: recorder.mimeType || "video/webm" };
+    const fallbackMime = recorder.mimeType || (hasAudio ? "video/webm" : "video/webm");
+    return { recorder, mimeType: fallbackMime };
   } catch (err) {
     console.error("could not create default MediaRecorder:", err);
-    return null;
   }
+
+  // Fallback 2: Try video-only mime candidates as a last resort
+  for (const type of CANDIDATE_MIME_TYPES_VIDEO_ONLY) {
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType: type });
+      return { recorder, mimeType: type };
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
 }
 
 export interface BackgroundRecording {
