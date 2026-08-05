@@ -24,7 +24,6 @@ export default function VrmMotionPage() {
   const [bgStyle, setBgStyle] = useState<BgStyle>("dark");
 
   const [capturedResult, setCapturedResult] = useState<VrmMotionResult | null>(null);
-  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const [flushKey, setFlushKey] = useState(0);
 
   // Motion Tracking Hook
@@ -105,20 +104,15 @@ export default function VrmMotionPage() {
                 <span className={styles.liveDot} />
                 실시간 웹캠 입력
               </span>
-              <button
-                onClick={() =>
-                  setCameraFacing((f) => (f === "user" ? "environment" : "user"))
-                }
-                className={styles.switchBtn}
-              >
-                {cameraFacing === "user" ? "후면 카메라 전환" : "전면 카메라 전환"}
-              </button>
+              <span className={styles.switchBtn} style={{ cursor: "default" }}>
+                카메라 전환은 화면 버튼으로
+              </span>
             </div>
 
             <div className={styles.mediaFrame}>
               <CameraView
                 autoStart={true}
-                initialFacing={cameraFacing}
+                initialFacing="user"
                 recordLabel="vrmmotion"
                 flushKey={flushKey}
                 onReady={handleCameraReady}

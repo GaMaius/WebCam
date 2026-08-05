@@ -11,27 +11,55 @@ export interface LandmarkFrameData {
   rightHandLandmarks?: NormalizedLandmark[];
 }
 
+// three-vrm's normalized humanoid abstracts away VRM0/VRM1 differences, so
+// Kalidokit's rig output maps DIRECTLY onto the normalized bones — same-named
+// bone, no left/right swap, no axis sign-flips. (The previous implementation
+// stacked a manual L/R swap AND per-axis negation on top of each other, which
+// is what made the avatar move in the opposite/mirrored-wrong direction.)
+// Kalidokit already produces a mirror-like result (the avatar acts as your
+// reflection), which is the intended selfie/VTuber UX.
+
 function getNode(vrm: VRM, boneName: any) {
   if (!vrm.humanoid) return null;
-  return (
-    vrm.humanoid.getNormalizedBoneNode(boneName) ||
-    vrm.humanoid.getRawBoneNode(boneName)
-  );
+  return vrm.humanoid.getNormalizedBoneNode(boneName) || vrm.humanoid.getRawBoneNode(boneName);
 }
 
-// Deadzone & Low-Pass Filter constants to eliminate micro-jittering when still
-const ROTATION_DEADZONE_RAD = 0.02; // ~1.1 degrees deadzone threshold
-const SLERP_SPEED = 0.18; // Smooth exponential moving average speed
-const LEG_SLERP_SPEED = 0.12; // Extra smooth damping for legs to prevent popping
-const FACE_ROT_SPEED = 0.25;
+// Smoothing + deadzone to kill micro-jitter while keeping response snappy.
+const DEADZONE_RAD = 0.02; // ~1.1° — ignore sub-threshold jitter
+const LERP_BODY = 0.3;
+const LERP_LEG = 0.22; // extra damping so legs don't pop
+const LERP_FACE = 0.3;
 
-/**
- * Apply Kalidokit tracking solved results to a three-vrm instance with Deadzone & Mirroring.
- */
+type Rot = { x: number; y: number; z: number; rotationOrder?: string };
+
+/** Applies a Kalidokit euler rotation to a VRM bone, honoring the rig's own
+ * rotationOrder, with a deadzone + slerp smoothing. */
+function rigRotation(
+  vrm: VRM,
+  boneName: string,
+  rot: Rot | undefined,
+  dampener = 1,
+  lerp = LERP_BODY
+) {
+  if (!rot) return;
+  const node = getNode(vrm, boneName);
+  if (!node) return;
+  const euler = new THREE.Euler(
+    rot.x * dampener,
+    rot.y * dampener,
+    rot.z * dampener,
+    (rot.rotationOrder as THREE.EulerOrder) || "XYZ"
+  );
+  const target = new THREE.Quaternion().setFromEuler(euler);
+  if (node.quaternion.angleTo(target) > DEADZONE_RAD) {
+    node.quaternion.slerp(target, lerp);
+  }
+}
+
 export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
   if (!vrm) return;
 
-  // 1. Face Tracking & Expressions
+  // 1. Face — head/neck rotation + blink/mouth expressions.
   if (frame.faceLandmarks && frame.faceLandmarks.length > 0) {
     const faceRig = Kalidokit.Face.solve(frame.faceLandmarks, {
       runtime: "mediapipe",
@@ -39,21 +67,15 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (faceRig) {
-      // Head & Neck Rotation using Mirrored YXZ Euler Order (-x Pitch, -y Yaw, -z Roll)
-      rotateHeadAndNeck(vrm, faceRig.head);
+      rigRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE);
+      rigRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE);
 
-      // Expressions (Eye Blink & Mouth Shape)
       if (vrm.expressionManager) {
-        // Mirrored eye blink:
-        // User right eye (screen-left) -> VRM blinkRight (screen-left)
-        // User left eye (screen-right) -> VRM blinkLeft (screen-right)
-        const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
         const blinkLeft = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
-
-        vrm.expressionManager.setValue("blinkRight", blinkRight);
+        const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
         vrm.expressionManager.setValue("blinkLeft", blinkLeft);
+        vrm.expressionManager.setValue("blinkRight", blinkRight);
 
-        // Mouth blendshapes with 0.08 cutoff deadzone
         if (faceRig.mouth && faceRig.mouth.shape) {
           vrm.expressionManager.setValue("aa", cutoff(faceRig.mouth.shape.A, 0.08));
           vrm.expressionManager.setValue("ih", cutoff(faceRig.mouth.shape.I, 0.08));
@@ -65,13 +87,11 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     }
   }
 
-  // 2. Pose Kinematics
+  // 2. Pose — torso, arms, legs. Direct same-name mapping (no swap/flip).
   if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
-    // Visibility check: if hip/spine landmarks are hidden/missing, skip update to prevent ghost motion
+    // Skip when the hips are hidden/unreliable to avoid ghost motion.
     const hipLandmark = frame.poseLandmarks[23] || frame.poseLandmarks[24];
-    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.3) {
-      return;
-    }
+    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.3) return;
 
     const poseRig = Kalidokit.Pose.solve(frame.poseWorldLandmarks, frame.poseLandmarks, {
       runtime: "mediapipe",
@@ -79,30 +99,23 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      // Hips & Spine (Mirrored -x, -y, -z)
-      rotateBoneWithDeadzone(vrm, "hips", mirrorRotation(extractRotation(poseRig.Hips)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "spine", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "chest", mirrorRotation(extractRotation(poseRig.Spine)), SLERP_SPEED);
+      rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7);
+      rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45);
+      rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25);
 
-      // Arms (Pitch X is preserved for natural up/down motion, Y and Z are mirrored)
-      rotateBoneWithDeadzone(vrm, "leftUpperArm", mirrorArmRotation(extractRotation(poseRig.RightUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "leftLowerArm", mirrorArmRotation(extractRotation(poseRig.RightLowerArm)), SLERP_SPEED);
+      rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1);
+      rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1);
+      rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1);
+      rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1);
 
-      rotateBoneWithDeadzone(vrm, "rightUpperArm", mirrorArmRotation(extractRotation(poseRig.LeftUpperArm)), SLERP_SPEED);
-      rotateBoneWithDeadzone(vrm, "rightLowerArm", mirrorArmRotation(extractRotation(poseRig.LeftLowerArm)), SLERP_SPEED);
-
-      // Legs (Leg visibility check & damped rotation to eliminate full-body leg popping)
-      const kneeLandmarkLeft = frame.poseLandmarks[25];
-      const kneeLandmarkRight = frame.poseLandmarks[26];
-      const isLegsVisible =
-        (kneeLandmarkLeft?.visibility ?? 1) > 0.4 && (kneeLandmarkRight?.visibility ?? 1) > 0.4;
-
-      if (isLegsVisible) {
-        rotateBoneWithDeadzone(vrm, "leftUpperLeg", mirrorLegRotation(extractRotation(poseRig.RightUpperLeg)), LEG_SLERP_SPEED);
-        rotateBoneWithDeadzone(vrm, "leftLowerLeg", mirrorLegRotation(extractRotation(poseRig.RightLowerLeg)), LEG_SLERP_SPEED);
-
-        rotateBoneWithDeadzone(vrm, "rightUpperLeg", mirrorLegRotation(extractRotation(poseRig.LeftUpperLeg)), LEG_SLERP_SPEED);
-        rotateBoneWithDeadzone(vrm, "rightLowerLeg", mirrorLegRotation(extractRotation(poseRig.LeftLowerLeg)), LEG_SLERP_SPEED);
+      const kneeL = frame.poseLandmarks[25];
+      const kneeR = frame.poseLandmarks[26];
+      const legsVisible = (kneeL?.visibility ?? 1) > 0.4 && (kneeR?.visibility ?? 1) > 0.4;
+      if (legsVisible) {
+        rigRotation(vrm, "rightUpperLeg", poseRig.RightUpperLeg as Rot, 1, LERP_LEG);
+        rigRotation(vrm, "rightLowerLeg", poseRig.RightLowerLeg as Rot, 1, LERP_LEG);
+        rigRotation(vrm, "leftUpperLeg", poseRig.LeftUpperLeg as Rot, 1, LERP_LEG);
+        rigRotation(vrm, "leftLowerLeg", poseRig.LeftLowerLeg as Rot, 1, LERP_LEG);
       }
     }
   }
@@ -116,85 +129,4 @@ function clampThreshold(val: number, low: number, high: number): number {
   if (val <= low) return 0;
   if (val >= high) return 1;
   return (val - low) / (high - low);
-}
-
-function mirrorRotation(rot: { x: number; y: number; z: number } | undefined) {
-  if (!rot) return undefined;
-  return {
-    x: -rot.x,
-    y: -rot.y,
-    z: -rot.z,
-  };
-}
-
-function mirrorArmRotation(rot: { x: number; y: number; z: number } | undefined) {
-  if (!rot) return undefined;
-  return {
-    x: rot.x, // Pitch X is preserved so raising arms moves up, lowering moves down
-    y: -rot.y,
-    z: -rot.z,
-  };
-}
-
-function mirrorLegRotation(rot: { x: number; y: number; z: number } | undefined) {
-  if (!rot) return undefined;
-  return {
-    x: rot.x * 0.7, // Damped pitch to prevent sudden leg popping
-    y: -rot.y,
-    z: -rot.z,
-  };
-}
-
-function rotateHeadAndNeck(vrm: VRM, headRot: { x: number; y: number; z: number }) {
-  // Use YXZ Euler order with mirrored signs (-x Pitch, -y Yaw, -z Roll)
-  const headNode = getNode(vrm, "head");
-  if (headNode) {
-    const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(-headRot.x, -headRot.y, -headRot.z, "YXZ")
-    );
-    if (headNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
-      headNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
-    }
-  }
-
-  const neckNode = getNode(vrm, "neck");
-  if (neckNode) {
-    const targetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(-headRot.x * 0.3, -headRot.y * 0.3, -headRot.z * 0.3, "YXZ")
-    );
-    if (neckNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
-      neckNode.quaternion.slerp(targetQuat, FACE_ROT_SPEED);
-    }
-  }
-}
-
-function extractRotation(item: any): { x: number; y: number; z: number } | undefined {
-  if (!item) return undefined;
-  if ("rotation" in item && item.rotation) {
-    return item.rotation;
-  }
-  if (typeof item.x === "number" && typeof item.y === "number" && typeof item.z === "number") {
-    return { x: item.x, y: item.y, z: item.z };
-  }
-  return undefined;
-}
-
-function rotateBoneWithDeadzone(
-  vrm: VRM,
-  boneName: any,
-  rotation: { x: number; y: number; z: number } | undefined,
-  speed: number = SLERP_SPEED
-) {
-  if (!rotation) return;
-  const boneNode = getNode(vrm, boneName);
-  if (!boneNode) return;
-
-  // Use YXZ Euler order for stable bone kinematics
-  const targetEuler = new THREE.Euler(rotation.x, rotation.y, rotation.z, "YXZ");
-  const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
-
-  // Deadzone filter: Ignore tiny rotational fluctuations
-  if (boneNode.quaternion.angleTo(targetQuat) > ROTATION_DEADZONE_RAD) {
-    boneNode.quaternion.slerp(targetQuat, speed);
-  }
 }

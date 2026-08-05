@@ -45,6 +45,13 @@ export function useVrmMotionScan(vrm: VRM | null, videoRef: React.RefObject<HTML
     };
   }, []);
 
+  // Dev-only: expose the VRM + bridge for deterministic mapping tests (?debug).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!new URLSearchParams(window.location.search).has("debug")) return;
+    (window as unknown as { __vrmDebug?: unknown }).__vrmDebug = { vrm, applyTrackingToVRM };
+  }, [vrm]);
+
   // 2. Continuous Tracking Loop
   const processFrame = useCallback(() => {
     const video = videoRef.current;
