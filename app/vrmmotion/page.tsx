@@ -66,7 +66,7 @@ export default function VrmMotionPage() {
     }
   };
 
-  // Built-in avatar picker (default VRM / Spider-Man FBX).
+  // Built-in avatar picker (see AVATAR_PRESETS).
   const handlePresetChange = async (preset: AvatarPreset) => {
     if (!canvasRef.current) return;
     setIsLoadingAvatar(true);

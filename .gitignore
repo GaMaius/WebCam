@@ -29,7 +29,8 @@ yarn-error.log*
 .vercel
 .env*
 
-# Raw third-party avatar downloads (4K PNG texture sets are ~600MB+ and must
-# never be committed). Run `node scratch/build_avatar_assets.mjs` to produce the
-# web-sized copy under public/models/spiderman/, which IS committed.
-/public/models/spider-man-brand-new-day/
+# Raw third-party avatar downloads. These ship 4K PNG texture sets (600MB+) and
+# must never be committed — downscale before anything goes in public/models/.
+/public/models/*-raw/
+/public/models/*/source/
+/public/models/*/textures/

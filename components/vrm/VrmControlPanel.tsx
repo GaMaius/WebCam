@@ -65,7 +65,8 @@ export function VrmControlPanel({
 
       {/* Controls Group */}
       <div className={styles.controlGrid}>
-        {/* Built-in avatars */}
+        {/* Built-in avatars — pointless as a picker while there is only one. */}
+        {AVATAR_PRESETS.length > 1 && (
         <div className={styles.fieldGroup}>
           <label className={styles.label} style={{ color: "#444838" }}>기본 제공 아바타</label>
           <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
@@ -93,6 +94,7 @@ export function VrmControlPanel({
               : AVATAR_PRESETS.find((p) => p.id === presetId)?.hint ?? ""}
           </span>
         </div>
+        )}
 
         {/* Background Setting */}
         <div className={styles.fieldGroup}>
