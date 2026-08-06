@@ -149,21 +149,67 @@ export function rigRotation(
  * `side` is MediaPipe's handedness label, used verbatim for both the solve and
  * the VRM bone prefix — the same same-name convention the pose path uses, which
  * is what produces the intended mirror/selfie behavior.
+ *
+ * `poseHandRoll` is `Pose.solve`'s `{side}Hand.z`. The wrist is deliberately
+ * built from two sources: FLEX/DEVIATION (x/y) from the palm landmarks, and ROLL
+ * (z, i.e. forearm twist) from the arm chain. Kalidokit's hand solver derives its
+ * own roll from the palm plane and then folds it into yaw as well
+ * (`handRotation.y = handRotation.z`), so applying its full wrist rotation snaps
+ * the hand to a broken-looking angle — the forearm's own twist is the reliable
+ * source for roll.
  */
 export function applyHandRig(
   vrm: MotionAvatar,
   handRig: Record<string, Rot> | undefined,
-  side: HandSide
+  side: HandSide,
+  poseHandRoll?: number
 ) {
   if (!handRig) return;
   const prefix = side.toLowerCase(); // "left" | "right"
 
-  // The wrist rotation lands on the VRM hand bone.
-  rigRotation(vrm, `${prefix}Hand`, handRig[`${side}Wrist`], 1, LERP_HAND, true);
+  const wrist = handRig[`${side}Wrist`];
+  if (wrist) {
+    // Only the z here is pose-derived, so only it takes the flipZ convention.
+    rigRotation(
+      vrm,
+      `${prefix}Hand`,
+      { x: wrist.x, y: wrist.y, z: poseHandRoll ?? 0 },
+      1,
+      LERP_HAND,
+      true
+    );
+  }
 
   for (const [rigSuffix, boneSuffix] of Object.entries(FINGER_BONE_BY_RIG_SUFFIX)) {
     const rot = handRig[`${side}${rigSuffix}`];
     if (!rot) continue;
-    rigRotation(vrm, `${prefix}${boneSuffix}`, rot, 1, LERP_HAND, true);
+    // NO flipZ on fingers. Curl is pure z here, and Kalidokit already emits it
+    // side-corrected and clamped to the anatomically valid half-range
+    // (rigFingers clamps to [-PI,0] on the right, [0,PI] on the left). Negating
+    // that doesn't mirror it — it bends every finger backwards.
+    rigRotation(vrm, `${prefix}${boneSuffix}`, rot, 1, LERP_HAND, false);
   }
+}
+
+/**
+ * Copies `visibility` from the normalized landmarks onto the world landmarks.
+ *
+ * Kalidokit decides a hand is "offscreen" when the wrist's world-landmark
+ * visibility is under 0.23, and in that case it throws the arm away and
+ * substitutes a resting default. MediaPipe does not reliably populate visibility
+ * on world landmarks (it's often 0 there while the normalized list has real
+ * values), so without this the arms sit in a resting pose no matter what the
+ * user does — which is exactly what happened on device.
+ */
+export function withLandmarkVisibility<T extends { x: number; y: number; z: number }>(
+  world: T[] | undefined,
+  normalized: { visibility?: number }[] | undefined
+): (T & { visibility?: number })[] | undefined {
+  if (!world) return undefined;
+  if (!normalized) return world as (T & { visibility?: number })[];
+  return world.map((point, i) => {
+    const existing = (point as { visibility?: number }).visibility ?? 0;
+    const fromNormalized = normalized[i]?.visibility ?? 0;
+    return { ...point, visibility: Math.max(existing, fromNormalized) };
+  });
 }

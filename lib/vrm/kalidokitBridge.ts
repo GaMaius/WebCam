@@ -9,6 +9,7 @@ import {
   LERP_LEG,
   resolvePoseGates,
   rigRotation,
+  withLandmarkVisibility,
   type HandSide,
   type Rot,
 } from "./boneRig";
@@ -99,20 +100,26 @@ export function applyTrackingToVRM(
     }
   }
 
-  // 1b. Hands — wrist + 15 finger joints per side.
-  applyHand(vrm, frame.leftHandLandmarks, "Left");
-  applyHand(vrm, frame.rightHandLandmarks, "Right");
-
   // 2. Pose — torso, arms, legs. Same-name mapping (no L/R swap: Kalidokit
   // already crosses MediaPipe's sides to produce the mirror/selfie result),
   // with ROLL (Z) inverted for the VRM1 normalized-bone convention.
+  //
+  // Solved BEFORE the hands, because the wrist borrows its roll from the arm
+  // chain (see applyHandRig).
+  let poseRig: ReturnType<typeof Kalidokit.Pose.solve> | undefined;
   if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
     // Per-part gating: a hidden hip line must not freeze the arms (see
     // resolvePoseGates — that exact all-or-nothing bug shipped once).
     const gates = resolvePoseGates(frame.poseLandmarks, mode);
 
     if (gates.torso || gates.arms) {
-      const poseRig = Kalidokit.Pose.solve(frame.poseWorldLandmarks, frame.poseLandmarks, {
+      // Kalidokit reads visibility off the WORLD landmarks to decide whether an
+      // arm is offscreen, and MediaPipe doesn't reliably fill it in there.
+      const worldLandmarks = withLandmarkVisibility(
+        frame.poseWorldLandmarks,
+        frame.poseLandmarks
+      )!;
+      poseRig = Kalidokit.Pose.solve(worldLandmarks, frame.poseLandmarks, {
         runtime: "mediapipe",
         enableLegs: gates.legs,
       });
@@ -140,19 +147,24 @@ export function applyTrackingToVRM(
       }
     }
   }
+
+  // 3. Hands — wrist + 15 finger joints per side, using the arm chain's roll.
+  applyHand(vrm, frame.leftHandLandmarks, "Left", poseRig?.LeftHand?.z);
+  applyHand(vrm, frame.rightHandLandmarks, "Right", poseRig?.RightHand?.z);
 }
 
 /** Solves one hand from MediaPipe landmarks and writes it to the avatar. */
 function applyHand(
   vrm: MotionAvatar,
   landmarks: NormalizedLandmark[] | undefined,
-  side: HandSide
+  side: HandSide,
+  poseHandRoll?: number
 ) {
   if (!landmarks || landmarks.length < 21) return;
   const handRig = Kalidokit.Hand.solve(landmarks as never, side) as
     | Record<string, Rot>
     | undefined;
-  applyHandRig(vrm, handRig, side);
+  applyHandRig(vrm, handRig, side, poseHandRoll);
 }
 
 function cutoff(val: number, threshold: number): number {

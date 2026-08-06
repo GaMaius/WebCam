@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import { buildHumanoidRig, classifyBoneName } from "../lib/vrm/humanoidRigger.ts";
-import { applyHandRig, resolvePoseGates } from "../lib/vrm/boneRig.ts";
+import {
+  applyHandRig,
+  resolvePoseGates,
+  withLandmarkVisibility,
+} from "../lib/vrm/boneRig.ts";
 import { vrmExpressionsFromBlendshapes } from "../lib/vrm/faceExpressions.ts";
 import type { MotionAvatar } from "../lib/vrm/motionAvatar.ts";
 // Kalidokit's package entry re-exports from directories, which Node's ESM
@@ -144,22 +148,88 @@ function fingertipReach(curl: number): number {
   return hand.distanceTo(tip);
 }
 
-test("a curled hand actually curls the finger bones", () => {
+test("a curled hand actually moves the finger bones", () => {
   const open = fingertipReach(0);
   const closed = fingertipReach(1);
 
-  // The direction is what matters: whatever the axis convention, folding the
-  // landmarks must shorten the hand->fingertip span, not lengthen it. Getting
-  // this backwards is exactly the class of bug the arm mapping hit.
   assert.ok(open > 0, "open hand should have a measurable finger span");
-  // Direction is what this test guards, not magnitude: these synthetic landmarks
-  // are flat (z=0 everywhere), so Kalidokit solves a conservative curl — a real
-  // hand's depth gives much more. Measured ~13% here, so 10% is a stable floor
-  // that still can't pass on noise.
+  // NOTE: distance alone does NOT prove the curl DIRECTION — bending a finger
+  // backwards shortens the wrist->tip span just as much as curling it forwards,
+  // which is why an earlier version of this test passed with the sign inverted.
+  // This pair is only a "something moved" check; the signed test below guards
+  // direction.
   assert.ok(
     closed < open * 0.9,
-    `curling should shorten the finger span: open=${open.toFixed(4)} closed=${closed.toFixed(4)}`
+    `curling should change the finger span: open=${open.toFixed(4)} closed=${closed.toFixed(4)}`
   );
+});
+
+/** Local Z of a normalized finger bone after applying a full curl. */
+function fingerCurlZ(side: "Left" | "Right", bone: string): number {
+  const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
+  const handRig = Kalidokit.Hand.solve(handLandmarks(1), side);
+  for (let i = 0; i < 40; i++) {
+    applyHandRig(avatar, handRig, side);
+    humanoid.update();
+    scene.updateMatrixWorld(true);
+  }
+  const node = humanoid.getNormalizedBoneNode(bone as never)!;
+  return new THREE.Euler().setFromQuaternion(node.quaternion, "XYZ").z;
+}
+
+test("finger curl keeps Kalidokit's per-side sign (curl, not hyperextension)", () => {
+  // Kalidokit drives fingers on Z ALONE and already clamps it to the
+  // anatomically valid half-range per side — rigFingers clamps to [-PI, 0] for
+  // the right hand and [0, PI] for the left. The mapping must pass that sign
+  // through untouched: negating it (as the pose bones do, for a different
+  // convention) bends every finger backwards instead of mirroring it.
+  const leftZ = fingerCurlZ("Left", "leftIndexProximal");
+  const rightZ = fingerCurlZ("Right", "rightIndexProximal");
+
+  assert.ok(leftZ > 0.05, `left-hand curl must be +Z, got ${leftZ.toFixed(3)}`);
+  assert.ok(rightZ < -0.05, `right-hand curl must be -Z, got ${rightZ.toFixed(3)}`);
+});
+
+test("the wrist takes its roll from the arm chain, not from the palm", () => {
+  // Kalidokit's hand solver folds its palm-plane roll into yaw as well
+  // (handRotation.y = handRotation.z), so feeding its z straight in snaps the
+  // hand to a broken angle. Roll comes from the pose rig's Hand.z instead.
+  const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
+  const handRig = Kalidokit.Hand.solve(handLandmarks(0), "Left");
+
+  for (let i = 0; i < 40; i++) {
+    applyHandRig(avatar, handRig, "Left", 0.5);
+    humanoid.update();
+    scene.updateMatrixWorld(true);
+  }
+  const z = new THREE.Euler().setFromQuaternion(
+    humanoid.getNormalizedBoneNode("leftHand")!.quaternion,
+    "XYZ"
+  ).z;
+  // flipZ applies to this pose-derived z, so +0.5 in must come out negative.
+  assert.ok(z < -0.2, `pose roll should reach the wrist, got ${z.toFixed(3)}`);
+});
+
+test("world landmarks inherit visibility from the normalized list", () => {
+  // Kalidokit throws an arm away (substituting a resting default) when the
+  // wrist's world-landmark visibility is under 0.23, and MediaPipe often leaves
+  // it at 0 there — which is what pinned the arms in a resting pose on device.
+  const world = [
+    { x: 0, y: 0, z: 0 },
+    { x: 1, y: 1, z: 1, visibility: 0 },
+  ];
+  const normalized = [{ visibility: 0.97 }, { visibility: 0.88 }];
+
+  const merged = withLandmarkVisibility(world, normalized)!;
+  assert.equal(merged[0].visibility, 0.97);
+  assert.equal(merged[1].visibility, 0.88, "a zero must be replaced, not kept");
+  assert.equal(merged[1].x, 1, "coordinates must survive untouched");
+
+  // Never downgrade a real world-landmark value.
+  const better = withLandmarkVisibility([{ x: 0, y: 0, z: 0, visibility: 0.9 }], [
+    { visibility: 0.1 },
+  ])!;
+  assert.equal(better[0].visibility, 0.9);
 });
 
 /** Pose landmark array with only the given indices visible. */
