@@ -45,6 +45,62 @@ export const FINGER_BONE_BY_RIG_SUFFIX: Record<string, string> = {
   LittleDistal: "LittleDistal",
 };
 
+/** Which body parts this frame's landmarks can be trusted to drive. */
+export interface PoseGates {
+  torso: boolean;
+  arms: boolean;
+  legs: boolean;
+}
+
+/** MediaPipe pose landmark indices. */
+const LM = {
+  leftShoulder: 11,
+  rightShoulder: 12,
+  leftHip: 23,
+  rightHip: 24,
+  leftKnee: 25,
+  rightKnee: 26,
+};
+
+/** Best visibility of a landmark pair — one visible side is enough to trust the
+ * part, and a missing `visibility` field is treated as visible. */
+function pairVisibility(
+  landmarks: { visibility?: number }[] | undefined,
+  a: number,
+  b: number
+): number {
+  if (!landmarks) return 0;
+  const va = landmarks[a] ? landmarks[a].visibility ?? 1 : 0;
+  const vb = landmarks[b] ? landmarks[b].visibility ?? 1 : 0;
+  return Math.max(va, vb);
+}
+
+/**
+ * Decides per part instead of all-or-nothing.
+ *
+ * This used to be a single early return on hip visibility, which silently froze
+ * the ARMS too: in the face+hands framing the user is close to the camera, the
+ * hips are out of shot, and so nothing below the neck ever moved even though the
+ * shoulders and elbows were tracked perfectly. Gate each part on the landmarks
+ * that part actually needs.
+ */
+export function resolvePoseGates(
+  landmarks: { visibility?: number }[] | undefined,
+  mode: "full" | "upper"
+): PoseGates {
+  const shoulders = pairVisibility(landmarks, LM.leftShoulder, LM.rightShoulder);
+  const hips = pairVisibility(landmarks, LM.leftHip, LM.rightHip);
+  const knees = pairVisibility(landmarks, LM.leftKnee, LM.rightKnee);
+
+  return {
+    // Hips/spine come from the hip line, so they still need it: without hips
+    // Kalidokit's torso estimate wanders and the avatar leans on its own.
+    torso: hips >= 0.3,
+    arms: shoulders >= 0.5,
+    legs: mode === "full" && knees > 0.4,
+  };
+}
+
 function getNode(vrm: MotionAvatar, boneName: string) {
   if (!vrm.humanoid) return null;
   return (

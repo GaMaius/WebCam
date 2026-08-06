@@ -80,9 +80,13 @@ export function vrmExpressionsFromBlendshapes(
 
   const out: Record<string, number> = {};
 
-  // Eyes. ARKit is per-eye, and so is VRM, so no averaging.
-  out.blinkLeft = remap(get("eyeBlinkLeft"), BLINK_LOW, BLINK_HIGH);
-  out.blinkRight = remap(get("eyeBlinkRight"), BLINK_LOW, BLINK_HIGH);
+  // Eyes. ARKit names are anatomical — `eyeBlinkLeft` is the subject's OWN left
+  // eye — but the avatar acts as a reflection, so the eye the user sees close
+  // on their winking side is the avatar's opposite eye. Hence the swap: without
+  // it, winking your left eye winks the avatar's far eye, which reads as wrong.
+  // Same reason the gaze pair is crossed below.
+  out.blinkLeft = remap(get("eyeBlinkRight"), BLINK_LOW, BLINK_HIGH);
+  out.blinkRight = remap(get("eyeBlinkLeft"), BLINK_LOW, BLINK_HIGH);
 
   // Mouth: pick the dominant viseme.
   const vowels: Record<string, number> = {
@@ -109,16 +113,18 @@ export function vrmExpressionsFromBlendshapes(
   out.surprised = cut(get("browInnerUp"));
   out.angry = cut(pair("browDownLeft", "browDownRight"));
 
-  // Gaze. ARKit's Out/In are relative to each eye, so the left eye looking
-  // "out" and the right looking "in" both mean gazing to the viewer's left.
+  // Gaze. Vertical needs no mirroring; horizontal does.
   const up = cut(pair("eyeLookUpLeft", "eyeLookUpRight"));
   const down = cut(pair("eyeLookDownLeft", "eyeLookDownRight"));
   out.lookUp = up > down ? up : 0;
   out.lookDown = down > up ? down : 0;
-  const left = cut(get("eyeLookOutLeft"));
-  const right = cut(get("eyeLookInLeft"));
-  out.lookLeft = left > right ? left : 0;
-  out.lookRight = right > left ? right : 0;
+
+  // ARKit's Out/In are relative to each eye: the left eye looking "out" means
+  // the subject is gazing to their own left, which mirrors to the avatar's right.
+  const towardSubjectLeft = cut(get("eyeLookOutLeft"));
+  const towardSubjectRight = cut(get("eyeLookInLeft"));
+  out.lookRight = towardSubjectLeft > towardSubjectRight ? towardSubjectLeft : 0;
+  out.lookLeft = towardSubjectRight > towardSubjectLeft ? towardSubjectRight : 0;
 
   return out;
 }

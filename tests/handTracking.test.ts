@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import { buildHumanoidRig, classifyBoneName } from "../lib/vrm/humanoidRigger.ts";
-import { applyHandRig } from "../lib/vrm/boneRig.ts";
+import { applyHandRig, resolvePoseGates } from "../lib/vrm/boneRig.ts";
 import { vrmExpressionsFromBlendshapes } from "../lib/vrm/faceExpressions.ts";
 import type { MotionAvatar } from "../lib/vrm/motionAvatar.ts";
 // Kalidokit's package entry re-exports from directories, which Node's ESM
@@ -162,6 +162,61 @@ test("a curled hand actually curls the finger bones", () => {
   );
 });
 
+/** Pose landmark array with only the given indices visible. */
+function visibilityAt(entries: Record<number, number>): { visibility?: number }[] {
+  const lm: { visibility?: number }[] = new Array(33)
+    .fill(null)
+    .map(() => ({ visibility: 0 }));
+  for (const [i, v] of Object.entries(entries)) lm[Number(i)] = { visibility: v };
+  return lm;
+}
+
+test("hidden hips must not freeze the arms", () => {
+  // The regression that shipped: sitting close to the camera puts the hips out
+  // of frame, and a single early return on hip visibility froze the arms too —
+  // the avatar held a T-pose while the hands and face tracked fine.
+  const seated = visibilityAt({
+    11: 0.99, // shoulders visible
+    12: 0.99,
+    13: 0.95, // elbows visible
+    14: 0.95,
+    23: 0.05, // hips out of frame
+    24: 0.05,
+    25: 0.0, // knees out of frame
+    26: 0.0,
+  });
+
+  const gates = resolvePoseGates(seated, "upper");
+  assert.equal(gates.arms, true, "shoulders are tracked, so the arms must move");
+  assert.equal(gates.torso, false, "no hip line -> don't let the torso wander");
+  assert.equal(gates.legs, false);
+});
+
+test("pose gates follow the visible landmarks and the mode", () => {
+  const wholeBody = visibilityAt({
+    11: 0.99, 12: 0.99, 23: 0.9, 24: 0.9, 25: 0.8, 26: 0.8,
+  });
+  assert.deepEqual(resolvePoseGates(wholeBody, "full"), {
+    torso: true,
+    arms: true,
+    legs: true,
+  });
+  // Face+hands mode never drives legs, however visible they are.
+  assert.equal(resolvePoseGates(wholeBody, "upper").legs, false);
+
+  // Nothing tracked at all -> drive nothing.
+  assert.deepEqual(resolvePoseGates(visibilityAt({}), "full"), {
+    torso: false,
+    arms: false,
+    legs: false,
+  });
+  assert.deepEqual(resolvePoseGates(undefined, "full"), {
+    torso: false,
+    arms: false,
+    legs: false,
+  });
+});
+
 test("blendshapes drive blink per eye with a dead zone", () => {
   const rest = vrmExpressionsFromBlendshapes([
     { categoryName: "eyeBlinkLeft", score: 0.1 },
@@ -169,13 +224,33 @@ test("blendshapes drive blink per eye with a dead zone", () => {
   ]);
   assert.equal(rest.blinkLeft, 0, "small scores are noise and must read as open");
   assert.equal(rest.blinkRight, 0);
+});
 
-  const winkLeft = vrmExpressionsFromBlendshapes([
+test("a wink mirrors: the subject's left eye closes the avatar's right", () => {
+  // ARKit names are anatomical, the avatar is a reflection. Shipping this
+  // unmirrored made the wrong eye wink on a real device.
+  const winkSubjectLeft = vrmExpressionsFromBlendshapes([
     { categoryName: "eyeBlinkLeft", score: 0.95 },
     { categoryName: "eyeBlinkRight", score: 0.05 },
   ]);
-  assert.equal(winkLeft.blinkLeft, 1);
-  assert.equal(winkLeft.blinkRight, 0, "eyes must stay independent");
+  assert.equal(winkSubjectLeft.blinkRight, 1, "should close the avatar's right eye");
+  assert.equal(winkSubjectLeft.blinkLeft, 0, "eyes must stay independent");
+
+  const winkSubjectRight = vrmExpressionsFromBlendshapes([
+    { categoryName: "eyeBlinkRight", score: 0.95 },
+  ]);
+  assert.equal(winkSubjectRight.blinkLeft, 1);
+  assert.equal(winkSubjectRight.blinkRight, 0);
+});
+
+test("horizontal gaze mirrors too", () => {
+  // eyeLookOutLeft = left eye outward = gazing to the subject's own left.
+  const gazingSubjectLeft = vrmExpressionsFromBlendshapes([
+    { categoryName: "eyeLookOutLeft", score: 0.8 },
+    { categoryName: "eyeLookInLeft", score: 0.05 },
+  ]);
+  assert.ok(gazingSubjectLeft.lookRight > 0.7, "mirrors to the avatar's right");
+  assert.equal(gazingSubjectLeft.lookLeft, 0);
 });
 
 test("only the dominant vowel is emitted", () => {

@@ -7,6 +7,7 @@ import {
   LERP_BODY,
   LERP_FACE,
   LERP_LEG,
+  resolvePoseGates,
   rigRotation,
   type HandSide,
   type Rot,
@@ -62,8 +63,13 @@ export function applyTrackingToVRM(
     });
 
     if (faceRig) {
-      rigRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE);
-      rigRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE);
+      // Head ROLL (the "tilt") is inverted here for the same reason the body's
+      // is: Kalidokit's rotations are VRM0 raw-bone convention and we drive
+      // three-vrm's normalized bones. Tilting your head right used to tilt the
+      // avatar's left. So the head flips Z too — every solver-derived bone in
+      // this file now does, which is one rule instead of an exception.
+      rigRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE, true);
+      rigRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE, true);
 
       if (vrm.expressionManager) {
         // Prefer ARKit blendshapes; they're steadier and cover brows/gaze that
@@ -74,8 +80,10 @@ export function applyTrackingToVRM(
             vrm.expressionManager.setValue(name, value);
           }
         } else {
-          const blinkLeft = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
-          const blinkRight = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+          // Mirrored, like the blendshape path: your left eye drives the eye on
+          // your side of the screen, which is the avatar's right.
+          const blinkLeft = clampThreshold(1 - faceRig.eye.r, 0.15, 0.85);
+          const blinkRight = clampThreshold(1 - faceRig.eye.l, 0.15, 0.85);
           vrm.expressionManager.setValue("blinkLeft", blinkLeft);
           vrm.expressionManager.setValue("blinkRight", blinkRight);
 
@@ -99,33 +107,36 @@ export function applyTrackingToVRM(
   // already crosses MediaPipe's sides to produce the mirror/selfie result),
   // with ROLL (Z) inverted for the VRM1 normalized-bone convention.
   if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
-    // Skip when the hips are hidden/unreliable to avoid ghost motion.
-    const hipLandmark = frame.poseLandmarks[23] || frame.poseLandmarks[24];
-    if (hipLandmark && (hipLandmark.visibility ?? 1) < 0.3) return;
+    // Per-part gating: a hidden hip line must not freeze the arms (see
+    // resolvePoseGates — that exact all-or-nothing bug shipped once).
+    const gates = resolvePoseGates(frame.poseLandmarks, mode);
 
-    const poseRig = Kalidokit.Pose.solve(frame.poseWorldLandmarks, frame.poseLandmarks, {
-      runtime: "mediapipe",
-      enableLegs: true,
-    });
+    if (gates.torso || gates.arms) {
+      const poseRig = Kalidokit.Pose.solve(frame.poseWorldLandmarks, frame.poseLandmarks, {
+        runtime: "mediapipe",
+        enableLegs: gates.legs,
+      });
 
-    if (poseRig) {
-      rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7, LERP_BODY, true);
-      rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45, LERP_BODY, true);
-      rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25, LERP_BODY, true);
+      if (poseRig) {
+        if (gates.torso) {
+          rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7, LERP_BODY, true);
+          rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45, LERP_BODY, true);
+          rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25, LERP_BODY, true);
+        }
 
-      rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1, LERP_BODY, true);
-      rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1, LERP_BODY, true);
-      rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1, LERP_BODY, true);
-      rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1, LERP_BODY, true);
+        if (gates.arms) {
+          rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1, LERP_BODY, true);
+          rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1, LERP_BODY, true);
+          rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1, LERP_BODY, true);
+          rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1, LERP_BODY, true);
+        }
 
-      const kneeL = frame.poseLandmarks[25];
-      const kneeR = frame.poseLandmarks[26];
-      const legsVisible = (kneeL?.visibility ?? 1) > 0.4 && (kneeR?.visibility ?? 1) > 0.4;
-      if (mode === "full" && legsVisible) {
-        rigRotation(vrm, "rightUpperLeg", poseRig.RightUpperLeg as Rot, 1, LERP_LEG, true);
-        rigRotation(vrm, "rightLowerLeg", poseRig.RightLowerLeg as Rot, 1, LERP_LEG, true);
-        rigRotation(vrm, "leftUpperLeg", poseRig.LeftUpperLeg as Rot, 1, LERP_LEG, true);
-        rigRotation(vrm, "leftLowerLeg", poseRig.LeftLowerLeg as Rot, 1, LERP_LEG, true);
+        if (gates.legs) {
+          rigRotation(vrm, "rightUpperLeg", poseRig.RightUpperLeg as Rot, 1, LERP_LEG, true);
+          rigRotation(vrm, "rightLowerLeg", poseRig.RightLowerLeg as Rot, 1, LERP_LEG, true);
+          rigRotation(vrm, "leftUpperLeg", poseRig.LeftUpperLeg as Rot, 1, LERP_LEG, true);
+          rigRotation(vrm, "leftLowerLeg", poseRig.LeftLowerLeg as Rot, 1, LERP_LEG, true);
+        }
       }
     }
   }
