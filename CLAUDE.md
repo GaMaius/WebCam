@@ -7,8 +7,9 @@
 > 제품 컨셉 = **"카메라로 나를 스캔하는 독립 앱 모음"**(웰니스+스타일+재미). 홈은 `lib/apps.ts` 레지스트리를 렌더링하는
 > 런처. 브랜드는 **"VisionLab"**로 통일됨(탭 타이틀·히어로 H1·푸터·결과 이미지·공유 문구 모두 "VisionLab", 2026-07-25).
 > 개발: `npm run dev`(3000 사용 중이면 다른 포트), `npm run build`, `npm test`.
+> 리포 루트의 `AGENTS.md`는 이 파일의 Codex용 미러(구버전)다 — CLAUDE.md가 최신 기준이며, 크게 바뀌면 같이 갱신할 것.
 
-## 현재 상태 (2026-07-25 기준)
+## 현재 상태 (2026-08-06 기준)
 
 - **VL-1** 파운데이션: 디자인 시스템(라벤더 헤이즈 `#92A9E1` + 소프트 그래파이트 다크 테마, `app/globals.css`), 랜딩 페이지, `CameraView` 전/후면 전환 컴포넌트
 - **VL-2** HeartPulse: rPPG POS(`ubicomplab/rPPG-Toolbox` 실제 포팅) + 사전학습 DeepPhys(ONNX, `onnxruntime-web`) 이중 엔진, MediaPipe FaceLandmarker, 자체 FFT로 BPM/스트레스/HRV 계산
@@ -23,6 +24,20 @@
   - **fp16**: 이 모델(timm FastViT의 Cast 노드)에서 `convert_float_to_float16`가 로드 불가 모델을 만들어 **실패 → fp32 유지**. int8 동적양자화도 정확도 붕괴(코사인 0.16)라 사용 안 함.
   - **로딩 최적화**: 홈에서 `components/PokematchPrefetch.tsx`가 idle에 인코더/갤러리를 미리 fetch(캐시 워밍). 자산 재생성 = `ml/pokematch/prepare_pokematch.ipynb`(Colab). 데이터셋(Kaggle "1282 pokemon…")은 리포 미포함.
   - **웹캠 μ 재보정 (2026-07-25, "다들 뮤가 나온다" 수정)**: μ/σ가 LFW 얼굴 기준이라 실제 웹캠 셀피 분포와 안 맞아, 둥근 얼굴형 포켓몬(mew·jigglypuff·diancie·gothitelle…)이 **모두에게** 공통으로 떠서 결과가 안 갈라지던 문제(허브니스). 실제 테스터 얼굴들의 `?debug` **FULLCOS**(종별 전체 코사인)를 모아 웹캠 평균을 계산 → `gallery.json`의 `mu`를 **`μ_eff = 0.3·muRaw + 0.7·webcam_mean`**로 재보정하고 `sd`에 **p30 σ-floor**(작은 σ 종이 새 허브 되는 것 방지) 적용. 원본은 `muRaw`/`sdRaw`로 보존, 메타는 `calibration` 키. **matcher 코드는 통계만 읽으므로 무변경**(단, 표시 "닮은 정도 %"는 캡처 밝기 편차를 없애려 `matchTopK`에서 **얼굴별 z 표준화** 후 매핑). 검증: 4명 leave-one-out에서 상위권 공유 종 0개(사람마다 다른 결과). **더 정확히 하려면 faces 수를 늘려 재보정**(현재 4명, `scratch_faces/`는 gitignore). ⚠️ 노트북(`prepare_pokematch.ipynb`)이 `gallery.json`을 재생성하면 이 보정이 사라지니 재적용 필요.
+  - **랭킹 엔진 최종형 (2026-07-29, `lib/pokematch/matcher.ts` `matchTopK`)**: 위의 단순 z-score에서 아래 하이브리드로 발전함. 사람마다 결과가 갈리게 하는 게 핵심 목표였고, 순서대로 적용됨.
+    1. **humanMean 차감**: 임베딩의 ~86%는 "일반적인 사람 얼굴" 성분이라 개인차를 덮어씀 → `uniqueEmb = normalize(embedding − humanMean)`로 개인 고유 편차 벡터를 뽑는다(`gallery.json`의 `humanMean`).
+    2. **이중 z-score 혼합**: `score = 0.60·z_unique + 0.40·z_raw + shapeBoost`. `z_unique`는 종별 `muUnique/sdUnique`(σ floor 0.035), `z_raw`는 `mu/sd`(σ floor 0.055) 기준. `CHAR_SHAPE_BOOST`로 캐릭터성 형태에 가점, 세로로 긴 얼굴(`faceAspect > 1.15`)이면 `humanoid/upright`에 +0.02.
+    3. **오탐 제외**: `NON_HUMAN_EXCLUDE_SHAPES`(fish·bug-wings·tentacles·armor·squiggle·ball·blob·quadruped·wings) + `HUB_EXCLUDE_SLUGS`(muk·jigglypuff 계열·electrode·chi_yu·goldeen·mankey 계열 등 30여 종) 완전 배제. 추가로 **`mu[s] < 0.25`(저기준선 몬스터 아웃라이어)** 도 배제 — 얼굴 집단과 원래 안 닮는 종은 σ가 작아 z만 폭발하는 문제.
+    4. **NMS 다양성 재랭킹**: 상위 후보 중 이미 뽑힌 종과 **코사인 ≥ 0.72**면 억제(같은 진화계열/비슷한 외형이 상위 5개를 독식하는 것 방지). 억제로 5개가 안 차면 원래 순위로 채움.
+    5. 표시 `percent`는 여전히 얼굴별 z 표준화 후 `zToPercent(sz, topSz)` 매핑.
+  - **검증 스크립트**: 위 결정들은 `scratch/`의 파이썬 진단 스크립트(`diagnose_hubs_detailed.py`, `test_cluster_dedup.py`, `test_dampen_monsters.py`, `diagnose_user_result.py` 등)로 실제 테스터 임베딩에 대해 확인함. `scratch/`는 리포에 커밋돼 있으니 재조정할 때 그대로 재사용할 것.
+- **VL-7** VrmMotion("VRM Capture", `/vrmmotion`) — 실시간 3D 모션캡쳐 앱, 2026-08-02~06 구현:
+  - **파이프라인**(`모션캡쳐기획.md`): 웹캠 → MediaPipe(FaceLandmarker + PoseLandmarker) → **Kalidokit**(좌표→회전값 solve) → **@pixiv/three-vrm**(정규화 휴머노이드 본에 주입) → three.js 렌더. 의존성: `three ^0.185`, `@pixiv/three-vrm ^3.5`, `kalidokit ^1.1.5`.
+  - **파일**: `app/vrmmotion/page.tsx`, `components/vrm/VrmCanvas.tsx`(three 캔버스 + `loadVRM`/`takeSnapshot` ref), `components/vrm/VrmControlPanel.tsx`(배경 스타일·VRM 업로드·스냅샷·FPS), `lib/vrm/vrmScene.ts`(`VRMSceneManager`: 렌더러/카메라/OrbitControls/배경 dark·chromakey·transparent), `lib/vrm/kalidokitBridge.ts`(매핑), `hooks/useVrmMotionScan.ts`(rAF 트래킹 루프·FPS·트래킹 상태), `lib/poseLandmarker.ts`, `lib/resultCard.ts`의 `drawVrmMotionCard`.
+  - **모델**: 기본 아바타 `public/models/avatar.vrm`(VRM 1.0, 10MB, 커밋됨). 사용자가 자기 `.vrm`을 업로드하면 `loader.parse(ArrayBuffer)`로 교체 가능(기본으로 되돌리기 버튼 있음). Pose 모델은 **`pose_landmarker_full`**(lite는 트래킹이 나빴고 heavy는 실시간에 너무 느림), GPU delegate 실패 시 CPU 폴백.
+  - **⚠️ 축 매핑 — 절대 임의로 되돌리지 말 것**: Kalidokit rig는 VRM0 시대 **raw 본** 축 규약으로 만들어졌는데 우리는 three-vrm의 **normalized 본**을 쓴다. `?debug`(`window.__vrmDebug`)로 두 개의 DOF 분리 포즈(측면 들기=roll, 전방 들기=pitch)를 축 스윕한 결과, **오직 로컬 Z(roll)만 반전**돼 있었다(그래서 팔을 옆으로 들면 아바타 팔이 내려감). 그래서 `rigRotation(..., flipZ)`로 **포즈 유래 본에만 Z만 부호 반전**한다 — X(pitch)/Y(yaw)까지 반전시키면 pitch가 다시 깨지고, 좌우 **본 스왑은 하지 않는다**(Kalidokit이 이미 MediaPipe 좌우를 교차시켜 거울상 결과를 낸다. 예전에 스왑+전축반전을 동시에 쌓아 모션이 반대로 나왔던 버그가 이것). Face(`Face.solve`)의 head/neck 회전은 다른 규약이라 그대로 둔다.
+  - **안정화**: 각 본에 deadzone(0.02rad ≈ 1.1°) + slerp 스무딩(body 0.3 / leg 0.22 / face 0.3), 엉덩이 랜드마크 visibility < 0.3이면 전체 포즈 스킵(유령 모션 방지), 무릎 visibility ≤ 0.4면 다리 본만 스킵. 표정은 blink(`clampThreshold 0.15~0.85`) + 모음 5종(`aa/ih/ou/ee/oh`, cutoff 0.08).
+  - **UI**: 3D 아바타가 히어로 스테이지, 실제 카메라는 우상단 **PiP**(`CameraView`에 `showControls={false}`·`allowSwitch={false}`)로 겹쳐서 **둘을 한 화면에서 동시에** 본다. 3D 카메라는 뒤로 빼고 시선을 가슴 높이로 맞춰 든 팔이 프레임에 남게 함. 스냅샷 → 결과 모달(아바타·FPS·트래킹 센서) → `ResultActions`로 공유/저장.
 
 단위 테스트: `npm test`(Node 내장 `node --test`, `.ts` 직접 실행). `deepPhys.test.ts`는 `onnxruntime-web` 미설치 환경에서 import 에러로 실패할 수 있음(로직 무관, `npm install` 후 정상).
 
@@ -37,7 +52,10 @@
 - **녹화 파이프라인은 필수 기능**: 웹캠 원본 영상을 백그라운드로 녹화해 Backblaze B2로 직접 업로드(presigned URL). 절대 제거하지 말 것 — 예전에 이걸 빼려다 사용자에게 강하게 정정받은 적 있음.
 - **웹캠 사용 = 항상 녹화·업로드 (2026-07-24 사용자 지시)**: 별도의 지시가 없으면 이 웹에서 웹캠을 켜는 모든 순간은 항상 녹화되어 B2로 업로드되어야 함. 그래서 `CameraView`의 녹화는 **기본 ON(opt-out)** 이다 — `record` prop 기본값 `true`, 끄려면 명시적으로 `record={false}`. B2 키 라벨은 `recordLabel` 미지정 시 라우트 첫 세그먼트에서 자동 유도(`deriveRecordLabel`). `/api/recordings`는 고정 allowlist 대신 `^[a-z0-9-]{1,40}$` 포맷 검증만 하므로 **새 앱은 별도 배선 없이 자동으로 녹화·업로드됨**. 모든 카메라 접근은 반드시 `CameraView`를 통하게 유지할 것.
 - **오디오도 기본 녹음 (2026-07-25 사용자 지시)**: `CameraView`가 마이크도 함께 캡처(`audio` prop 기본 `true`)해 녹화에 소리 포함. getUserMedia는 카메라+마이크를 한 번의 통합 프롬프트로 요청하고, 마이크가 거부/부재면 **비디오 전용으로 자동 폴백**(카메라는 항상 동작). MediaRecorder mime은 opus 포함 webm이라 오디오 트랙 자동 저장.
-- **카메라 자동 시작 및 이탈/탭전환 시 녹화 연속성 유지 (2026-07-28 사용자 지시)**: 페이지 로드 시 즉시 웹캠을 켜고, `MediaRecorder`에 `timeslice(1000ms)`를 부여하여 탭 전환이나 타 앱 창 활성화 시에도 백그라운드 미디어 엔진이 끊김 없이 데이터를 모으도록 처리함. 탭 전환(`visibilitychange`)이나 창 이동 시 비디오 재생 정지를 자동 복구하며, 페이지 이동(`pagehide`/`beforeunload`/unmount) 시에도 `fetch`의 `keepalive: true` 옵션을 통해 B2 업로드가 끝각까지 완료되도록 유지함.
+- **카메라 자동 시작 및 이탈/탭전환 시 녹화 연속성 유지 (2026-07-28 사용자 지시)**: 페이지 로드 시 즉시 웹캠을 켜고, `MediaRecorder`에 `timeslice(1000ms)`를 부여하여 탭 전환이나 타 앱 창 활성화 시에도 백그라운드 미디어 엔진이 끊김 없이 데이터를 모으도록 처리함. 탭 전환(`visibilitychange`)이나 창 이동 시 비디오 재생 정지를 자동 복구하며, 페이지 이동(`pagehide`/`beforeunload`/unmount) 시에도 진행 중 녹화를 finalize해서 업로드함.
+  - **정정**: 예전에 여기 적혀 있던 "업로드에 `fetch keepalive: true`" 는 **제거됨**(2026-07-28, 39719b5) — `keepalive` 요청은 본문 **64KB 제한**이 있어 영상 PUT이 통째로 실패했다. 다시 넣지 말 것. 대신 아래 주기적 flush로 커버한다.
+  - **주기적 자동 flush 20초 (2026-08-05, a2f1195)**: `CameraView`의 `autoFlushIntervalMs`(기본 20000, 0이면 비활성)가 20초마다 finalize→업로드→새 녹화 시작을 반복한다. VrmMotion처럼 계속 켜져 있는 앱에서 **iOS Safari가 unmount 시점 업로드를 취소**해 영상이 통째로 유실되던 문제 대응. 스냅샷/스캔 완료 시엔 페이지가 살아있는 동안 `flushKey`를 bump해 즉시 업로드.
+  - **업로드 견고화 (2026-08-05, 5906cc8 / a73c5e2)**: ① `MediaRecorder` mime 후보를 vp8/vp9-opus → mp4(avc1/h264) → quicktime 순으로 넓히고, 전부 실패하면 **옵션 없는 기본 `new MediaRecorder(stream)`** 으로 폴백(사파리/구형 안드로이드). finalize 시 `requestData()`를 먼저 호출해 마지막 청크 유실 방지. ② 오디오 트랙이 없거나 거부된 경우의 폴백 정리. ③ `/api/recordings`는 미지의 content-type을 400으로 거절하던 것을 **`video/webm`으로 가정하고 통과**시키도록 완화(확장자 표도 mov/mkv/ogv/weba/m4a/ogg 추가) — presigned URL 단계에서 업로드가 막히던 원인. ④ `lib/b2.ts`에 `forcePathStyle: true`(B2 S3 호환 엔드포인트 호환성).
 - **작업 완료 시 항상 커밋 & 푸시 진행 (2026-07-28 사용자 지시)**: 기능 구현이나 수정 작업이 완료되면 반드시 `git commit` 및 `git push origin visionlab`을 즉시 진행하여 Vercel 실기기 환경에 바로 반영되도록 함.
 - **질문하지 말고 알아서 진행**: 사용자가 "지금부터 질문하지 말고 편의성과 보안성 알아서 조절해서 만들어"라고 명시적으로 지시함 — 애매한 부분은 스스로 판단해서 진행.
 - **아키텍처 (2026-07-24 사용자 확인)**: 분석(BPM/톤/얼굴형)은 온디바이스(브라우저)에서 계산됨. 자체 백엔드 서버는 없음 — Vercel 서버리스 위의 프론트 앱이고, 녹화 영상은 브라우저에서 Backblaze B2 스토리지로 직접 업로드됨(`/api/recordings`는 presigned URL 발급용 서버리스 함수일 뿐). 홈에 "별도의 서버 없이 브라우저에서 처리되는 프론트 앱" 고지 문구를 사용자 지시로 표기함.
@@ -51,9 +69,10 @@
    - **파일명 및 폴더 구조 수정**: `route.ts`의 B2 키를 `<label>/<YYYY-MM-DD>/<ip>/<HHMMSS>-<label>-<shortid>.<ext>`(모듈/날짜/IP/시간-모듈-ID)로 변경 → 날짜별 하위에 클라이언트 IP별 폴더로 저장됨. 예: `heartpulse/2026-07-28/123.45.67.89/143022-heartpulse-a1b2c3d4.webm`.
    - **분할은 감수(2026-07-26 사용자 재확인)**: 잠깐 "flush 후 재시작 제거"로 세션당 1파일을 시도했으나, 사용자가 **"웹캠이 켜져 있으면 그 순간들은 무조건 다 녹화"**를 우선함(재스캔·idle 포함). 그래서 flush 후 **재시작을 유지**(`CameraView` flushKey `useEffect`가 finalize→beginRecording) → 완료 후 idle/재스캔도 계속 녹화되고, 그만큼 파일이 여러 개로 나뉘는 건 **의도된 트레이드오프**. PersonalFrame 전/후면 2파일도 정상. 이 동작(전원=녹화)을 임의로 되돌리지 말 것.
 
-2. **PokéMatch — 비인간형/구형 오탐 필터링 및 UI 정리 (2026-07-28 수정됨)**:
+2. **PokéMatch — 비인간형/구형 오탐 필터링 및 UI 정리 (2026-07-28 수정, 07-29 마무리)**:
    - **조치 1**: 사람 얼굴 스캔 시 비인간형 형태(`fish`, `bug-wings`, `tentacles`, `armor`, `ball`, `blob`, `quadruped`) 및 오탐 쏠림 종(`jigglypuff`, `electrode`, `chi_yu`, `goldeen` 등)을 완전히 필터링/제외 처리(`NON_HUMAN_EXCLUDE_SHAPES`, `HUB_EXCLUDE_SLUGS`). 실제 캐릭터성 인간형/직립형 포켓몬 위주로 매칭되도록 개편.
    - **조치 2 (사용자 요청)**: `AI 정밀 4대 세부 분석 리포트` UI 섹션을 완전히 제거.
+   - **조치 3 (2026-07-29)**: 허브 붕괴/사람마다 같은 결과 문제를 랭킹 엔진 레벨에서 해결(humanMean 차감 + muUnique/sdUnique + 저기준선 몬스터 배제 + NMS 다양성). 자세한 내용은 위 **VL-6 "랭킹 엔진 최종형"** 항목 참조. 이후 사용자 재보고 없음 → 일단 해결된 것으로 본다.
 
 3. **HeartPulse — 심박 측정 정확도가 많이 떨어지는 듯**: (사용자 지시로 이제 착수) 실제 심박 대비 오차 큼. 점검 대상: DeepPhys 경로 실제 사용 여부/전처리, POS 폴백 빈도, 밴드패스·피크검출·`estimateBpmAndHrv`의 FFT 지배주파수 산출, 30초 창/프레임레이트 추정(`effectiveFps`), 조명·움직임 영향. 가능하면 알려진 BPM(맥박계)과 비교할 수 있게 사용자에게 기준값 요청.
 
@@ -61,8 +80,10 @@
 
 5. **PersonalFrame — 결과 이미지 저장 내용이 너무 빈약함 (2026-07-27 수정됨)**: `lib/resultCard.ts`의 `drawPersonalFrameCard`를 완전 재설계함. 1080x1350 PNG 내 4개 카드 블록(피부 톤/시즌 요약, 어울리는/피해야 할 대표 컬러 팔레트 칩, 메이크업·헤어·액세서리·패션 스타일 연출 가이드, 얼굴형·길이/너비·턱선형성각 골격 지표)으로 확장하여 화면 결과와 동등한 풍부한 수준으로 생성.
 
-## 남은 일 (기존)
+## 남은 일
 
+- **HeartPulse 심박 정확도**: 위 3번 항목이 **여전히 미해결**된 최우선 과제. (VrmMotion 작업이 먼저 들어와서 밀렸음.)
+- **VrmMotion 실기기 확인**: 축 매핑은 `?debug` 축 스윕 + `applyTrackingToVRM` end-to-end로 수치 검증됨(측면 들기 dY −0.60→+0.615, 전방 들기 +0.167→+0.435). 남은 건 실제 웹캠에서의 체감 — 좌우 거울 방향, 다리/허리 흔들림, 모바일 FPS(pose full 모델 부담), 20초 flush로 vrmmotion 클립이 B2에 실제로 쌓이는지.
 - **실제 기기(진짜 웹캠)로 테스트**: 이 프로젝트를 다루는 Claude 세션은 샌드박스 브라우저라 실제 카메라 접근이 정책상 막혀 있어 직접 테스트 불가능. 사용자가 실제 폰/노트북으로 열어봐야 함. 콘솔 에러 있으면 붙여넣어 달라고 요청하면 됨.
 - **오디오 녹음 실기기 확인**: 권한창에 마이크가 함께 뜨는지, 업로드 파일에 소리가 들어가는지.
 
