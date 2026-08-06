@@ -2,8 +2,11 @@ import { PoseLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 const TASKS_VISION_VERSION = "0.10.35";
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VISION_VERSION}/wasm`;
+// "full" gives markedly better landmark accuracy/stability than "lite" (the
+// avatar tracked poorly on lite), while staying fast enough for real-time on
+// GPU delegate. "heavy" is more accurate still but too slow for smooth capture.
 const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
 
 let posePromise: Promise<PoseLandmarker> | null = null;
 

@@ -41,7 +41,9 @@ export class VRMSceneManager {
       0.1,
       20
     );
-    this.camera.position.set(0, 1.4, 2.2);
+    // Pulled back + slightly lower so the upper body and raised/lowered arms
+    // stay in frame (motion capture needs to see the limbs move).
+    this.camera.position.set(0, 1.15, 2.9);
 
     // 4. Lights
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -53,7 +55,7 @@ export class VRMSceneManager {
 
     // 5. Controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 1.2, 0);
+    this.controls.target.set(0, 1.0, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
 
@@ -100,12 +102,13 @@ export class VRMSceneManager {
         VRMUtils.rotateVRM0(vrm);
         this.scene.add(vrm.scene);
 
-        // Adjust camera target
+        // Aim the orbit pivot at the chest (a bit below the head) so the framing
+        // shows the torso + arms, not just the face.
         const headNode = vrm.humanoid?.getRawBoneNode("head");
         if (headNode) {
           const headPos = new THREE.Vector3();
           headNode.getWorldPosition(headPos);
-          this.controls.target.copy(headPos);
+          this.controls.target.set(headPos.x, headPos.y - 0.4, headPos.z);
         }
 
         resolve(vrm);

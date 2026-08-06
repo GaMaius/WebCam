@@ -42,6 +42,7 @@ export function CameraView({
   recordLabel,
   flushKey = 0,
   autoFlushIntervalMs = 20000,
+  showControls = true,
   onReady,
   onStopped,
   overlay,
@@ -53,6 +54,10 @@ export function CameraView({
   maxWidth?: number;
   guide?: "none" | "face";
   guideHint?: string;
+  /** Show the on-stage control bar (facing tag / switch / stop). Set false for
+   * a compact embedded self-view (e.g. a picture-in-picture) where recording is
+   * managed by the page lifecycle rather than a manual stop button. */
+  showControls?: boolean;
   /** Whether to record the raw stream in the background and upload it to
    * storage when the camera stops/switches. Defaults to true — every moment
    * the webcam is on is recorded unless a caller explicitly opts out with
@@ -311,7 +316,7 @@ export function CameraView({
         </div>
       )}
 
-      {status === "ready" && (
+      {status === "ready" && showControls && (
         <div className={styles.controls}>
           <span className={styles.facingTag}>
             {facing === "user" ? "전면" : "후면"} 카메라

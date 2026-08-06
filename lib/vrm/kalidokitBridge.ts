@@ -11,6 +11,10 @@ export interface LandmarkFrameData {
   rightHandLandmarks?: NormalizedLandmark[];
 }
 
+// Exposed for the dev-only ?debug harness so calibration/axis probes can call
+// the solver directly. Not used by the app at runtime.
+export const _KalidokitForDebug = Kalidokit;
+
 // three-vrm's normalized humanoid abstracts away VRM0/VRM1 differences, so
 // Kalidokit's rig output maps DIRECTLY onto the normalized bones — same-named
 // bone, no left/right swap, no axis sign-flips. (The previous implementation
@@ -33,13 +37,23 @@ const LERP_FACE = 0.3;
 type Rot = { x: number; y: number; z: number; rotationOrder?: string };
 
 /** Applies a Kalidokit euler rotation to a VRM bone, honoring the rig's own
- * rotationOrder, with a deadzone + slerp smoothing. */
+ * rotationOrder, with a deadzone + slerp smoothing.
+ *
+ * `flipZ`: Kalidokit's rig was authored for the VRM0-era raw-bone axis
+ * convention; on our VRM 1.0 model driven through three-vrm's *normalized*
+ * bones, the ROLL (local Z) of the body/limb rotations comes out inverted —
+ * so a side-raise (abduction) drives the arm DOWN instead of up. Empirically
+ * (see the ?debug axis sweep) only Z is inverted: X (pitch, forward/back raise)
+ * and Y (yaw/twist) map correctly, and negating them re-breaks the pitch. So we
+ * flip only Z on pose-derived bones. Face/head rotations use a different
+ * (Face.solve) convention and are left untouched. */
 function rigRotation(
   vrm: VRM,
   boneName: string,
   rot: Rot | undefined,
   dampener = 1,
-  lerp = LERP_BODY
+  lerp = LERP_BODY,
+  flipZ = false
 ) {
   if (!rot) return;
   const node = getNode(vrm, boneName);
@@ -47,7 +61,7 @@ function rigRotation(
   const euler = new THREE.Euler(
     rot.x * dampener,
     rot.y * dampener,
-    rot.z * dampener,
+    rot.z * dampener * (flipZ ? -1 : 1),
     (rot.rotationOrder as THREE.EulerOrder) || "XYZ"
   );
   const target = new THREE.Quaternion().setFromEuler(euler);
@@ -87,7 +101,9 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     }
   }
 
-  // 2. Pose — torso, arms, legs. Direct same-name mapping (no swap/flip).
+  // 2. Pose — torso, arms, legs. Same-name mapping (no L/R swap: Kalidokit
+  // already crosses MediaPipe's sides to produce the mirror/selfie result),
+  // with ROLL (Z) inverted for the VRM1 normalized-bone convention.
   if (frame.poseWorldLandmarks && frame.poseWorldLandmarks.length > 20 && frame.poseLandmarks) {
     // Skip when the hips are hidden/unreliable to avoid ghost motion.
     const hipLandmark = frame.poseLandmarks[23] || frame.poseLandmarks[24];
@@ -99,23 +115,23 @@ export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
     });
 
     if (poseRig) {
-      rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7);
-      rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45);
-      rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25);
+      rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7, LERP_BODY, true);
+      rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45, LERP_BODY, true);
+      rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25, LERP_BODY, true);
 
-      rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1);
-      rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1);
-      rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1);
-      rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1);
+      rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1, LERP_BODY, true);
+      rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1, LERP_BODY, true);
+      rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1, LERP_BODY, true);
+      rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1, LERP_BODY, true);
 
       const kneeL = frame.poseLandmarks[25];
       const kneeR = frame.poseLandmarks[26];
       const legsVisible = (kneeL?.visibility ?? 1) > 0.4 && (kneeR?.visibility ?? 1) > 0.4;
       if (legsVisible) {
-        rigRotation(vrm, "rightUpperLeg", poseRig.RightUpperLeg as Rot, 1, LERP_LEG);
-        rigRotation(vrm, "rightLowerLeg", poseRig.RightLowerLeg as Rot, 1, LERP_LEG);
-        rigRotation(vrm, "leftUpperLeg", poseRig.LeftUpperLeg as Rot, 1, LERP_LEG);
-        rigRotation(vrm, "leftLowerLeg", poseRig.LeftLowerLeg as Rot, 1, LERP_LEG);
+        rigRotation(vrm, "rightUpperLeg", poseRig.RightUpperLeg as Rot, 1, LERP_LEG, true);
+        rigRotation(vrm, "rightLowerLeg", poseRig.RightLowerLeg as Rot, 1, LERP_LEG, true);
+        rigRotation(vrm, "leftUpperLeg", poseRig.LeftUpperLeg as Rot, 1, LERP_LEG, true);
+        rigRotation(vrm, "leftLowerLeg", poseRig.LeftLowerLeg as Rot, 1, LERP_LEG, true);
       }
     }
   }

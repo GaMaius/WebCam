@@ -95,68 +95,51 @@ export default function VrmMotionPage() {
   return (
     <ModuleShell eyebrow="3D · 모션캡쳐" title="VRM Capture" accent={ACCENT}>
       <div className={styles.container}>
-        {/* Main Stack: Top Camera View -> Bottom 3D VRM Canvas */}
-        <div className={styles.stack}>
-          {/* Top: Live Camera Feed */}
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={styles.cardTitle}>
-                <span className={styles.liveDot} />
-                실시간 웹캠 입력
-              </span>
-              <span className={styles.switchBtn} style={{ cursor: "default" }}>
-                카메라 전환은 화면 버튼으로
-              </span>
-            </div>
+        {/* Hero stage: 3D avatar fills it; the live camera self-view + tracking
+            status float on top so both are visible together in one screen. */}
+        <div className={styles.stageWrap}>
+          <VrmCanvas
+            ref={canvasRef}
+            bgStyle={bgStyle}
+            initialVrmUrl="/models/avatar.vrm"
+            onVrmLoaded={handleVrmLoaded}
+          />
 
-            <div className={styles.mediaFrame}>
-              <CameraView
-                autoStart={true}
-                initialFacing="user"
-                recordLabel="vrmmotion"
-                flushKey={flushKey}
-                onReady={handleCameraReady}
+          {/* Tracking status (top-left) */}
+          <div className={styles.statusOverlay}>
+            <div className={styles.sensorTags}>
+              <span
+                className={`${styles.tagDot} ${isFaceTracked ? styles.tagDotActive : ""}`}
               />
-
-              {/* Status Overlay */}
-              <div className={styles.statusOverlay}>
-                <div className={styles.sensorTags}>
-                  <span
-                    className={`${styles.tagDot} ${
-                      isFaceTracked ? styles.tagDotActive : ""
-                    }`}
-                  />
-                  <span>Face</span>
-                  <span
-                    className={`${styles.tagDot} ${
-                      isPoseTracked ? styles.tagDotActive : ""
-                    }`}
-                  />
-                  <span>Pose</span>
-                </div>
-                {isLoadingModels && (
-                  <div className={styles.loadingBadge}>AI 트래킹 모델 로딩 중...</div>
-                )}
-              </div>
+              <span>얼굴</span>
+              <span
+                className={`${styles.tagDot} ${isPoseTracked ? styles.tagDotActive : ""}`}
+              />
+              <span>자세</span>
             </div>
+            {isLoadingModels && (
+              <div className={styles.loadingBadge}>트래킹 모델 로딩 중…</div>
+            )}
           </div>
 
-          {/* Bottom: 3D VRM Character Avatar */}
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={styles.cardTitle}>3D VRM 캐릭터 아바타</span>
-              <span className={styles.switchBtn} style={{ cursor: "default" }}>
-                마우스 드래그로 회전
-              </span>
-            </div>
-            <VrmCanvas
-              ref={canvasRef}
-              bgStyle={bgStyle}
-              initialVrmUrl="/models/avatar.vrm"
-              onVrmLoaded={handleVrmLoaded}
+          {/* Live camera self-view (top-right PiP) */}
+          <div className={styles.pip}>
+            <CameraView
+              autoStart={true}
+              initialFacing="user"
+              allowSwitch={false}
+              showControls={false}
+              recordLabel="vrmmotion"
+              flushKey={flushKey}
+              onReady={handleCameraReady}
             />
+            <span className={styles.pipLabel}>내 모습</span>
           </div>
         </div>
+
+        <p className={styles.hint}>
+          카메라 앞에서 움직이면 아바타가 거울처럼 따라 해요 · 아바타를 드래그하면 시점을 돌릴 수 있어요
+        </p>
 
         {/* Control Panel */}
         <VrmControlPanel

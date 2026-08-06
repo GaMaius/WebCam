@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadFaceLandmarker, FaceLandmarker } from "@/lib/faceLandmarker";
 import { loadPoseLandmarker, PoseLandmarker } from "@/lib/poseLandmarker";
-import { applyTrackingToVRM, LandmarkFrameData } from "@/lib/vrm/kalidokitBridge";
+import { applyTrackingToVRM, LandmarkFrameData, _KalidokitForDebug } from "@/lib/vrm/kalidokitBridge";
 import type { VRM } from "@pixiv/three-vrm";
 
 export function useVrmMotionScan(vrm: VRM | null, videoRef: React.RefObject<HTMLVideoElement | null>) {
@@ -49,7 +49,7 @@ export function useVrmMotionScan(vrm: VRM | null, videoRef: React.RefObject<HTML
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!new URLSearchParams(window.location.search).has("debug")) return;
-    (window as unknown as { __vrmDebug?: unknown }).__vrmDebug = { vrm, applyTrackingToVRM };
+    (window as unknown as { __vrmDebug?: unknown }).__vrmDebug = { vrm, applyTrackingToVRM, Kalidokit: _KalidokitForDebug };
   }, [vrm]);
 
   // 2. Continuous Tracking Loop
