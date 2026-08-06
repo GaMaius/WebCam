@@ -70,6 +70,7 @@ export class VRMSceneManager {
   private currentAvatar: MotionAvatar | null = null;
   private clock: THREE.Clock;
   private animId: number | null = null;
+  private framing: "full" | "upper" = "upper";
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -214,14 +215,33 @@ export class VRMSceneManager {
     // has to sit in the scene at identity — never under the (scaled) model root.
     for (const extra of avatar.extraRoots) this.scene.add(extra);
 
-    // Aim the orbit pivot at the chest (a bit below the head) so the framing
-    // shows the torso + arms, not just the face.
-    const headNode = avatar.humanoid?.getRawBoneNode("head");
-    if (headNode) {
-      const headPos = new THREE.Vector3();
-      headNode.getWorldPosition(headPos);
+    this.frameAvatar();
+  }
+
+  /** Aims the camera at the avatar. "upper" pulls in to a bust framing for the
+   * face+hands mode; "full" keeps the wider body shot. */
+  public setFraming(framing: "full" | "upper") {
+    this.framing = framing;
+    this.frameAvatar();
+  }
+
+  private frameAvatar() {
+    const headNode = this.currentAvatar?.humanoid?.getRawBoneNode("head");
+    if (!headNode) return;
+
+    const headPos = new THREE.Vector3();
+    headNode.getWorldPosition(headPos);
+
+    if (this.framing === "upper") {
+      // Chest-up: the face carries the performance here, and hands are raised
+      // into this area anyway.
+      this.controls.target.set(headPos.x, headPos.y - 0.18, headPos.z);
+      this.camera.position.set(headPos.x, headPos.y - 0.05, headPos.z + 1.35);
+    } else {
       this.controls.target.set(headPos.x, headPos.y - 0.4, headPos.z);
+      this.camera.position.set(0, 1.15, 2.9);
     }
+    this.controls.update();
   }
 
   public getAvatar(): MotionAvatar | null {

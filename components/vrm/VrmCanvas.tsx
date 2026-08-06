@@ -11,6 +11,7 @@ export interface VrmCanvasRef {
   loadAvatar: (urlOrBuffer: string | ArrayBuffer, nameHint?: string) => Promise<MotionAvatar>;
   loadPreset: (preset: AvatarPreset) => Promise<MotionAvatar>;
   setBgStyle: (style: BgStyle) => void;
+  setFraming: (framing: "full" | "upper") => void;
   getAvatar: () => MotionAvatar | null;
   takeSnapshot: () => string;
 }
@@ -37,6 +38,9 @@ export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
       },
       setBgStyle: (style) => {
         sceneManagerRef.current?.setBgStyle(style);
+      },
+      setFraming: (framing) => {
+        sceneManagerRef.current?.setFraming(framing);
       },
       getAvatar: () => sceneManagerRef.current?.getAvatar() ?? null,
       takeSnapshot: () => sceneManagerRef.current?.takeSnapshot() ?? "",

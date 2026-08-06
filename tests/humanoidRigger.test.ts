@@ -29,8 +29,10 @@ test("classifyBoneName maps the common conventions onto VRM human bones", () => 
   assert.equal(classifyBoneName("thigh.R"), "rightUpperLeg");
   assert.equal(classifyBoneName("shin_L"), "leftLowerLeg");
   assert.equal(classifyBoneName("clavicle_r"), "rightShoulder");
-  // Rejected: helpers, fingers, unrelated nodes
-  assert.equal(classifyBoneName("mixamorig:LeftHandThumb2"), null);
+  // Fingers map too (needed for hand tracking) — see tests/handTracking.test.ts
+  // for the joint-by-joint cases, including VRM 1.0's shifted thumb chain.
+  assert.equal(classifyBoneName("mixamorig:LeftHandThumb2"), "leftThumbProximal");
+  // Rejected: helpers and unrelated nodes
   assert.equal(classifyBoneName("LeftArmTwist"), null);
   assert.equal(classifyBoneName("IK_Hand_L"), null);
   assert.equal(classifyBoneName("Armature"), null);
@@ -116,8 +118,9 @@ test("buildHumanoidRig maps every required bone of a Mixamo-style rig", () => {
     assert.ok(humanoid.getRawBoneNode(name), `missing ${name}`);
     assert.ok(mapped.includes(name), `${name} not reported as mapped`);
   }
-  // Fingers are deliberately not mapped.
-  assert.equal(humanoid.getRawBoneNode("leftIndexProximal"), null);
+  // This fixture has one finger joint per hand, and it maps (fingers are
+  // optional, so a rig without them still passes the required-bone check).
+  assert.ok(humanoid.getRawBoneNode("leftIndexProximal"), "finger joints should map");
 });
 
 test("normalization scales a centimetre rig to human size and puts feet near the floor", () => {

@@ -3,38 +3,62 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadFaceLandmarker, FaceLandmarker } from "@/lib/faceLandmarker";
 import { loadPoseLandmarker, PoseLandmarker } from "@/lib/poseLandmarker";
-import { applyTrackingToVRM, LandmarkFrameData, _KalidokitForDebug } from "@/lib/vrm/kalidokitBridge";
+import { loadHandLandmarker, HandLandmarker } from "@/lib/handLandmarker";
+import {
+  applyTrackingToVRM,
+  LandmarkFrameData,
+  _KalidokitForDebug,
+  type TrackingMode,
+} from "@/lib/vrm/kalidokitBridge";
 import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
+
+/** Hands are the most expensive stage (palm detect + landmarks, up to 2 hands),
+ * and fingers read fine at half rate, so they run every other frame. */
+const HAND_EVERY_N_FRAMES = 2;
 
 export function useVrmMotionScan(
   vrm: MotionAvatar | null,
-  videoRef: React.RefObject<HTMLVideoElement | null>
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  mode: TrackingMode = "upper"
 ) {
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
   const [poseLandmarker, setPoseLandmarker] = useState<PoseLandmarker | null>(null);
+  const [handLandmarker, setHandLandmarker] = useState<HandLandmarker | null>(null);
 
   const [fps, setFps] = useState(0);
   const [isFaceTracked, setIsFaceTracked] = useState(false);
   const [isPoseTracked, setIsPoseTracked] = useState(false);
+  const [handCount, setHandCount] = useState(0);
 
   const lastVideoTimeRef = useRef(-1);
   const animFrameIdRef = useRef<number | null>(null);
   const frameCountRef = useRef(0);
   const lastFpsCalcTimeRef = useRef(performance.now());
+  const tickRef = useRef(0);
+  // Hands persist across skipped frames so the avatar doesn't drop back to a
+  // rest pose every other frame.
+  const lastHandsRef = useRef<{
+    left?: LandmarkFrameData["leftHandLandmarks"];
+    right?: LandmarkFrameData["rightHandLandmarks"];
+  }>({});
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   // 1. Initialize MediaPipe Models
   useEffect(() => {
     let isMounted = true;
     async function initModels() {
       try {
-        const [faceLm, poseLm] = await Promise.all([
+        const [faceLm, poseLm, handLm] = await Promise.all([
           loadFaceLandmarker(),
           loadPoseLandmarker(),
+          loadHandLandmarker(),
         ]);
         if (isMounted) {
           setFaceLandmarker(faceLm);
           setPoseLandmarker(poseLm);
+          setHandLandmarker(handLm);
           setIsLoadingModels(false);
         }
       } catch (e) {
@@ -63,6 +87,7 @@ export function useVrmMotionScan(
 
       if (video.currentTime !== lastVideoTimeRef.current) {
         lastVideoTimeRef.current = video.currentTime;
+        tickRef.current++;
 
         const frameData: LandmarkFrameData = {};
 
@@ -72,6 +97,7 @@ export function useVrmMotionScan(
             const faceResult = faceLandmarker.detectForVideo(video, now);
             if (faceResult.faceLandmarks && faceResult.faceLandmarks.length > 0) {
               frameData.faceLandmarks = faceResult.faceLandmarks[0];
+              frameData.faceBlendshapes = faceResult.faceBlendshapes?.[0]?.categories;
               setIsFaceTracked(true);
             } else {
               setIsFaceTracked(false);
@@ -81,7 +107,8 @@ export function useVrmMotionScan(
           }
         }
 
-        // Pose tracking
+        // Pose tracking — still needed in "upper" mode: arms/torso come from it,
+        // only the legs are left undriven.
         if (poseLandmarker) {
           try {
             const poseResult = poseLandmarker.detectForVideo(video, now);
@@ -97,9 +124,30 @@ export function useVrmMotionScan(
           }
         }
 
+        // Hand tracking, at reduced cadence.
+        if (handLandmarker && tickRef.current % HAND_EVERY_N_FRAMES === 0) {
+          try {
+            const handResult = handLandmarker.detectForVideo(video, now);
+            const next: typeof lastHandsRef.current = {};
+            const hands = handResult.landmarks ?? [];
+            hands.forEach((lm, i) => {
+              // MediaPipe's handedness label is used verbatim as the VRM side.
+              const label = handResult.handedness?.[i]?.[0]?.categoryName;
+              if (label === "Left") next.left = lm;
+              else if (label === "Right") next.right = lm;
+            });
+            lastHandsRef.current = next;
+            setHandCount(hands.length);
+          } catch (err) {
+            // ignore frame error
+          }
+        }
+        frameData.leftHandLandmarks = lastHandsRef.current.left;
+        frameData.rightHandLandmarks = lastHandsRef.current.right;
+
         // Apply tracking solved result to VRM avatar
         if (vrm) {
-          applyTrackingToVRM(vrm, frameData);
+          applyTrackingToVRM(vrm, frameData, modeRef.current);
         }
 
         // FPS calculation
@@ -113,7 +161,7 @@ export function useVrmMotionScan(
     }
 
     animFrameIdRef.current = requestAnimationFrame(processFrame);
-  }, [faceLandmarker, poseLandmarker, vrm, videoRef]);
+  }, [faceLandmarker, poseLandmarker, handLandmarker, vrm, videoRef]);
 
   useEffect(() => {
     if (!isLoadingModels) {
@@ -131,5 +179,6 @@ export function useVrmMotionScan(
     fps,
     isFaceTracked,
     isPoseTracked,
+    handCount,
   };
 }

@@ -20,7 +20,11 @@ async function createLandmarker(delegate: "GPU" | "CPU"): Promise<FaceLandmarker
     },
     runningMode: "VIDEO",
     numFaces: 1,
-    outputFaceBlendshapes: false,
+    // The 52 ARKit blendshapes come from a head on this same model, so enabling
+    // them is far cheaper than a second model — and they drive VRM expressions
+    // (brows and gaze included) much better than a geometric solve.
+    // lib/vrm/faceExpressions.ts consumes them.
+    outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: false,
   });
 }

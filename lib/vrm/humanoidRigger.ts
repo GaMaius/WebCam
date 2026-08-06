@@ -77,17 +77,21 @@ const SKIP_TOKENS = new Set([
   "bust",
 ]);
 
-const FINGER_TOKENS = new Set([
-  "thumb",
-  "index",
-  "middle",
-  "ring",
-  "pinky",
-  "little",
-  "finger",
-  "f00",
-  "f01",
-]);
+// Finger joint names by index. Rigs number them 1..3 from the palm outward
+// (Mixamo `LeftHandThumb1`, VRoid `J_Bip_L_Thumb1`, Blender `f_index.01.L`).
+// VRM 1.0's thumb chain is Metacarpal/Proximal/Distal while the other four are
+// Proximal/Intermediate/Distal — the same three joints under different names.
+const THUMB_JOINTS = ["ThumbMetacarpal", "ThumbProximal", "ThumbDistal"];
+const FINGER_JOINTS = ["Proximal", "Intermediate", "Distal"];
+/** Rig token -> VRM finger name. `pinky` is VRM's `little`. */
+const FINGER_NAMES: Record<string, string> = {
+  thumb: "Thumb",
+  index: "Index",
+  middle: "Middle",
+  ring: "Ring",
+  pinky: "Little",
+  little: "Little",
+};
 
 /** Target height in metres after normalization (FBX is very often in cm). */
 const TARGET_HEIGHT = 1.6;
@@ -136,12 +140,25 @@ export function classifyBoneName(name: string): VRMHumanBoneName | null {
   const tokens = tokenizeBoneName(name);
   if (tokens.length === 0) return null;
   if (tokens.some((t) => SKIP_TOKENS.has(t))) return null;
-  if (tokens.some((t) => FINGER_TOKENS.has(t))) return null;
 
   const has = (t: string) => tokens.includes(t);
   const side = detectSide(tokens);
   const numToken = tokens.find((t) => /^\d+$/.test(t));
   const num = numToken ? parseInt(numToken, 10) : null;
+
+  // Fingers first: Mixamo's finger names contain "Hand" (`LeftHandIndex1`), so
+  // checking the hand slot before this would swallow every finger joint.
+  const fingerToken = tokens.find((t) => t in FINGER_NAMES);
+  if (fingerToken && side) {
+    const finger = FINGER_NAMES[fingerToken];
+    // Joint index is 1-based; a name with no number is the first joint.
+    const jointIndex = (num ?? 1) - 1;
+    if (jointIndex < 0 || jointIndex > 2) return null;
+    const joint =
+      finger === "Thumb" ? THUMB_JOINTS[jointIndex] : `${finger}${FINGER_JOINTS[jointIndex]}`;
+    // side is already "left"/"right" and joint is PascalCase -> "leftIndexProximal".
+    return `${side}${joint}` as VRMHumanBoneName;
+  }
 
   // Torso / head — no side.
   if (has("hips") || has("hip") || has("pelvis")) return "hips";

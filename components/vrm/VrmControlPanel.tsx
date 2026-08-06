@@ -2,6 +2,7 @@
 
 import React, { useRef } from "react";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
+import type { TrackingMode } from "@/lib/vrm/kalidokitBridge";
 import { AVATAR_PRESETS, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./VrmControlPanel.module.css";
 
@@ -17,6 +18,9 @@ interface VrmControlPanelProps {
   presetId: string;
   onPresetChange: (preset: AvatarPreset) => void;
   isLoadingAvatar?: boolean;
+  mode: TrackingMode;
+  onModeChange: (mode: TrackingMode) => void;
+  handCount: number;
 }
 
 export function VrmControlPanel({
@@ -31,6 +35,9 @@ export function VrmControlPanel({
   presetId,
   onPresetChange,
   isLoadingAvatar = false,
+  mode,
+  onModeChange,
+  handCount,
 }: VrmControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +72,33 @@ export function VrmControlPanel({
 
       {/* Controls Group */}
       <div className={styles.controlGrid}>
+        {/* Tracking mode */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>트래킹 범위</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
+            {(
+              [
+                { id: "upper", label: "얼굴 + 손" },
+                { id: "full", label: "전신" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onModeChange(m.id)}
+                className={`${styles.modeBtn} ${mode === m.id ? styles.modeBtnActive : ""}`}
+                style={mode === m.id ? { color: "#fffdf7" } : { color: "#444838" }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <span className={styles.subText} style={{ color: "#7a7e68" }}>
+            {mode === "upper"
+              ? `표정(ARKit 52) + 손가락 · 인식된 손 ${handCount}개 · 다리는 움직이지 않음`
+              : "다리까지 구동 · 전신이 카메라에 들어와야 안정적"}
+          </span>
+        </div>
+
         {/* Built-in avatars — pointless as a picker while there is only one. */}
         {AVATAR_PRESETS.length > 1 && (
         <div className={styles.fieldGroup}>

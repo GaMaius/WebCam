@@ -9,6 +9,7 @@ import { VrmControlPanel } from "@/components/vrm/VrmControlPanel";
 import { useVrmMotionScan } from "@/hooks/useVrmMotionScan";
 import { drawVrmMotionCard, VrmMotionResult } from "@/lib/resultCard";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
+import type { TrackingMode } from "@/lib/vrm/kalidokitBridge";
 import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
 import { DEFAULT_PRESET, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./page.module.css";
@@ -26,15 +27,24 @@ export default function VrmMotionPage() {
   const [isLoadingAvatar, setIsLoadingAvatar] = useState(false);
   const [avatarNotes, setAvatarNotes] = useState<string[]>([]);
   const [bgStyle, setBgStyle] = useState<BgStyle>("dark");
+  // Face+hands is the default: a seated user rarely has their legs in frame.
+  const [mode, setMode] = useState<TrackingMode>("upper");
 
   const [capturedResult, setCapturedResult] = useState<VrmMotionResult | null>(null);
   const [flushKey, setFlushKey] = useState(0);
 
   // Motion Tracking Hook
-  const { isLoadingModels, fps, isFaceTracked, isPoseTracked } = useVrmMotionScan(
+  const { isLoadingModels, fps, isFaceTracked, isPoseTracked, handCount } = useVrmMotionScan(
     currentVrm,
-    videoRef
+    videoRef,
+    mode
   );
+
+  // Keep the 3D framing in step with the tracking range.
+  const handleModeChange = useCallback((next: TrackingMode) => {
+    setMode(next);
+    canvasRef.current?.setFraming(next);
+  }, []);
 
   const handleCameraReady = useCallback((handle: CameraHandle) => {
     videoRef.current = handle.video;
@@ -137,6 +147,10 @@ export default function VrmMotionPage() {
                 className={`${styles.tagDot} ${isPoseTracked ? styles.tagDotActive : ""}`}
               />
               <span>자세</span>
+              <span
+                className={`${styles.tagDot} ${handCount > 0 ? styles.tagDotActive : ""}`}
+              />
+              <span>손 {handCount}</span>
             </div>
             {isLoadingModels && (
               <div className={styles.loadingBadge}>트래킹 모델 로딩 중…</div>
@@ -185,6 +199,9 @@ export default function VrmMotionPage() {
           presetId={presetId}
           onPresetChange={handlePresetChange}
           isLoadingAvatar={isLoadingAvatar}
+          mode={mode}
+          onModeChange={handleModeChange}
+          handCount={handCount}
         />
 
         {/* Capture Result Modal */}
