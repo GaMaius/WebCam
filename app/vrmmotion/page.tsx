@@ -9,7 +9,8 @@ import { VrmControlPanel } from "@/components/vrm/VrmControlPanel";
 import { useVrmMotionScan } from "@/hooks/useVrmMotionScan";
 import { drawVrmMotionCard, VrmMotionResult } from "@/lib/resultCard";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
-import type { VRM } from "@pixiv/three-vrm";
+import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
+import { DEFAULT_PRESET, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./page.module.css";
 
 const ACCENT = "#7b52b9";
@@ -18,9 +19,12 @@ export default function VrmMotionPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<VrmCanvasRef | null>(null);
 
-  const [currentVrm, setCurrentVrm] = useState<VRM | null>(null);
-  const [vrmName, setVrmName] = useState("Constraint Sample (기본)");
+  const [currentVrm, setCurrentVrm] = useState<MotionAvatar | null>(null);
+  const [vrmName, setVrmName] = useState(DEFAULT_PRESET.label);
   const [isCustomLoaded, setIsCustomLoaded] = useState(false);
+  const [presetId, setPresetId] = useState(DEFAULT_PRESET.id);
+  const [isLoadingAvatar, setIsLoadingAvatar] = useState(false);
+  const [avatarNotes, setAvatarNotes] = useState<string[]>([]);
   const [bgStyle, setBgStyle] = useState<BgStyle>("dark");
 
   const [capturedResult, setCapturedResult] = useState<VrmMotionResult | null>(null);
@@ -36,36 +40,53 @@ export default function VrmMotionPage() {
     videoRef.current = handle.video;
   }, []);
 
-  const handleVrmLoaded = useCallback((vrm: VRM) => {
-    setCurrentVrm(vrm);
+  const handleVrmLoaded = useCallback((avatar: MotionAvatar) => {
+    setCurrentVrm(avatar);
+    setAvatarNotes(avatar.notes);
   }, []);
 
-  // Custom VRM Upload
+  // Custom avatar upload — .vrm, .fbx, .glb/.gltf. Non-VRM rigs get adapted to a
+  // VRM humanoid (bone-name mapping + A-pose→T-pose rest fix) in humanoidRigger.
   const handleCustomVrmUpload = async (file: File) => {
     if (!canvasRef.current) return;
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const loadedVrm = await canvasRef.current.loadVRM(arrayBuffer);
-      setCurrentVrm(loadedVrm);
-      setVrmName(file.name.replace(/\.vrm$/i, ""));
+      const loaded = await canvasRef.current.loadAvatar(arrayBuffer, file.name);
+      setCurrentVrm(loaded);
+      setVrmName(file.name.replace(/\.(vrm|fbx|glb|gltf)$/i, ""));
       setIsCustomLoaded(true);
+      setAvatarNotes(loaded.notes);
     } catch (err) {
-      console.error("Failed to load custom VRM:", err);
-      alert("VRM 파일 로딩에 실패했습니다. 올바른 3D VRM 모델인지 확인해 주세요.");
+      console.error("Failed to load custom avatar:", err);
+      const detail = err instanceof Error ? err.message : "";
+      alert(
+        detail ||
+          "3D 모델 로딩에 실패했습니다. .vrm / .fbx / .glb 캐릭터 파일인지 확인해 주세요."
+      );
     }
   };
 
-  const handleResetDefault = async () => {
+  // Built-in avatar picker (default VRM / Spider-Man FBX).
+  const handlePresetChange = async (preset: AvatarPreset) => {
     if (!canvasRef.current) return;
+    setIsLoadingAvatar(true);
     try {
-      const loadedVrm = await canvasRef.current.loadVRM("/models/avatar.vrm");
-      setCurrentVrm(loadedVrm);
-      setVrmName("Constraint Sample (기본)");
+      const loaded = await canvasRef.current.loadPreset(preset);
+      setCurrentVrm(loaded);
+      setVrmName(preset.label);
+      setPresetId(preset.id);
       setIsCustomLoaded(false);
+      setAvatarNotes(loaded.notes);
     } catch (err) {
-      console.error("Failed to reset default VRM:", err);
+      console.error("Failed to load preset avatar:", err);
+      const detail = err instanceof Error ? err.message : "";
+      alert(detail || "아바타를 불러오지 못했습니다.");
+    } finally {
+      setIsLoadingAvatar(false);
     }
   };
+
+  const handleResetDefault = () => handlePresetChange(DEFAULT_PRESET);
 
   // Snapshot Capture
   const handleTakeSnapshot = () => {
@@ -101,7 +122,7 @@ export default function VrmMotionPage() {
           <VrmCanvas
             ref={canvasRef}
             bgStyle={bgStyle}
-            initialVrmUrl="/models/avatar.vrm"
+            initialPreset={DEFAULT_PRESET}
             onVrmLoaded={handleVrmLoaded}
           />
 
@@ -141,6 +162,16 @@ export default function VrmMotionPage() {
           카메라 앞에서 움직이면 아바타가 거울처럼 따라 해요 · 아바타를 드래그하면 시점을 돌릴 수 있어요
         </p>
 
+        {/* Auto-fixes applied to a non-VRM rig (scale/axis/rest pose) + what it
+            can't do (expressions). Only shows when there is something to say. */}
+        {avatarNotes.length > 0 && (
+          <ul className={styles.notes}>
+            {avatarNotes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        )}
+
         {/* Control Panel */}
         <VrmControlPanel
           bgStyle={bgStyle}
@@ -151,6 +182,9 @@ export default function VrmMotionPage() {
           onResetDefault={handleResetDefault}
           onTakeSnapshot={handleTakeSnapshot}
           fps={fps}
+          presetId={presetId}
+          onPresetChange={handlePresetChange}
+          isLoadingAvatar={isLoadingAvatar}
         />
 
         {/* Capture Result Modal */}

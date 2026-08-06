@@ -112,6 +112,20 @@
   margin: -6px 0 0;
 }
 
+/* Auto-fix notes for adapted (FBX/glTF) rigs */
+.notes {
+  margin: 0;
+  padding: 12px 16px 12px 32px;
+  list-style: disc;
+  background: rgba(123, 82, 185, 0.08);
+  border: 1px solid rgba(123, 82, 185, 0.35);
+  border-radius: var(--radius-md, 18px);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.7;
+  color: var(--text-dim, #565a48);
+}
+
 /* Control Panel */
 .panel {
   background: var(--surface, #fffdf7) !important;

@@ -2,6 +2,7 @@
 
 import React, { useRef } from "react";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
+import { AVATAR_PRESETS, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./VrmControlPanel.module.css";
 
 interface VrmControlPanelProps {
@@ -13,6 +14,9 @@ interface VrmControlPanelProps {
   onResetDefault: () => void;
   onTakeSnapshot: () => void;
   fps: number;
+  presetId: string;
+  onPresetChange: (preset: AvatarPreset) => void;
+  isLoadingAvatar?: boolean;
 }
 
 export function VrmControlPanel({
@@ -24,16 +28,21 @@ export function VrmControlPanel({
   onResetDefault,
   onTakeSnapshot,
   fps,
+  presetId,
+  onPresetChange,
+  isLoadingAvatar = false,
 }: VrmControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.name.toLowerCase().endsWith(".vrm")) {
+      // FBX/glTF rigs are adapted to a VRM humanoid on load (bone-name mapping +
+      // rest-pose fix); only VRM carries expressions.
+      if (/\.(vrm|fbx|glb|gltf)$/i.test(file.name)) {
         onCustomVrmUpload(file);
       } else {
-        alert(".vrm 포맷의 3D 아바타 파일만 업로드할 수 있습니다.");
+        alert(".vrm / .fbx / .glb 포맷의 3D 캐릭터 파일만 업로드할 수 있습니다.");
       }
     }
   };
@@ -56,6 +65,35 @@ export function VrmControlPanel({
 
       {/* Controls Group */}
       <div className={styles.controlGrid}>
+        {/* Built-in avatars */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>기본 제공 아바타</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
+            {AVATAR_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => onPresetChange(preset)}
+                disabled={isLoadingAvatar}
+                className={`${styles.modeBtn} ${
+                  !isCustomLoaded && presetId === preset.id ? styles.modeBtnActive : ""
+                }`}
+                style={
+                  !isCustomLoaded && presetId === preset.id
+                    ? { color: "#fffdf7" }
+                    : { color: "#444838" }
+                }
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <span className={styles.subText} style={{ color: "#7a7e68" }}>
+            {isLoadingAvatar
+              ? "아바타 불러오는 중…"
+              : AVATAR_PRESETS.find((p) => p.id === presetId)?.hint ?? ""}
+          </span>
+        </div>
+
         {/* Background Setting */}
         <div className={styles.fieldGroup}>
           <label className={styles.label} style={{ color: "#444838" }}>배경 모드 (Studio / Chroma)</label>
@@ -86,11 +124,13 @@ export function VrmControlPanel({
 
         {/* Custom VRM Upload */}
         <div className={styles.fieldGroup}>
-          <label className={styles.label} style={{ color: "#444838" }}>커스텀 .vrm 아바타</label>
+          <label className={styles.label} style={{ color: "#444838" }}>
+            커스텀 아바타 (.vrm / .fbx / .glb)
+          </label>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".vrm"
+            accept=".vrm,.fbx,.glb,.gltf"
             className="hidden"
             style={{ display: "none" }}
             onChange={handleFileChange}
@@ -115,7 +155,7 @@ export function VrmControlPanel({
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
                 />
               </svg>
-              .vrm 파일 불러오기
+              3D 캐릭터 파일 불러오기
             </button>
             {isCustomLoaded && (
               <button

@@ -2,37 +2,43 @@
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { VRMSceneManager, BgStyle } from "@/lib/vrm/vrmScene";
-import type { VRM } from "@pixiv/three-vrm";
+import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
+import { DEFAULT_PRESET, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./VrmCanvas.module.css";
 
 export interface VrmCanvasRef {
-  loadVRM: (urlOrBuffer: string | ArrayBuffer) => Promise<VRM>;
+  /** `nameHint` carries the extension for uploaded buffers (.vrm/.fbx/.glb). */
+  loadAvatar: (urlOrBuffer: string | ArrayBuffer, nameHint?: string) => Promise<MotionAvatar>;
+  loadPreset: (preset: AvatarPreset) => Promise<MotionAvatar>;
   setBgStyle: (style: BgStyle) => void;
-  getVRM: () => VRM | null;
+  getAvatar: () => MotionAvatar | null;
   takeSnapshot: () => string;
 }
 
 interface VrmCanvasProps {
   bgStyle?: BgStyle;
-  initialVrmUrl?: string;
-  onVrmLoaded?: (vrm: VRM) => void;
+  initialPreset?: AvatarPreset;
+  onVrmLoaded?: (avatar: MotionAvatar) => void;
 }
 
 export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
-  ({ bgStyle = "dark", initialVrmUrl = "/models/avatar.vrm", onVrmLoaded }, ref) => {
+  ({ bgStyle = "dark", initialPreset = DEFAULT_PRESET, onVrmLoaded }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const sceneManagerRef = useRef<VRMSceneManager | null>(null);
 
     useImperativeHandle(ref, () => ({
-      loadVRM: async (urlOrBuffer) => {
+      loadAvatar: async (urlOrBuffer, nameHint) => {
         if (!sceneManagerRef.current) throw new Error("Scene not ready");
-        const vrm = await sceneManagerRef.current.loadVRM(urlOrBuffer);
-        return vrm;
+        return sceneManagerRef.current.loadAvatar(urlOrBuffer, nameHint);
+      },
+      loadPreset: async (preset) => {
+        if (!sceneManagerRef.current) throw new Error("Scene not ready");
+        return sceneManagerRef.current.loadPreset(preset);
       },
       setBgStyle: (style) => {
         sceneManagerRef.current?.setBgStyle(style);
       },
-      getVRM: () => sceneManagerRef.current?.getVRM() ?? null,
+      getAvatar: () => sceneManagerRef.current?.getAvatar() ?? null,
       takeSnapshot: () => sceneManagerRef.current?.takeSnapshot() ?? "",
     }));
 
@@ -66,16 +72,14 @@ export const VrmCanvas = forwardRef<VrmCanvasRef, VrmCanvasProps>(
       }
 
       // Load initial model
-      if (initialVrmUrl) {
-        manager
-          .loadVRM(initialVrmUrl)
-          .then((vrm) => {
-            if (onVrmLoaded) onVrmLoaded(vrm);
-          })
-          .catch((err) => {
-            console.error("Failed to load initial VRM model:", err);
-          });
-      }
+      manager
+        .loadPreset(initialPreset)
+        .then((avatar) => {
+          if (onVrmLoaded) onVrmLoaded(avatar);
+        })
+        .catch((err) => {
+          console.error("Failed to load initial avatar:", err);
+        });
 
       return () => {
         resizeObserver.disconnect();

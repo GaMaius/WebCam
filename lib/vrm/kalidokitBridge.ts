@@ -1,7 +1,7 @@
 import * as Kalidokit from "kalidokit";
 import * as THREE from "three";
-import type { VRM } from "@pixiv/three-vrm";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import type { MotionAvatar } from "./motionAvatar";
 
 export interface LandmarkFrameData {
   poseLandmarks?: NormalizedLandmark[];
@@ -23,7 +23,11 @@ export const _KalidokitForDebug = Kalidokit;
 // Kalidokit already produces a mirror-like result (the avatar acts as your
 // reflection), which is the intended selfie/VTuber UX.
 
-function getNode(vrm: VRM, boneName: any) {
+// Non-VRM rigs (FBX/glTF) are adapted to this same normalized humanoid by
+// lib/vrm/humanoidRigger.ts, including a rest-pose fix to T-pose, so everything
+// below applies unchanged to them.
+
+function getNode(vrm: MotionAvatar, boneName: any) {
   if (!vrm.humanoid) return null;
   return vrm.humanoid.getNormalizedBoneNode(boneName) || vrm.humanoid.getRawBoneNode(boneName);
 }
@@ -48,7 +52,7 @@ type Rot = { x: number; y: number; z: number; rotationOrder?: string };
  * flip only Z on pose-derived bones. Face/head rotations use a different
  * (Face.solve) convention and are left untouched. */
 function rigRotation(
-  vrm: VRM,
+  vrm: MotionAvatar,
   boneName: string,
   rot: Rot | undefined,
   dampener = 1,
@@ -70,7 +74,7 @@ function rigRotation(
   }
 }
 
-export function applyTrackingToVRM(vrm: VRM, frame: LandmarkFrameData) {
+export function applyTrackingToVRM(vrm: MotionAvatar, frame: LandmarkFrameData) {
   if (!vrm) return;
 
   // 1. Face — head/neck rotation + blink/mouth expressions.
