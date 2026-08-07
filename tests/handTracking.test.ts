@@ -5,6 +5,7 @@ import { buildHumanoidRig, classifyBoneName } from "../lib/vrm/humanoidRigger.ts
 import {
   applyHandRig,
   resolvePoseGates,
+  vrmSideForHand,
   withLandmarkVisibility,
 } from "../lib/vrm/boneRig.ts";
 import { vrmExpressionsFromBlendshapes } from "../lib/vrm/faceExpressions.ts";
@@ -55,7 +56,8 @@ function buildRigWithFingers(): THREE.Object3D {
   bone("Head", neck, 0, 0.1, 0);
 
   for (const side of ["Left", "Right"] as const) {
-    const f = side === "Left" ? -1 : 1;
+    // Left on +X, matching VRM 1.0 (+Z facing) — see realAvatarHands.test.ts.
+    const f = side === "Left" ? 1 : -1;
     const shoulder = bone(`${side}Shoulder`, spine1, 0.05 * f, 0.08, 0);
     const upper = bone(`${side}Arm`, shoulder, 0.05 * f, 0, 0);
     const lower = bone(`${side}ForeArm`, upper, 0.25 * f, 0, 0);
@@ -138,13 +140,15 @@ function fingertipReach(curl: number): number {
   const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
   const handRig = Kalidokit.Hand.solve(handLandmarks(curl), "Left");
   assert.ok(handRig, "Kalidokit should solve the synthetic hand");
+  // The user's left hand drives the avatar's right (mirrored).
+  const vrmSide = vrmSideForHand("Left");
   for (let i = 0; i < 40; i++) {
-    applyHandRig(avatar, handRig, "Left");
+    applyHandRig(avatar, handRig, "Left", vrmSide);
     humanoid.update();
     scene.updateMatrixWorld(true);
   }
-  const hand = worldOf(humanoid.getRawBoneNode("leftHand")!);
-  const tip = worldOf(humanoid.getRawBoneNode("leftIndexDistal")!);
+  const hand = worldOf(humanoid.getRawBoneNode(`${vrmSide}Hand`)!);
+  const tip = worldOf(humanoid.getRawBoneNode(`${vrmSide}IndexDistal`)!);
   return hand.distanceTo(tip);
 }
 
@@ -164,32 +168,32 @@ test("a curled hand actually moves the finger bones", () => {
   );
 });
 
-/** Local Z of a normalized finger bone after applying a full curl. */
-function fingerCurlZ(side: "Left" | "Right", bone: string): number {
+/** Local Z of the avatar's finger bone after applying a full curl of `side`. */
+function fingerCurlZ(side: "Left" | "Right"): number {
   const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
   const handRig = Kalidokit.Hand.solve(handLandmarks(1), side);
+  const vrmSide = vrmSideForHand(side);
   for (let i = 0; i < 40; i++) {
-    applyHandRig(avatar, handRig, side);
+    applyHandRig(avatar, handRig, side, vrmSide);
     humanoid.update();
     scene.updateMatrixWorld(true);
   }
-  const node = humanoid.getNormalizedBoneNode(bone as never)!;
+  const node = humanoid.getNormalizedBoneNode(`${vrmSide}IndexProximal` as never)!;
   return new THREE.Euler().setFromQuaternion(node.quaternion, "XYZ").z;
 }
 
-test("finger curl comes out left-negative / right-positive on Z", () => {
+test("a curl lands with the sign the target avatar hand needs", () => {
   // Measured on the real avatar (scratch/probe_vrm_axes.mjs): the palm faces -Y
-  // in the rest pose, and for the LEFT index finger a -Z rotation moves the tip
-  // -Y (toward the palm — a curl) while +Z moves it +Y (hyperextension). The
-  // right hand is the mirror. Kalidokit emits the opposite sign on both
-  // (rigFingers clamps left to [0,PI], right to [-PI,0]), which is why the
-  // mapping negates z. Reasoning from the solver's clamp ranges alone gave the
-  // wrong answer here; these numbers come from the model.
-  const leftZ = fingerCurlZ("Left", "leftIndexProximal");
-  const rightZ = fingerCurlZ("Right", "rightIndexProximal");
+  // at rest, and the avatar's LEFT index curls on -Z while its RIGHT curls on
+  // +Z. Kalidokit emits a left-hand curl as +z and a right-hand curl as -z, and
+  // the mirror crossing pairs those up exactly — user's left (+z) lands on the
+  // avatar's right (needs +z). That's why no flip is applied here.
+  // The geometric version of this check is in tests/realAvatarHands.test.ts.
+  const fromUserLeft = fingerCurlZ("Left"); // -> avatar right, wants +Z
+  const fromUserRight = fingerCurlZ("Right"); // -> avatar left, wants -Z
 
-  assert.ok(leftZ < -0.05, `left-hand curl must be -Z, got ${leftZ.toFixed(3)}`);
-  assert.ok(rightZ > 0.05, `right-hand curl must be +Z, got ${rightZ.toFixed(3)}`);
+  assert.ok(fromUserLeft > 0.05, `avatar right curl must be +Z, got ${fromUserLeft.toFixed(3)}`);
+  assert.ok(fromUserRight < -0.05, `avatar left curl must be -Z, got ${fromUserRight.toFixed(3)}`);
 });
 
 test("the wrist takes its roll from the arm chain, not from the palm", () => {
@@ -200,12 +204,12 @@ test("the wrist takes its roll from the arm chain, not from the palm", () => {
   const handRig = Kalidokit.Hand.solve(handLandmarks(0), "Left");
 
   for (let i = 0; i < 40; i++) {
-    applyHandRig(avatar, handRig, "Left", 0.5);
+    applyHandRig(avatar, handRig, "Left", vrmSideForHand("Left"), 0.5);
     humanoid.update();
     scene.updateMatrixWorld(true);
   }
   const z = new THREE.Euler().setFromQuaternion(
-    humanoid.getNormalizedBoneNode("leftHand")!.quaternion,
+    humanoid.getNormalizedBoneNode(`${vrmSideForHand("Left")}Hand`)!.quaternion,
     "XYZ"
   ).z;
   // flipZ applies to this pose-derived z, so +0.5 in must come out negative.

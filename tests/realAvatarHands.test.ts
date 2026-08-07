@@ -44,7 +44,7 @@ import fs from "node:fs";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin } from "@pixiv/three-vrm";
-import { applyHandRig } from "../lib/vrm/boneRig.ts";
+import { applyHandRig, vrmSideForHand } from "../lib/vrm/boneRig.ts";
 import type { MotionAvatar } from "../lib/vrm/motionAvatar.ts";
 // @ts-expect-error - the rolled-up bundle ships no type declarations; the package
 // entry re-exports from directories, which Node's ESM resolver rejects.
@@ -118,7 +118,8 @@ function fistLandmarks(): { x: number; y: number; z: number }[] {
 test("a solved fist curls the real avatar's fingers toward the palm", async () => {
   for (const side of ["Left", "Right"] as const) {
     const { vrm, scene, avatar, worldOf } = await loadAvatar();
-    const prefix = side.toLowerCase();
+    // Mirrored: the user's left hand drives the avatar's right.
+    const prefix = vrmSideForHand(side);
 
     // VRM's rest pose is a T/A-pose with BOTH palms facing down, so the palm
     // side is -Y for either hand. (Don't try to derive this from
@@ -146,7 +147,7 @@ test("a solved fist curls the real avatar's fingers toward the palm", async () =
     delete solved[`${side}Wrist`];
 
     for (let i = 0; i < 40; i++) {
-      applyHandRig(avatar, solved as never, side);
+      applyHandRig(avatar, solved as never, side, prefix);
       vrm.humanoid.update();
       scene.updateMatrixWorld(true);
     }
@@ -156,11 +157,40 @@ test("a solved fist curls the real avatar's fingers toward the palm", async () =
 
     assert.ok(
       towardPalm > 0.005,
-      `${side} fingertip must move toward the palm (-Y), got ${towardPalm.toFixed(
-        4
-      )} — negative means it bent backwards`
+      `${side} hand -> avatar ${prefix}: fingertip must move toward the palm (-Y), ` +
+        `got ${towardPalm.toFixed(4)} — negative means it bent backwards`
     );
   }
+});
+
+test("a hand is written to the mirrored avatar side, matching the arm", async () => {
+  // Kalidokit's pose solver crosses sides, so the avatar's right arm is driven by
+  // the user's LEFT arm. The hand has to cross the same way or it sits on the
+  // other arm — which reads as a badly wrong wrist angle rather than as a swap,
+  // because both hands usually do the same thing.
+  assert.equal(vrmSideForHand("Left"), "right");
+  assert.equal(vrmSideForHand("Right"), "left");
+
+  const { vrm, scene, avatar, worldOf } = await loadAvatar();
+  const before = worldOf("rightIndexDistal").clone();
+  const untouched = worldOf("leftIndexDistal").clone();
+
+  const solved = Kalidokit.Hand.solve(fistLandmarks(), "Left") as Record<string, unknown>;
+  delete solved["LeftWrist"];
+  for (let i = 0; i < 40; i++) {
+    applyHandRig(avatar, solved as never, "Left", vrmSideForHand("Left"));
+    vrm.humanoid.update();
+    scene.updateMatrixWorld(true);
+  }
+
+  assert.ok(
+    worldOf("rightIndexDistal").distanceTo(before) > 0.005,
+    "the user's LEFT hand must move the avatar's RIGHT fingers"
+  );
+  assert.ok(
+    worldOf("leftIndexDistal").distanceTo(untouched) < 1e-6,
+    "and must leave the avatar's left fingers alone"
+  );
 });
 
 test("the avatar follows the VRM 1.0 axis convention this code assumes", async () => {

@@ -20,7 +20,29 @@ export const LERP_LEG = 0.22; // extra damping so legs don't pop
 export const LERP_FACE = 0.3;
 export const LERP_HAND = 0.4; // fingers should feel snappy; they're small and fast
 
+/** MediaPipe's handedness label — the ANATOMICAL hand, which is what Kalidokit's
+ * solver needs to pick its palm points and clamp ranges. */
 export type HandSide = "Left" | "Right";
+
+/** Which of the avatar's hands a solved rig is written to. Note this is the
+ * OPPOSITE of the anatomical side: Kalidokit's pose solver crosses sides (its
+ * `RightUpperArm` is built from MediaPipe's LEFT shoulder/elbow), so everything
+ * on the avatar's right is driven by the user's left, which is what makes the
+ * avatar read as a mirror. The hand path has to cross the same way or each hand
+ * ends up on the other arm — invisible while both hands do the same thing, but it
+ * shows up as a badly wrong wrist angle. */
+export type VrmSide = "left" | "right";
+
+/** The avatar side a given anatomical hand belongs on, mirrored. */
+export function vrmSideForHand(solveSide: HandSide): VrmSide {
+  return solveSide === "Left" ? "right" : "left";
+}
+
+/** The pose rig key carrying that same limb's hand rotation. Kalidokit's
+ * crossing means the user's LEFT hand appears as `RightHand`. */
+export function poseHandKeyForHand(solveSide: HandSide): "LeftHand" | "RightHand" {
+  return solveSide === "Left" ? "RightHand" : "LeftHand";
+}
 
 /** Kalidokit's hand rig uses the VRM0 finger naming, where the thumb chain is
  * Proximal/Intermediate/Distal. VRM 1.0 renamed it Metacarpal/Proximal/Distal —
@@ -161,36 +183,37 @@ export function rigRotation(
 export function applyHandRig(
   vrm: MotionAvatar,
   handRig: Record<string, Rot> | undefined,
-  side: HandSide,
-  poseHandRoll?: number
+  solveSide: HandSide,
+  vrmSide: VrmSide,
+  wristRoll?: number
 ) {
   if (!handRig) return;
-  const prefix = side.toLowerCase(); // "left" | "right"
 
-  const wrist = handRig[`${side}Wrist`];
+  const wrist = handRig[`${solveSide}Wrist`];
   if (wrist) {
-    // Only the z here is pose-derived, so only it takes the flipZ convention.
+    // Roll (z) comes from the arm chain. The hand solver's own y is dropped
+    // outright: it isn't a yaw measurement at all — the solver assigns
+    // `handRotation.y = handRotation.z` and then biases it by -0.4, so feeding it
+    // in twists the hand off its forearm. x (flex) is the one component the palm
+    // landmarks measure cleanly.
     rigRotation(
       vrm,
-      `${prefix}Hand`,
-      { x: wrist.x, y: wrist.y, z: poseHandRoll ?? 0 },
+      `${vrmSide}Hand`,
+      { x: wrist.x, y: 0, z: wristRoll ?? 0 },
       1,
       LERP_HAND,
-      true
+      true // only the pose-derived z is affected
     );
   }
 
   for (const [rigSuffix, boneSuffix] of Object.entries(FINGER_BONE_BY_RIG_SUFFIX)) {
-    const rot = handRig[`${side}${rigSuffix}`];
+    const rot = handRig[`${solveSide}${rigSuffix}`];
     if (!rot) continue;
-    // flipZ, like the pose bones. Fingers are driven on z alone, and Kalidokit
-    // emits the LEFT hand positive / RIGHT hand negative (rigFingers clamps to
-    // [0,PI] and [-PI,0]) — but measured on the real avatar, a fist is left
-    // NEGATIVE z / right POSITIVE z, so both need negating.
-    // Measured with scratch/probe_vrm_axes.mjs: the palm faces -Y in the rest
-    // pose, and for the left index finger -Z moves the tip -Y (toward the palm,
-    // a curl) while +Z moves it +Y (hyperextension).
-    rigRotation(vrm, `${prefix}${boneSuffix}`, rot, 1, LERP_HAND, true);
+    // No flipZ: crossing the sides already lands the correct sign. Kalidokit
+    // emits a left-hand curl as +z (rigFingers clamps to [0,PI]) and the avatar's
+    // RIGHT hand — which is where a left hand belongs in a mirror — curls on +z
+    // too (measured, scratch/probe_vrm_axes.mjs). Uncrossed, this needed a flip.
+    rigRotation(vrm, `${vrmSide}${boneSuffix}`, rot, 1, LERP_HAND, false);
   }
 }
 

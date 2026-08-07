@@ -7,8 +7,10 @@ import {
   LERP_BODY,
   LERP_FACE,
   LERP_LEG,
+  poseHandKeyForHand,
   resolvePoseGates,
   rigRotation,
+  vrmSideForHand,
   withLandmarkVisibility,
   type HandSide,
   type Rot,
@@ -148,23 +150,27 @@ export function applyTrackingToVRM(
     }
   }
 
-  // 3. Hands — wrist + 15 finger joints per side, using the arm chain's roll.
-  applyHand(vrm, frame.leftHandLandmarks, "Left", poseRig?.LeftHand?.z);
-  applyHand(vrm, frame.rightHandLandmarks, "Right", poseRig?.RightHand?.z);
+  // 3. Hands — wrist + 15 finger joints, crossed to the mirrored avatar side so
+  // each hand lands on the arm driven by that same real limb.
+  applyHand(vrm, frame.leftHandLandmarks, "Left", poseRig);
+  applyHand(vrm, frame.rightHandLandmarks, "Right", poseRig);
 }
 
 /** Solves one hand from MediaPipe landmarks and writes it to the avatar. */
 function applyHand(
   vrm: MotionAvatar,
   landmarks: NormalizedLandmark[] | undefined,
-  side: HandSide,
-  poseHandRoll?: number
+  solveSide: HandSide,
+  poseRig: ReturnType<typeof Kalidokit.Pose.solve> | undefined
 ) {
   if (!landmarks || landmarks.length < 21) return;
-  const handRig = Kalidokit.Hand.solve(landmarks as never, side) as
+  // Solve with the ANATOMICAL side (Kalidokit picks palm points and clamps from
+  // it), then write to the mirrored avatar side.
+  const handRig = Kalidokit.Hand.solve(landmarks as never, solveSide) as
     | Record<string, Rot>
     | undefined;
-  applyHandRig(vrm, handRig, side, poseHandRoll);
+  const roll = poseRig?.[poseHandKeyForHand(solveSide)]?.z;
+  applyHandRig(vrm, handRig, solveSide, vrmSideForHand(solveSide), roll);
 }
 
 function cutoff(val: number, threshold: number): number {
