@@ -165,6 +165,24 @@ export function rigRotation(
   }
 }
 
+/** Face rotations need BOTH pitch and roll negated.
+ *
+ * Kalidokit's head rotation is authored for VRM0 raw bones, and VRM0 vs VRM1 is a
+ * 180-degree turn about Y — conjugating a rotation by that turn negates its X and
+ * Z components. Roll was fixed first (head tilt went the wrong way); pitch turned
+ * out to be inverted too (looking down made the avatar look up). Yaw (Y) is the
+ * one component that survives the turn, so it is left alone. */
+export function rigFaceRotation(
+  vrm: MotionAvatar,
+  boneName: string,
+  rot: Rot | undefined,
+  dampener = 1,
+  lerp = LERP_FACE
+) {
+  if (!rot) return;
+  rigRotation(vrm, boneName, { ...rot, x: -rot.x }, dampener, lerp, true);
+}
+
 /**
  * Writes a solved hand rig onto the avatar's wrist + 15 finger joints.
  *
@@ -203,6 +221,82 @@ export function applyHandRig(
     // too (measured, scratch/probe_vrm_axes.mjs). Uncrossed, this needed a flip.
     rigRotation(vrm, `${vrmSide}${boneSuffix}`, rot, 1, LERP_HAND, false);
   }
+}
+
+/** Thumb landmark triples: the joint being bent, with its neighbours. */
+const THUMB_JOINTS: [number, number, number][] = [
+  [0, 1, 2], // metacarpal
+  [1, 2, 3], // proximal
+  [2, 3, 4], // distal
+];
+/** The thumb's usable range is much smaller than a finger's. */
+const THUMB_GAIN = 0.7;
+
+/** Kalidokit's `normalizeRadians`, ported so the thumb can use the same joint
+ * measure as the fingers without reaching into the package's internals: ~0 for a
+ * straight joint, ~0.5 at 90 degrees. */
+function normalizeRadians(radians: number): number {
+  let r = radians;
+  if (r >= Math.PI / 2) r -= 2 * Math.PI;
+  if (r <= -Math.PI / 2) {
+    r += 2 * Math.PI;
+    r = Math.PI - r;
+  }
+  return r / Math.PI;
+}
+
+/** Normalized bend of the joint at `b`, between neighbours `a` and `c`. */
+function jointBend(a: Point3, b: Point3, c: Point3): number {
+  const v1 = new THREE.Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
+  const v2 = new THREE.Vector3(c.x - b.x, c.y - b.y, c.z - b.z);
+  if (v1.lengthSq() < 1e-12 || v2.lengthSq() < 1e-12) return 0;
+  const dot = THREE.MathUtils.clamp(v1.normalize().dot(v2.normalize()), -1, 1);
+  return normalizeRadians(Math.acos(dot));
+}
+
+interface Point3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Thumb rotations, replacing Kalidokit's thumb output.
+ *
+ * Kalidokit's thumb is a special case full of constants tuned for VRM0's bone
+ * naming — `startPos.x` alone is 1.2 rad (69 degrees). VRM 1.0 shifted the thumb
+ * chain by one joint (Metacarpal/Proximal/Distal), so those offsets land on the
+ * wrong joint and bend the thumb off on its own regardless of the real hand.
+ *
+ * Measured on the real avatar (scratch/probe_vrm_axes.mjs): the thumb curls
+ * palmward on -Z (left) / +Z (right), the same axis and signs as the other
+ * fingers, so it gets their formula and no constant offsets.
+ *
+ * Keys are rig-side names, which FINGER_BONE_BY_RIG_SUFFIX shifts onto the VRM
+ * joints.
+ */
+export function solveThumbRig(
+  landmarks: Point3[] | undefined,
+  solveSide: HandSide
+): Record<string, Rot> {
+  const out: Record<string, Rot> = {};
+  if (!landmarks || landmarks.length < 5) return out;
+
+  const invert = solveSide === "Right" ? 1 : -1;
+  const rigKeys = ["ThumbProximal", "ThumbIntermediate", "ThumbDistal"];
+
+  THUMB_JOINTS.forEach(([a, b, c], i) => {
+    const bend = jointBend(landmarks[a], landmarks[b], landmarks[c]);
+    const z = bend * -Math.PI * invert * THUMB_GAIN;
+    out[`${solveSide}${rigKeys[i]}`] = {
+      x: 0,
+      y: 0,
+      // Clamp to the side's anatomically valid half-range, as Kalidokit does for
+      // the other four fingers.
+      z: invert > 0 ? THREE.MathUtils.clamp(z, -Math.PI, 0) : THREE.MathUtils.clamp(z, 0, Math.PI),
+    };
+  });
+  return out;
 }
 
 /** Sets a bone's rotation from a WORLD-space target, converting through the

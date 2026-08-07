@@ -9,7 +9,9 @@ import {
   LERP_FACE,
   LERP_LEG,
   resolvePoseGates,
+  rigFaceRotation,
   rigRotation,
+  solveThumbRig,
   vrmSideForHand,
   withLandmarkVisibility,
   type HandSide,
@@ -71,8 +73,8 @@ export function applyTrackingToVRM(
       // three-vrm's normalized bones. Tilting your head right used to tilt the
       // avatar's left. So the head flips Z too — every solver-derived bone in
       // this file now does, which is one rule instead of an exception.
-      rigRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE, true);
-      rigRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE, true);
+      rigFaceRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE);
+      rigFaceRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE);
 
       if (vrm.expressionManager) {
         // Prefer ARKit blendshapes; they're steadier and cover brows/gaze that
@@ -170,6 +172,8 @@ function applyHand(
   const handRig = Kalidokit.Hand.solve(landmarks as never, solveSide) as
     | Record<string, Rot>
     | undefined;
+  // Kalidokit's thumb branch is unusable on VRM 1.0 (see solveThumbRig).
+  if (handRig) Object.assign(handRig, solveThumbRig(landmarks, solveSide));
   // Wrist: our own solver, straight off the palm geometry.
   const wristWorld = solveWristWorldQuaternion(landmarks, vrmSide);
   applyHandRig(vrm, handRig, solveSide, vrmSide, wristWorld);

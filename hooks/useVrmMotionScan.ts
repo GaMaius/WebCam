@@ -12,9 +12,19 @@ import {
 } from "@/lib/vrm/kalidokitBridge";
 import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
 
-/** Hands are the most expensive stage (palm detect + landmarks, up to 2 hands),
- * and fingers read fine at half rate, so they run every other frame. */
+// Tracking quality is mostly a frame-rate problem: MediaPipe's VIDEO mode tracks
+// between frames, so starving it makes every stage worse. Running face + pose +
+// hands on every frame is far more than a phone can do, so the two expensive
+// stages alternate — each frame does the face plus ONE of pose/hands, and the
+// other's last result is held. That roughly halves the per-frame cost.
+//
+// (Reference point: the gesture-synth app the user found tracks hands well while
+// running the same model with the same options — its advantage is that hands are
+// the only model it runs, at 640x480.)
 const HAND_EVERY_N_FRAMES = 2;
+const POSE_EVERY_N_FRAMES = 2;
+/** Offset so pose and hands never land on the same frame. */
+const POSE_PHASE = 1;
 
 export function useVrmMotionScan(
   vrm: MotionAvatar | null,
@@ -41,6 +51,11 @@ export function useVrmMotionScan(
   const lastHandsRef = useRef<{
     left?: LandmarkFrameData["leftHandLandmarks"];
     right?: LandmarkFrameData["rightHandLandmarks"];
+  }>({});
+  // Same for the pose, which now also runs at half rate.
+  const lastPoseRef = useRef<{
+    landmarks?: LandmarkFrameData["poseLandmarks"];
+    world?: LandmarkFrameData["poseWorldLandmarks"];
   }>({});
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -108,21 +123,26 @@ export function useVrmMotionScan(
         }
 
         // Pose tracking — still needed in "upper" mode: arms/torso come from it,
-        // only the legs are left undriven.
-        if (poseLandmarker) {
+        // only the legs are left undriven. Runs on alternate frames from the hands.
+        if (poseLandmarker && tickRef.current % POSE_EVERY_N_FRAMES === POSE_PHASE) {
           try {
             const poseResult = poseLandmarker.detectForVideo(video, now);
             if (poseResult.landmarks && poseResult.landmarks.length > 0) {
-              frameData.poseLandmarks = poseResult.landmarks[0];
-              frameData.poseWorldLandmarks = poseResult.worldLandmarks?.[0];
+              lastPoseRef.current = {
+                landmarks: poseResult.landmarks[0],
+                world: poseResult.worldLandmarks?.[0],
+              };
               setIsPoseTracked(true);
             } else {
+              lastPoseRef.current = {};
               setIsPoseTracked(false);
             }
           } catch (err) {
             // ignore frame error
           }
         }
+        frameData.poseLandmarks = lastPoseRef.current.landmarks;
+        frameData.poseWorldLandmarks = lastPoseRef.current.world;
 
         // Hand tracking, at reduced cadence.
         if (handLandmarker && tickRef.current % HAND_EVERY_N_FRAMES === 0) {

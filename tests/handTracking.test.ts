@@ -5,6 +5,8 @@ import { buildHumanoidRig, classifyBoneName } from "../lib/vrm/humanoidRigger.ts
 import {
   applyHandRig,
   resolvePoseGates,
+  rigFaceRotation,
+  solveThumbRig,
   vrmSideForHand,
   withLandmarkVisibility,
 } from "../lib/vrm/boneRig.ts";
@@ -294,6 +296,70 @@ test("pose gates follow the visible landmarks and the mode", () => {
     arms: false,
     legs: false,
   });
+});
+
+test("face rotations negate pitch and roll, but not yaw", () => {
+  // Kalidokit's head rotation is VRM0 raw-bone convention, and VRM0 -> VRM1 is a
+  // 180-degree turn about Y, which negates the X and Z components. Roll was fixed
+  // first (head tilt went the wrong way); pitch was inverted too — looking down
+  // made the avatar look up. Yaw survives the turn and must be left alone.
+  const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
+  const head = humanoid.getNormalizedBoneNode("head" as never)!;
+
+  for (let i = 0; i < 60; i++) {
+    rigFaceRotation(avatar, "head", { x: 0.4, y: 0.3, z: 0.2 }, 1, 0.6);
+    humanoid.update();
+    scene.updateMatrixWorld(true);
+  }
+  const applied = new THREE.Euler().setFromQuaternion(head.quaternion, "XYZ");
+
+  assert.ok(applied.x < -0.2, `pitch must be negated, got ${applied.x.toFixed(3)}`);
+  assert.ok(applied.y > 0.1, `yaw must pass through, got ${applied.y.toFixed(3)}`);
+  assert.ok(applied.z < -0.05, `roll must be negated, got ${applied.z.toFixed(3)}`);
+});
+
+test("the thumb curls with the other fingers' convention, no constant offset", () => {
+  // Kalidokit's thumb branch carries VRM0-era constants (startPos.x alone is 1.2
+  // rad), and VRM 1.0 shifted the thumb chain by a joint, so those offsets landed
+  // on the wrong joint and bent the thumb off on its own. solveThumbRig replaces
+  // it with the finger formula.
+  const straight = [
+    { x: 0.5, y: 0.8, z: 0 },
+    { x: 0.47, y: 0.76, z: 0 },
+    { x: 0.44, y: 0.72, z: 0 },
+    { x: 0.41, y: 0.68, z: 0 },
+    { x: 0.38, y: 0.64, z: 0 },
+  ];
+  const restRig = solveThumbRig(straight, "Left");
+  for (const [key, rot] of Object.entries(restRig)) {
+    assert.ok(
+      Math.abs(rot.z) < 0.2,
+      `a straight thumb must stay near rest, ${key} got z=${rot.z.toFixed(3)}`
+    );
+    assert.equal(rot.x, 0, "no constant offset on x — that was the old bug");
+    assert.equal(rot.y, 0);
+  }
+
+  // A bent thumb: fold the tip back so each joint has a real angle.
+  const bent = [
+    { x: 0.5, y: 0.8, z: 0 },
+    { x: 0.47, y: 0.76, z: 0 },
+    { x: 0.45, y: 0.72, z: 0 },
+    { x: 0.47, y: 0.7, z: 0 },
+    { x: 0.5, y: 0.71, z: 0 },
+  ];
+  const leftBent = solveThumbRig(bent, "Left");
+  const rightBent = solveThumbRig(bent, "Right");
+
+  // Same per-side signs as the four fingers, so the mirror crossing lines up.
+  assert.ok(
+    Object.values(leftBent).some((r) => r.z > 0.1),
+    `left thumb should bend +Z, got ${JSON.stringify(Object.values(leftBent).map((r) => r.z))}`
+  );
+  assert.ok(
+    Object.values(rightBent).some((r) => r.z < -0.1),
+    `right thumb should bend -Z, got ${JSON.stringify(Object.values(rightBent).map((r) => r.z))}`
+  );
 });
 
 test("blendshapes drive blink per eye with a dead zone", () => {

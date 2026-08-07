@@ -164,6 +164,10 @@ export default function VrmMotionPage() {
               initialFacing="user"
               allowSwitch={false}
               showControls={false}
+              // Tracking runs three models off this stream, and inference cost
+              // scales with frame size. 640 is what the reference gesture app
+              // uses and it's plenty for landmarks.
+              maxWidth={640}
               recordLabel="vrmmotion"
               flushKey={flushKey}
               onReady={handleCameraReady}
