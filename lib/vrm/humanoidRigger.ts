@@ -315,14 +315,16 @@ function normalizeRestPose(
     root.updateMatrixWorld(true);
   }
 
-  // 4) VRM 1.0 faces +Z, which puts the character's LEFT at -X. If the rig's
-  //    left arm sits on +X it is facing away from the camera; spin it around.
+  // 4) VRM 1.0 models face +Z, which puts the character's own LEFT on world +X
+  //    (measured on the real avatar — see tests/realAvatarHands.test.ts, and
+  //    scratch/probe_vrm_axes.mjs). A rig whose left arm sits on -X is modelled
+  //    facing away from the camera, so spin it around.
   const leftArm = bones.leftUpperArm;
   const rightArm = bones.rightUpperArm;
   if (leftArm && rightArm) {
     const lx = worldPos(leftArm).x;
     const rx = worldPos(rightArm).x;
-    if (lx > rx) {
+    if (lx < rx) {
       root.rotateY(Math.PI);
       root.updateMatrixWorld(true);
       notes.push("정면 방향을 180° 보정");
@@ -332,16 +334,17 @@ function normalizeRestPose(
   // 5) A-pose -> T-pose. This is the one that actually matters: the rest pose
   //    becomes the tracker's zero, and Kalidokit solves against T-pose.
   let armFix = 0;
+  // Left extends to +X, right to -X (see the facing note above).
   if (bones.leftUpperArm && bones.leftHand) {
     armFix = Math.max(
       armFix,
-      alignChain(bones.leftUpperArm, bones.leftHand, new THREE.Vector3(-1, 0, 0))
+      alignChain(bones.leftUpperArm, bones.leftHand, new THREE.Vector3(1, 0, 0))
     );
   }
   if (bones.rightUpperArm && bones.rightHand) {
     armFix = Math.max(
       armFix,
-      alignChain(bones.rightUpperArm, bones.rightHand, new THREE.Vector3(1, 0, 0))
+      alignChain(bones.rightUpperArm, bones.rightHand, new THREE.Vector3(-1, 0, 0))
     );
   }
   if (armFix > 0) {

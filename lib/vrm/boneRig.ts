@@ -183,11 +183,14 @@ export function applyHandRig(
   for (const [rigSuffix, boneSuffix] of Object.entries(FINGER_BONE_BY_RIG_SUFFIX)) {
     const rot = handRig[`${side}${rigSuffix}`];
     if (!rot) continue;
-    // NO flipZ on fingers. Curl is pure z here, and Kalidokit already emits it
-    // side-corrected and clamped to the anatomically valid half-range
-    // (rigFingers clamps to [-PI,0] on the right, [0,PI] on the left). Negating
-    // that doesn't mirror it — it bends every finger backwards.
-    rigRotation(vrm, `${prefix}${boneSuffix}`, rot, 1, LERP_HAND, false);
+    // flipZ, like the pose bones. Fingers are driven on z alone, and Kalidokit
+    // emits the LEFT hand positive / RIGHT hand negative (rigFingers clamps to
+    // [0,PI] and [-PI,0]) — but measured on the real avatar, a fist is left
+    // NEGATIVE z / right POSITIVE z, so both need negating.
+    // Measured with scratch/probe_vrm_axes.mjs: the palm faces -Y in the rest
+    // pose, and for the left index finger -Z moves the tip -Y (toward the palm,
+    // a curl) while +Z moves it +Y (hyperextension).
+    rigRotation(vrm, `${prefix}${boneSuffix}`, rot, 1, LERP_HAND, true);
   }
 }
 

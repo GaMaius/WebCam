@@ -177,17 +177,19 @@ function fingerCurlZ(side: "Left" | "Right", bone: string): number {
   return new THREE.Euler().setFromQuaternion(node.quaternion, "XYZ").z;
 }
 
-test("finger curl keeps Kalidokit's per-side sign (curl, not hyperextension)", () => {
-  // Kalidokit drives fingers on Z ALONE and already clamps it to the
-  // anatomically valid half-range per side — rigFingers clamps to [-PI, 0] for
-  // the right hand and [0, PI] for the left. The mapping must pass that sign
-  // through untouched: negating it (as the pose bones do, for a different
-  // convention) bends every finger backwards instead of mirroring it.
+test("finger curl comes out left-negative / right-positive on Z", () => {
+  // Measured on the real avatar (scratch/probe_vrm_axes.mjs): the palm faces -Y
+  // in the rest pose, and for the LEFT index finger a -Z rotation moves the tip
+  // -Y (toward the palm — a curl) while +Z moves it +Y (hyperextension). The
+  // right hand is the mirror. Kalidokit emits the opposite sign on both
+  // (rigFingers clamps left to [0,PI], right to [-PI,0]), which is why the
+  // mapping negates z. Reasoning from the solver's clamp ranges alone gave the
+  // wrong answer here; these numbers come from the model.
   const leftZ = fingerCurlZ("Left", "leftIndexProximal");
   const rightZ = fingerCurlZ("Right", "rightIndexProximal");
 
-  assert.ok(leftZ > 0.05, `left-hand curl must be +Z, got ${leftZ.toFixed(3)}`);
-  assert.ok(rightZ < -0.05, `right-hand curl must be -Z, got ${rightZ.toFixed(3)}`);
+  assert.ok(leftZ < -0.05, `left-hand curl must be -Z, got ${leftZ.toFixed(3)}`);
+  assert.ok(rightZ > 0.05, `right-hand curl must be +Z, got ${rightZ.toFixed(3)}`);
 });
 
 test("the wrist takes its roll from the arm chain, not from the palm", () => {

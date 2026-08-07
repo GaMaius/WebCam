@@ -63,8 +63,9 @@ function buildSkeleton(armDir: THREE.Vector3, facing: 1 | -1 = 1): THREE.Object3
 
   const dir = armDir.clone().normalize().multiplyScalar(25);
   for (const side of ["Left", "Right"] as const) {
-    // Left sits at -X (VRM/+Z-facing convention) unless mirrored by `facing`.
-    const flip = (side === "Left" ? -1 : 1) * facing;
+    // Left sits at +X (VRM 1.0 faces +Z, so the character's own left is +X —
+    // measured, see tests/realAvatarHands.test.ts) unless mirrored by `facing`.
+    const flip = (side === "Left" ? 1 : -1) * facing;
     const shoulder = bone(`${side}Shoulder`, spine2, 8 * flip, 8, 0);
     const upper = bone(`${side}Arm`, shoulder, 5 * flip, 0, 0);
     const lower = bone(`${side}ForeArm`, upper, Math.abs(dir.x) * flip, dir.y, dir.z);
@@ -145,9 +146,9 @@ test("an A-pose rest pose is corrected to T-pose (the tracker's zero)", () => {
     const hand = worldOf(humanoid.getRawBoneNode(`${side}Hand`)!);
     const dir = hand.sub(upper).normalize();
 
-    // Horizontal, and pointing to the character's own side (+Z facing → left is -X).
+    // Horizontal, and pointing to the character's own side (+Z facing → left is +X).
     assert.ok(Math.abs(dir.y) < 0.09, `${side} arm not horizontal: y=${dir.y}`);
-    const expectedX = side === "left" ? -1 : 1;
+    const expectedX = side === "left" ? 1 : -1;
     assert.ok(dir.x * expectedX > 0.95, `${side} arm points the wrong way: x=${dir.x}`);
   }
 
@@ -158,12 +159,12 @@ test("an A-pose rest pose is corrected to T-pose (the tracker's zero)", () => {
 });
 
 test("a rig facing away from the camera is spun around to VRM's +Z convention", () => {
-  // Mirrored on X: the "left" bones sit on +X, i.e. the character faces -Z.
+  // Mirrored on X: the "left" bones sit on -X, i.e. the character faces -Z.
   const { humanoid, notes } = buildHumanoidRig(buildSkeleton(APOSE_DIR, -1));
 
   const left = worldOf(humanoid.getRawBoneNode("leftUpperArm")!);
   const right = worldOf(humanoid.getRawBoneNode("rightUpperArm")!);
-  assert.ok(left.x < right.x, `left arm should end up at -X: ${left.x} vs ${right.x}`);
+  assert.ok(left.x > right.x, `left arm should end up at +X: ${left.x} vs ${right.x}`);
   assert.ok(
     notes.some((n) => n.includes("180")),
     `expected a facing note, got ${JSON.stringify(notes)}`
@@ -172,7 +173,7 @@ test("a rig facing away from the camera is spun around to VRM's +Z convention", 
   // ...and the T-pose fix still resolves in the corrected frame.
   const hand = worldOf(humanoid.getRawBoneNode("leftHand")!);
   const dir = hand.sub(left).normalize();
-  assert.ok(dir.x < -0.95, `left arm should extend to -X after the fix: ${dir.x}`);
+  assert.ok(dir.x > 0.95, `left arm should extend to +X after the fix: ${dir.x}`);
 });
 
 /** Drives the normalized bone the way kalidokitBridge does, then reads the raw
@@ -200,8 +201,9 @@ function poseAndRead(
 }
 
 test("an adapted A-pose rig responds to normalized rotations like a T-posed one", () => {
-  // A side-raise as the bridge emits it: roll about the normalized local Z.
-  const raise = new THREE.Euler(0, 0, -0.6, "XYZ");
+  // A side-raise: roll about the normalized local Z. The left arm rests along
+  // +X, so +Z rotates it toward +Y — upward.
+  const raise = new THREE.Euler(0, 0, 0.6, "XYZ");
 
   const aPose = poseAndRead(buildSkeleton(APOSE_DIR), "leftUpperArm", raise, "leftHand");
   const tPose = poseAndRead(buildSkeleton(TPOSE_DIR), "leftUpperArm", raise, "leftHand");
