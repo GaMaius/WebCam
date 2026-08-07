@@ -185,26 +185,14 @@ export function applyHandRig(
   handRig: Record<string, Rot> | undefined,
   solveSide: HandSide,
   vrmSide: VrmSide,
-  wristRoll?: number
+  wristWorld?: THREE.Quaternion | null
 ) {
   if (!handRig) return;
 
-  const wrist = handRig[`${solveSide}Wrist`];
-  if (wrist) {
-    // Roll (z) comes from the arm chain. The hand solver's own y is dropped
-    // outright: it isn't a yaw measurement at all — the solver assigns
-    // `handRotation.y = handRotation.z` and then biases it by -0.4, so feeding it
-    // in twists the hand off its forearm. x (flex) is the one component the palm
-    // landmarks measure cleanly.
-    rigRotation(
-      vrm,
-      `${vrmSide}Hand`,
-      { x: wrist.x, y: 0, z: wristRoll ?? 0 },
-      1,
-      LERP_HAND,
-      true // only the pose-derived z is affected
-    );
-  }
+  // The wrist is driven by lib/vrm/wristSolver.ts, not by Kalidokit: its wrist
+  // rotation twists the hand off the forearm (it copies roll into yaw), and
+  // taking roll from the arm chain instead loses palm rotation altogether.
+  if (wristWorld) applyWorldRotation(vrm, `${vrmSide}Hand`, wristWorld, LERP_HAND);
 
   for (const [rigSuffix, boneSuffix] of Object.entries(FINGER_BONE_BY_RIG_SUFFIX)) {
     const rot = handRig[`${solveSide}${rigSuffix}`];
@@ -214,6 +202,33 @@ export function applyHandRig(
     // RIGHT hand — which is where a left hand belongs in a mirror — curls on +z
     // too (measured, scratch/probe_vrm_axes.mjs). Uncrossed, this needed a flip.
     rigRotation(vrm, `${vrmSide}${boneSuffix}`, rot, 1, LERP_HAND, false);
+  }
+}
+
+/** Sets a bone's rotation from a WORLD-space target, converting through the
+ * parent's current world rotation. Used for the wrist, whose orientation is
+ * solved in model space rather than as a parent-relative euler. */
+export function applyWorldRotation(
+  vrm: MotionAvatar,
+  boneName: string,
+  world: THREE.Quaternion,
+  lerp = LERP_HAND
+) {
+  const node = getNode(vrm, boneName);
+  if (!node) return;
+
+  let target = world;
+  if (node.parent) {
+    // Matrices are only refreshed at render time, so the parent chain (which the
+    // arm bones may have just changed) has to be brought up to date first.
+    node.parent.updateWorldMatrix(true, false);
+    const parentWorld = new THREE.Quaternion();
+    node.parent.getWorldQuaternion(parentWorld);
+    target = parentWorld.invert().multiply(world);
+  }
+
+  if (node.quaternion.angleTo(target) > DEADZONE_RAD) {
+    node.quaternion.slerp(target, lerp);
   }
 }
 

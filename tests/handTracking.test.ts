@@ -196,24 +196,27 @@ test("a curl lands with the sign the target avatar hand needs", () => {
   assert.ok(fromUserRight < -0.05, `avatar left curl must be -Z, got ${fromUserRight.toFixed(3)}`);
 });
 
-test("the wrist takes its roll from the arm chain, not from the palm", () => {
-  // Kalidokit's hand solver folds its palm-plane roll into yaw as well
-  // (handRotation.y = handRotation.z), so feeding its z straight in snaps the
-  // hand to a broken angle. Roll comes from the pose rig's Hand.z instead.
+test("the wrist is left alone when no orientation is supplied", () => {
+  // Kalidokit's wrist rotation is never used: it copies its palm-plane roll into
+  // yaw (handRotation.y = handRotation.z, biased by -0.4), which twists the hand
+  // off the forearm. lib/vrm/wristSolver.ts supplies the orientation instead, and
+  // when it can't (degenerate landmarks) the wrist must simply not move.
   const { avatar, scene, humanoid } = asAvatar(buildRigWithFingers());
   const handRig = Kalidokit.Hand.solve(handLandmarks(0), "Left");
+  const wristBone = humanoid.getNormalizedBoneNode(
+    `${vrmSideForHand("Left")}Hand` as never
+  )!;
+  const before = wristBone.quaternion.clone();
 
   for (let i = 0; i < 40; i++) {
-    applyHandRig(avatar, handRig, "Left", vrmSideForHand("Left"), 0.5);
+    applyHandRig(avatar, handRig, "Left", vrmSideForHand("Left"), null);
     humanoid.update();
     scene.updateMatrixWorld(true);
   }
-  const z = new THREE.Euler().setFromQuaternion(
-    humanoid.getNormalizedBoneNode(`${vrmSideForHand("Left")}Hand`)!.quaternion,
-    "XYZ"
-  ).z;
-  // flipZ applies to this pose-derived z, so +0.5 in must come out negative.
-  assert.ok(z < -0.2, `pose roll should reach the wrist, got ${z.toFixed(3)}`);
+  assert.ok(
+    wristBone.quaternion.angleTo(before) < 1e-6,
+    "no wrist orientation means no wrist rotation"
+  );
 });
 
 test("world landmarks inherit visibility from the normalized list", () => {

@@ -2,12 +2,12 @@ import * as Kalidokit from "kalidokit";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { MotionAvatar } from "./motionAvatar";
 import { vrmExpressionsFromBlendshapes, type BlendshapeCategory } from "./faceExpressions";
+import { solveWristWorldQuaternion } from "./wristSolver";
 import {
   applyHandRig,
   LERP_BODY,
   LERP_FACE,
   LERP_LEG,
-  poseHandKeyForHand,
   resolvePoseGates,
   rigRotation,
   vrmSideForHand,
@@ -151,26 +151,28 @@ export function applyTrackingToVRM(
   }
 
   // 3. Hands — wrist + 15 finger joints, crossed to the mirrored avatar side so
-  // each hand lands on the arm driven by that same real limb.
-  applyHand(vrm, frame.leftHandLandmarks, "Left", poseRig);
-  applyHand(vrm, frame.rightHandLandmarks, "Right", poseRig);
+  // each hand lands on the arm driven by that same real limb. Runs after the pose
+  // so the wrist's world->local conversion sees the final forearm rotation.
+  applyHand(vrm, frame.leftHandLandmarks, "Left");
+  applyHand(vrm, frame.rightHandLandmarks, "Right");
 }
 
 /** Solves one hand from MediaPipe landmarks and writes it to the avatar. */
 function applyHand(
   vrm: MotionAvatar,
   landmarks: NormalizedLandmark[] | undefined,
-  solveSide: HandSide,
-  poseRig: ReturnType<typeof Kalidokit.Pose.solve> | undefined
+  solveSide: HandSide
 ) {
   if (!landmarks || landmarks.length < 21) return;
-  // Solve with the ANATOMICAL side (Kalidokit picks palm points and clamps from
-  // it), then write to the mirrored avatar side.
+  const vrmSide = vrmSideForHand(solveSide);
+  // Fingers: Kalidokit, solved with the ANATOMICAL side (it picks palm points and
+  // clamp ranges from it), written to the mirrored avatar side.
   const handRig = Kalidokit.Hand.solve(landmarks as never, solveSide) as
     | Record<string, Rot>
     | undefined;
-  const roll = poseRig?.[poseHandKeyForHand(solveSide)]?.z;
-  applyHandRig(vrm, handRig, solveSide, vrmSideForHand(solveSide), roll);
+  // Wrist: our own solver, straight off the palm geometry.
+  const wristWorld = solveWristWorldQuaternion(landmarks, vrmSide);
+  applyHandRig(vrm, handRig, solveSide, vrmSide, wristWorld);
 }
 
 function cutoff(val: number, threshold: number): number {

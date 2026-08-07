@@ -44,7 +44,8 @@ import fs from "node:fs";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin } from "@pixiv/three-vrm";
-import { applyHandRig, vrmSideForHand } from "../lib/vrm/boneRig.ts";
+import { applyHandRig, applyWorldRotation, vrmSideForHand } from "../lib/vrm/boneRig.ts";
+import { solveWristWorldQuaternion } from "../lib/vrm/wristSolver.ts";
 import type { MotionAvatar } from "../lib/vrm/motionAvatar.ts";
 // @ts-expect-error - the rolled-up bundle ships no type declarations; the package
 // entry re-exports from directories, which Node's ESM resolver rejects.
@@ -190,6 +191,114 @@ test("a hand is written to the mirrored avatar side, matching the arm", async ()
   assert.ok(
     worldOf("leftIndexDistal").distanceTo(untouched) < 1e-6,
     "and must leave the avatar's left fingers alone"
+  );
+});
+
+/**
+ * Raw-frame landmarks for a hand that should END UP at the given model-space
+ * orientation on `vrmSide`.
+ *
+ * Built backwards from the wanted result on purpose. Placing index/pinky by
+ * intuition doesn't work: "fingers up, palm forward" is reachable with the thumb
+ * either medial or lateral — two poses 180 degrees apart in wrist roll — so a
+ * hand-placed fixture silently encodes one of them and then argues with the
+ * code. Instead, derive `index->pinky` from the anatomical identity that WAS
+ * measured on the avatar (palm = -(fingers x across) on a left hand, +(...) on a
+ * right one), then convert to raw landmarks by inverting the camera->model map
+ * (which negates every axis).
+ */
+function landmarksFor(
+  vrmSide: "left" | "right",
+  fingersModel: THREE.Vector3,
+  palmModel: THREE.Vector3
+): { x: number; y: number; z: number }[] {
+  const fingers = fingersModel.clone().normalize();
+  const palm = palmModel.clone().normalize();
+  // a = -(f x palm) for a right hand, +(f x palm) for a left one.
+  const across = new THREE.Vector3()
+    .crossVectors(fingers, palm)
+    .multiplyScalar(vrmSide === "right" ? -1 : 1)
+    .normalize();
+
+  // model -> raw is the same negation as raw -> model.
+  const toRaw = (v: THREE.Vector3) => v.clone().negate();
+  const rawFingers = toRaw(fingers).multiplyScalar(0.2);
+  const rawAcross = toRaw(across).multiplyScalar(0.1);
+
+  const wrist = { x: 0.5, y: 0.8, z: 0 };
+  const at = (v: THREE.Vector3) => ({
+    x: wrist.x + v.x,
+    y: wrist.y + v.y,
+    z: wrist.z + v.z,
+  });
+
+  const pts: { x: number; y: number; z: number }[] = new Array(21)
+    .fill(null)
+    .map(() => ({ ...wrist }));
+  pts[0] = { ...wrist };
+  pts[9] = at(rawFingers); // middle MCP
+  pts[5] = at(rawFingers.clone().multiplyScalar(0.9).sub(rawAcross.clone().multiplyScalar(0.5)));
+  pts[17] = at(rawFingers.clone().multiplyScalar(0.9).add(rawAcross.clone().multiplyScalar(0.5)));
+  // Extended fingers, so nothing reads as a curl.
+  for (const [mcp, tip] of [[5, 8], [9, 12], [13, 16], [17, 20]]) {
+    pts[mcp + 1] = at(rawFingers.clone().multiplyScalar(1.3));
+    pts[mcp + 2] = at(rawFingers.clone().multiplyScalar(1.6));
+    pts[tip] = at(rawFingers.clone().multiplyScalar(1.8));
+  }
+  return pts;
+}
+
+/** Palm toward the camera, fingers up — the pose from the screenshots. */
+function palmToCameraLandmarks(twist = 0): { x: number; y: number; z: number }[] {
+  const palm = new THREE.Vector3(Math.sin(twist), 0, Math.cos(twist));
+  return landmarksFor("right", new THREE.Vector3(0, 1, 0), palm);
+}
+
+test("palm to camera, fingers up: the avatar's palm faces the viewer", async () => {
+  // The spec case from the screenshots. The user's LEFT hand drives the avatar's
+  // RIGHT hand (mirror), whose palm should end up facing +Z (at the camera) with
+  // the fingers pointing +Y (up).
+  const { vrm, scene, avatar, worldOf } = await loadAvatar();
+  const vrmSide = vrmSideForHand("Left");
+  const landmarks = palmToCameraLandmarks();
+
+  const wristWorld = solveWristWorldQuaternion(landmarks, vrmSide);
+  assert.ok(wristWorld, "the solver should produce an orientation");
+
+  for (let i = 0; i < 60; i++) {
+    applyWorldRotation(avatar, `${vrmSide}Hand`, wristWorld!, 0.5);
+    vrm.humanoid.update();
+    scene.updateMatrixWorld(true);
+  }
+
+  const indexProximal = worldOf(`${vrmSide}IndexProximal`);
+  const fingerDir = worldOf(`${vrmSide}IndexDistal`).sub(indexProximal).normalize();
+  const across = worldOf(`${vrmSide}LittleProximal`).sub(indexProximal).normalize();
+  // For the avatar's RIGHT hand, fingers x (index->little) IS the palm normal.
+  const palmDir = new THREE.Vector3().crossVectors(fingerDir, across).normalize();
+
+  assert.ok(
+    fingerDir.y > 0.8,
+    `fingers should point up, got ${fingerDir.toArray().map((n) => n.toFixed(2)).join(",")}`
+  );
+  assert.ok(
+    palmDir.z > 0.8,
+    `palm should face the camera (+Z), got ${palmDir.toArray().map((n) => n.toFixed(2)).join(",")}`
+  );
+});
+
+test("twisting the real wrist rotates the avatar's hand", async () => {
+  // The regression that prompted this solver: with roll taken from the pose chain
+  // the hand never rotated, because that chain only knows the wrist's POSITION.
+  const vrmSide = vrmSideForHand("Left");
+  const flat = solveWristWorldQuaternion(palmToCameraLandmarks(0), vrmSide);
+  const twisted = solveWristWorldQuaternion(palmToCameraLandmarks(Math.PI / 2), vrmSide);
+  assert.ok(flat && twisted);
+
+  const delta = flat!.angleTo(twisted!);
+  assert.ok(
+    delta > 1.0,
+    `a 90-degree palm twist should rotate the hand, got ${((delta * 180) / Math.PI).toFixed(1)} degrees`
   );
 });
 
