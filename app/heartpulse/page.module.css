@@ -279,3 +279,59 @@
   background: #c4553a;
   color: #fff;
 }
+
+/* Scan-length picker on the start card. The whole card is a flex row with
+   space-between, so this takes the full width on its own line below. */
+.durationPicker {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 16px;
+  border-top: 1.5px dashed var(--border);
+}
+.durationLabel {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.durationOptions {
+  display: flex;
+  gap: 8px;
+}
+.durationOn,
+.durationOnActive {
+  padding: 7px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13.5px;
+  font-weight: 700;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: transform 0.12s ease;
+}
+.durationOn:hover {
+  transform: translateY(-1px);
+  color: var(--text);
+}
+.durationOnActive {
+  border-color: #c4553a;
+  background: #c4553a;
+  color: #fff;
+}
+.durationHint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+/* Says whether the neck actually contributed, rather than assuming it did. */
+.regionNote {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}

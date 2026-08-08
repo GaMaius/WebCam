@@ -6,7 +6,9 @@ import {
   computeRoiRegions,
   computeFaceCropBox,
   sampleRegionMean,
+  sampleRegionSkinMean,
   sampleRegionAsRgbFrame,
+  isRegionUsableSkin,
 } from "@/lib/roi";
 import { posSignalFromRgbSeries, type RgbSample } from "@/lib/pos";
 import { bandpassFilter, estimateBpmAndHrv, resampleUniform } from "@/lib/signalProcessing";
@@ -20,14 +22,20 @@ import {
 } from "@/lib/heartpulse/tsCan";
 import { SESSION_KEYS, type HeartPulseResult } from "@/lib/types";
 
-// 30s scan, matching ubicomplab/rppg-web and the window the TS-CAN paper
-// evaluates on. This is longer than the 15s we used before, and deliberately so:
-// frequency resolution is 1/window, so 15s can only place the pulse peak to about
-// ±4 BPM before any noise, and a longer window also averages down the motion and
-// lighting artifacts that dominate webcam rPPG. Accuracy was the complaint; this
-// is part of the answer.
-const SCAN_DURATION_MS = 30_000;
-const MIN_USABLE_SAMPLES = 120;
+// Selectable scan length. The tradeoff is real and worth exposing rather than
+// picking for the user: frequency resolution is 1/window, so a 15s scan can only
+// place the pulse peak to about ±4 BPM before any noise is considered, while a
+// longer window also averages down the motion and lighting artifacts that
+// dominate webcam rPPG. 30s is what ubicomplab/rppg-web and the TS-CAN paper use,
+// so it stays the default.
+export const SCAN_DURATION_OPTIONS = [15, 30, 60] as const;
+export type ScanDurationSec = (typeof SCAN_DURATION_OPTIONS)[number];
+export const DEFAULT_SCAN_DURATION: ScanDurationSec = 30;
+
+/** Minimum usable samples, scaled to the window: roughly 4 seconds of capture at
+ * a conservative 20fps. A fixed floor would either reject a valid 15s scan or wave
+ * through a 60s one that lost most of its frames. */
+const minUsableSamples = (durationSec: number) => Math.round(durationSec * 20 * 0.2);
 const WAVEFORM_POINTS = 150;
 
 // Everything downstream is resampled onto this grid, so the bandpass and FFT see
@@ -51,6 +59,10 @@ export interface HeartPulseScanState {
   /** Which signal source actually produced the result — surfaced so the UI
    * can be transparent about a fallback happening. */
   engine: HeartPulseEngine | null;
+  /** Whether the neck (carotid) region was visible skin often enough to be
+   * folded into the signal. Reported so the guidance can be honest about
+   * whether it actually contributed. */
+  neckUsed: boolean;
 }
 
 export function useHeartPulseScan() {
@@ -61,6 +73,7 @@ export function useHeartPulseScan() {
     result: null,
     errorMessage: "",
     engine: null,
+    neckUsed: false,
   });
 
   const rafRef = useRef<number | null>(null);
@@ -85,6 +98,10 @@ export function useHeartPulseScan() {
   const lastCenterRef = useRef<{ x: number; y: number } | null>(null);
   const lastVideoTimeRef = useRef(-1);
   const scanStartRef = useRef<number>(0);
+  const durationRef = useRef<number>(DEFAULT_SCAN_DURATION);
+  /** How many frames actually had usable neck skin, so the UI can say whether it
+   * contributed rather than assuming it did. */
+  const neckFramesRef = useRef({ used: 0, total: 0 });
 
   const stop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -95,7 +112,15 @@ export function useHeartPulseScan() {
 
   const reset = useCallback(() => {
     stop();
-    setState({ phase: "idle", progress: 0, waveform: [], result: null, errorMessage: "", engine: null });
+    setState({
+      phase: "idle",
+      progress: 0,
+      waveform: [],
+      result: null,
+      errorMessage: "",
+      engine: null,
+      neckUsed: false,
+    });
   }, [stop]);
 
   /**
@@ -138,7 +163,8 @@ export function useHeartPulseScan() {
 
     void (async () => {
       const samples = samplesRef.current;
-      if (samples.length < MIN_USABLE_SAMPLES) {
+      const minSamples = minUsableSamples(durationRef.current);
+      if (samples.length < minSamples) {
         setState((s) => ({
           ...s,
           phase: "error",
@@ -155,7 +181,7 @@ export function useHeartPulseScan() {
         let engine: HeartPulseEngine = "pos";
 
         const { derivative, times } = pulseRef.current;
-        if (modelRef.current && derivative.length >= MIN_USABLE_SAMPLES) {
+        if (modelRef.current && derivative.length >= minSamples) {
           // The model emits the pulse derivative, so integrate first, then put it
           // on a uniform time base before any spectral work.
           signal = resampleUniform(integratePulse(derivative), times, ANALYSIS_FPS);
@@ -206,7 +232,17 @@ export function useHeartPulseScan() {
           /* sessionStorage may be unavailable (private mode etc.) — non-fatal */
         }
 
-        setState((s) => ({ ...s, phase: "done", progress: 1, result, engine }));
+        const neck = neckFramesRef.current;
+        setState((s) => ({
+          ...s,
+          phase: "done",
+          progress: 1,
+          result,
+          engine,
+          // "Used" only if it was visible for most of the scan; a couple of lucky
+          // frames shouldn't let the UI claim the neck contributed.
+          neckUsed: neck.total > 0 && neck.used / neck.total >= 0.5,
+        }));
       } catch (err) {
         console.error("rPPG analysis failed:", err);
         setState((s) => ({
@@ -219,8 +255,10 @@ export function useHeartPulseScan() {
   }, [pumpInference, stop]);
 
   const start = useCallback(
-    async (video: HTMLVideoElement) => {
+    async (video: HTMLVideoElement, durationSec: ScanDurationSec = DEFAULT_SCAN_DURATION) => {
       stop();
+      durationRef.current = durationSec;
+      neckFramesRef.current = { used: 0, total: 0 };
       samplesRef.current = [];
       pendingRef.current = { frames: [], times: [] };
       pulseRef.current = { derivative: [], times: [] };
@@ -229,7 +267,15 @@ export function useHeartPulseScan() {
       motionRef.current = { totalDisplacement: 0, sampleCount: 0 };
       lastCenterRef.current = null;
       lastVideoTimeRef.current = -1;
-      setState({ phase: "aligning", progress: 0, waveform: [], result: null, errorMessage: "", engine: null });
+      setState({
+        phase: "aligning",
+        progress: 0,
+        waveform: [],
+        result: null,
+        errorMessage: "",
+        engine: null,
+        neckUsed: false,
+      });
 
       // Start the model load in parallel with the face landmarker so it has the
       // alignment period to finish rather than only starting once scanning does.
@@ -304,9 +350,24 @@ export function useHeartPulseScan() {
         const forehead = sampleRegionMean(ctx, regions.forehead, canvas.width, canvas.height);
         const leftCheek = sampleRegionMean(ctx, regions.leftCheek, canvas.width, canvas.height);
         const rightCheek = sampleRegionMean(ctx, regions.rightCheek, canvas.width, canvas.height);
-        const r = (forehead.r + leftCheek.r + rightCheek.r) / 3;
-        const g = (forehead.g + leftCheek.g + rightCheek.g) / 3;
-        const b = (forehead.b + leftCheek.b + rightCheek.b) / 3;
+        const patches = [forehead, leftCheek, rightCheek];
+
+        // The neck (carotid) region, folded in ONLY when it's really exposed skin
+        // inside the frame. The carotids run close to the surface so the pulsatile
+        // component there is strong, but a collar, a beard or a tight framing puts
+        // it out of reach — and averaging a shirt into the signal is worse than
+        // leaving it out. Skin-masked so the check is on pixels, not hope.
+        const neckSample = sampleRegionSkinMean(ctx, regions.neck, canvas.width, canvas.height);
+        const neckUsable = isRegionUsableSkin(regions.neck, neckSample, canvas.width, canvas.height);
+        neckFramesRef.current.total += 1;
+        if (neckUsable) {
+          neckFramesRef.current.used += 1;
+          patches.push(neckSample);
+        }
+
+        const r = patches.reduce((sum, p) => sum + p.r, 0) / patches.length;
+        const g = patches.reduce((sum, p) => sum + p.g, 0) / patches.length;
+        const b = patches.reduce((sum, p) => sum + p.b, 0) / patches.length;
 
         // The model's own ROI: a tracked face crop at 36x36. The upstream demo
         // uses a FIXED box and asks the user to line their face up inside it; we
@@ -341,7 +402,7 @@ export function useHeartPulseScan() {
           const nextWaveform = [...s.waveform, g];
           return {
             ...s,
-            progress: Math.min(1, elapsed / SCAN_DURATION_MS),
+            progress: Math.min(1, elapsed / (durationSec * 1000)),
             waveform:
               nextWaveform.length > WAVEFORM_POINTS
                 ? nextWaveform.slice(nextWaveform.length - WAVEFORM_POINTS)
@@ -349,7 +410,7 @@ export function useHeartPulseScan() {
           };
         });
 
-        if (elapsed >= SCAN_DURATION_MS) {
+        if (elapsed >= durationSec * 1000) {
           finish();
           return;
         }
@@ -361,7 +422,7 @@ export function useHeartPulseScan() {
     [finish, pumpInference, stop]
   );
 
-  return { ...state, start, stop, reset, scanSeconds: SCAN_DURATION_MS / 1000 };
+  return { ...state, start, stop, reset };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

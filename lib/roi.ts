@@ -21,8 +21,45 @@ export interface RoiRegions {
   forehead: RoiRegion;
   leftCheek: RoiRegion;
   rightCheek: RoiRegion;
+  /**
+   * The front of the neck, below the chin — the carotid region.
+   *
+   * Genuinely one of the stronger rPPG sites: the carotids run close to the
+   * surface, so the pulsatile component there is large. It's optional, though —
+   * a high collar, a beard, or a tight camera framing puts it out of shot — so
+   * callers must check it's actually visible skin before using it (see
+   * `isRegionUsableSkin`) rather than averaging in a collar.
+   */
+  neck: RoiRegion;
   /** Overall face bounding box center, in pixel coordinates — used for motion tracking. */
   center: { x: number; y: number };
+}
+
+/** Minimum skin coverage before an optional region is trusted. Below this the
+ * rectangle is mostly clothing, hair, beard or background. */
+export const MIN_SKIN_RATIO = 0.55;
+
+/**
+ * Whether an optional ROI is really exposed skin and inside the frame.
+ *
+ * Used to decide at runtime whether the neck contributes. This is what makes
+ * "your neck is included when it's visible" an accurate statement instead of a
+ * hopeful one.
+ */
+export function isRegionUsableSkin(
+  region: RoiRegion,
+  sample: SkinSample,
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  const inFrame =
+    region.x >= 0 &&
+    region.y >= 0 &&
+    region.x + region.w <= frameWidth &&
+    region.y + region.h <= frameHeight &&
+    region.w > 4 &&
+    region.h > 4;
+  return inFrame && sample.skinRatio >= MIN_SKIN_RATIO;
 }
 
 export function computeRoiRegions(
@@ -57,6 +94,10 @@ export function computeRoiRegions(
     leftCheek: region(0.1, 0.5, 0.22, 0.16),
     // Image-space right side (== subject's left cheek).
     rightCheek: region(0.68, 0.5, 0.22, 0.16),
+    // Just below the chin, centred on the throat. Sits OUTSIDE the face box
+    // (ry > 1), so it can fall off the bottom of the frame — that's expected and
+    // is what isRegionUsableSkin exists to catch.
+    neck: region(0.3, 1.04, 0.4, 0.18),
     center: {
       x: (minX + faceW / 2) * frameWidth,
       y: (minY + faceH / 2) * frameHeight,

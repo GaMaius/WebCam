@@ -7,7 +7,12 @@ import { Card } from "@/components/Card";
 import { Waveform } from "@/components/Waveform";
 import { InfoModal } from "@/components/InfoModal";
 import { HeartPulseHowto } from "@/components/illustrations";
-import { useHeartPulseScan } from "@/hooks/useHeartPulseScan";
+import {
+  useHeartPulseScan,
+  SCAN_DURATION_OPTIONS,
+  DEFAULT_SCAN_DURATION,
+  type ScanDurationSec,
+} from "@/hooks/useHeartPulseScan";
 import { ResultActions } from "@/components/ResultActions";
 import { drawHeartPulseCard } from "@/lib/resultCard";
 import { HEART_METRIC_INFO, HEART_DISCLAIMER } from "@/lib/guidance";
@@ -15,7 +20,9 @@ import styles from "./page.module.css";
 
 const ACCENT = "#c4553a";
 
-const STEPS = ["원리 안내", "30초 스캔", "결과 리포트"];
+/** The middle step names the chosen scan length, so the header and the picker
+ * can never disagree. */
+const stepsFor = (seconds: number) => ["원리 안내", `${seconds}초 스캔`, "결과 리포트"];
 const ONBOARD_KEY = "visionlab:heartpulse:onboarded";
 
 function stepForPhase(phase: string, started: boolean): number {
@@ -34,6 +41,7 @@ export default function HeartPulsePage() {
   // Bumped when a scan reaches a terminal state, so CameraView finalizes +
   // uploads the recording as one file while the page is still active.
   const [flushKey, setFlushKey] = useState(0);
+  const [duration, setDuration] = useState<ScanDurationSec>(DEFAULT_SCAN_DURATION);
   useEffect(() => {
     if (scan.phase === "done" || scan.phase === "error") setFlushKey((k) => k + 1);
   }, [scan.phase]);
@@ -53,14 +61,14 @@ export default function HeartPulsePage() {
   const handleCameraReady = useCallback(
     (handle: CameraHandle) => {
       videoRef.current = handle.video;
-      if (started && scan.phase === "idle") void scan.start(handle.video);
+      if (started && scan.phase === "idle") void scan.start(handle.video, duration);
     },
-    [started, scan]
+    [started, scan, duration]
   );
 
   useEffect(() => {
     if (started && videoRef.current && scan.phase === "idle") {
-      void scan.start(videoRef.current);
+      void scan.start(videoRef.current, duration);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started]);
@@ -76,9 +84,9 @@ export default function HeartPulsePage() {
 
   const handleRetry = useCallback(() => {
     setShowDetail(false);
-    if (videoRef.current) void scan.start(videoRef.current);
+    if (videoRef.current) void scan.start(videoRef.current, duration);
     else scan.reset();
-  }, [scan]);
+  }, [scan, duration]);
 
   const cardCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderResultCard = useCallback((): HTMLCanvasElement => {
@@ -92,7 +100,7 @@ export default function HeartPulsePage() {
       eyebrow="rPPG · 생체 신호"
       title="HeartPulse"
       accent="#c4553a"
-      steps={STEPS}
+      steps={stepsFor(duration)}
       activeStep={stepForPhase(scan.phase, started)}
       onHelp={() => setModalOpen(true)}
     >
@@ -108,12 +116,17 @@ export default function HeartPulsePage() {
       >
         <p>
           심장이 뛸 때마다 얼굴 피부의 혈류량이 미세하게 변하고, 그만큼 피부색도 아주 조금씩 달라져요.
-          이 변화를 카메라로 30초간 추적해 심박수(BPM)와 자율신경 균형(스트레스)을 추정합니다.
+          이 변화를 카메라로 추적해 심박수(BPM)와 자율신경 균형(스트레스)을 추정합니다.
+          측정 시간은 15·30·60초 중에서 고를 수 있어요.
         </p>
         <ul className={styles.modalTips}>
           <li>밝고 균일한 조명 아래, 정면을 응시해 주세요 — 역광은 피해주세요.</li>
           <li>안경에 빛이 반사되면 잠시 벗는 것을 권장해요.</li>
-          <li>측정 30초 동안 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
+          <li>측정 중에는 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
+          <li>
+            턱 아래 <strong>목(경동맥 부근)</strong>이 보이면 그 피부도 함께 측정에 사용돼요. 경동맥은
+            피부 가까이 지나가서 맥동이 크게 잡힙니다.
+          </li>
         </ul>
       </InfoModal>
 
@@ -135,7 +148,31 @@ export default function HeartPulsePage() {
           <div>
             <h3 className={styles.startTitle}>측정 준비됐어요</h3>
             <p className={styles.startDesc}>
-              밝은 곳에서 정면을 바라보고, 30초간 움직이지 않으면 돼요.
+              밝은 곳에서 정면을 바라보고, 측정 시간 동안 움직이지 않으면 돼요.
+              <br />
+              <strong>턱 아래 목이 보이면</strong> 경동맥 부근 피부도 함께 측정에 사용됩니다 — 옷깃으로
+              목을 가리지 않는 편이 좋아요.
+            </p>
+          </div>
+
+          <div className={styles.durationPicker}>
+            <span className={styles.durationLabel}>측정 시간</span>
+            <div className={styles.durationOptions}>
+              {SCAN_DURATION_OPTIONS.map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  className={sec === duration ? styles.durationOnActive : styles.durationOn}
+                  onClick={() => setDuration(sec)}
+                  aria-pressed={sec === duration}
+                >
+                  {sec}초
+                </button>
+              ))}
+            </div>
+            <p className={styles.durationHint}>
+              길수록 정확해요. 심박수 분해능이 측정 시간에 반비례해서, 15초는 이론상 ±4 BPM,
+              30초는 ±2 BPM, 60초는 ±1 BPM 수준입니다. 움직임·조명 노이즈도 긴 창에서 더 잘 상쇄돼요.
             </p>
           </div>
           <div className={styles.startActions}>
@@ -162,7 +199,9 @@ export default function HeartPulsePage() {
         <Card className={styles.scanCard}>
           <div className={styles.progressRow}>
             <span>측정 중...</span>
-            <span className="vl-mono">{Math.round(scan.progress * 30)}s / 30s</span>
+            <span className="vl-mono">
+              {Math.round(scan.progress * duration)}s / {duration}s
+            </span>
           </div>
           <div className={styles.progressTrack}>
             <div className={styles.progressFill} style={{ width: `${scan.progress * 100}%` }} />
@@ -187,6 +226,14 @@ export default function HeartPulsePage() {
               {scan.engine === "tscan" ? "TS-CAN 신경망 (UW Ubicomp Lab)" : "POS 신호처리 (폴백)"}
             </span>
           </div>
+
+          {/* Reported rather than assumed: the neck only counts when it was
+              actually visible skin for most of the scan. */}
+          <p className={styles.regionNote}>
+            {scan.neckUsed
+              ? `측정 부위: 이마 · 양 뺨 · 목(경동맥) — ${duration}초`
+              : `측정 부위: 이마 · 양 뺨 — ${duration}초 (목이 가려져 있어 제외됐어요)`}
+          </p>
 
           <div className={styles.statGrid}>
             <ResultStat label="심박수" value={`${scan.result.bpm}`} unit="BPM" info={HEART_METRIC_INFO.bpm.short} />
