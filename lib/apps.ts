@@ -6,7 +6,7 @@
 // route) — the home page renders straight from this list, so it scales without
 // touching layout code.
 
-export type AppIconKey = "pulse" | "palette" | "pokeball" | "vrm";
+export type AppIconKey = "pulse" | "palette" | "pokeball" | "vrm" | "synth";
 
 export interface AppMeta {
   /** Route slug under "/" (e.g. "heartpulse" -> /heartpulse). */
@@ -55,6 +55,16 @@ export const APPS: AppMeta[] = [
     desc: "웹캠으로 내 얼굴과 포즈를 실시간 추적해 3D 캐릭터(VRM·FBX)를 움직이고 연출합니다.",
     accent: "#7b52b9",
     icon: "vrm",
+  },
+  {
+    // The only app here that isn't ours: Eric Wei's Gesture Synth, embedded with
+    // permission (see app/gesturesynth/page.tsx).
+    slug: "gesturesynth",
+    title: "Gesture Synth",
+    subtitle: "제스처 · 신스",
+    desc: "양손 제스처로 코드를 짚고 음색과 필터를 바꾸는 악기입니다. 왼손이 코드, 오른손이 화성과 음량을 만듭니다.",
+    accent: "#e8a13d",
+    icon: "synth",
   },
 ];
 

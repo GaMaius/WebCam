@@ -106,6 +106,17 @@
     7. **검증·도구**: `tests/humanoidRigger.test.ts`(이름 매핑, 스케일/접지, A-pose→T-pose, 정면 180°, 그리고 **"어댑트된 A-pose 리그가 T-pose 리그와 동일하게 반응한다"** 는 end-to-end 등가성 — 보정을 끄면 손 위치가 **0.226m** 어긋난다). 새 모델은 `node scratch/inspect_avatar_rig.mjs <model.fbx>`로 브라우저·웹캠 없이 미리 볼 수 있다(본 매핑·자동 보정·rest 방향·side-raise가 손을 올리는지·스켈레톤 복사본 중첩 여부).
     8. **⚠️ 메시별 스켈레톤 복사본**: 스파이더맨 FBX처럼 메시마다 스켈레톤 사본이 있는 파일은 사본들이 **0 오프셋으로 중첩**돼 최상단이 전체의 조상이다. 그래서 `collectBones`의 **최소 depth 선택**이 전체 메시를 구동한다 — 이 선택 규칙을 바꾸면 일부 메시만 움직인다.
 
+- **VL-8** Gesture Synth(`/gesturesynth`) — **유일하게 우리가 만들지 않은 앱**. Eric Wei(indecisiveeric.com)의 손 제스처 신스를 **본인 허락을 받아** 그대로 임베드했다(2026-08-08). 포팅이 아니라 임베드다.
+  - **자산**: `public/gesture-synth/`에 `index.html` + `assets/index-B3fG-YTY.js`(147KB). 번들은 **바이트 단위로 원본과 동일**(md5 확인). HTML만 두 곳 수정: ① 스크립트 경로를 `/assets/…` → `./assets/…`(서브디렉터리에서 서빙하므로) ② 아래 카메라 shim 추가. 로컬 자산은 이 둘뿐이고(이미지·폰트·오디오 파일 0개, CSS는 HTML 인라인), MediaPipe wasm(**0.10.14**)과 손 모델은 런타임에 절대 URL로 CDN에서 받는다. env·API키·도메인 하드코딩 없음.
+  - **⚠️ 카메라 소유권 — 이 임베드의 핵심**: 그 앱은 자기가 `getUserMedia`를 호출한다. 그러면 이 사이트의 "웹캠이 켜진 모든 순간은 녹화·업로드" 규칙이 깨진다(스트림 2개 + 권한창 2번 + 녹화 안 되는 세션). 그래서 `index.html` 최상단 인라인 shim이 `getUserMedia`를 **호스트가 준 스트림을 반환하는 함수로 교체**하고, 페이지는 `CameraView`의 스트림을 `window.__visionlabStream`에 올린다.
+    - **postMessage가 아니라 객체 직접 참조**다 — `MediaStream`은 structured-clone이 안 돼서 postMessage하면 예외가 난다. same-origin(우리가 서빙)이라 직접 읽기가 된다.
+    - **`sandbox` 속성 안 붙였다**: same-origin 읽기가 필요하고, `allow-scripts allow-same-origin` 조합은 실질적 경계가 아니며, `allow-popups`가 빠지면 그 앱 도움말의 외부 링크가 죽는다.
+    - **⚠️ iframe은 스트림이 생긴 뒤에 mount한다**(`appMounted` 단방향 래치). 처음엔 바로 mount했는데, shim이 스트림을 기다리다 **타임아웃되면 자기 `getUserMedia`로 폴백**해서 권한창이 두 번 뜨고 녹화가 안 됐다. 늦게 mount하면 shim의 첫 폴에서 스트림이 이미 있어 경합 자체가 사라진다. 한 번 mount하면 안 내린다(스트림이 잠깐 끊겨도 악기가 리셋되지 않게).
+    - CameraView는 **보이지 않게 mount**된다(1px·opacity 0, `display:none` 아님 — 비디오 재생 throttle 방지). 그 앱이 자기 canvas에 카메라를 이미 그려주므로 PiP가 중복이다. 카메라가 8초 안에 안 뜨면 **패널을 드러내서** CameraView 자신의 에러 메시지·다시시도 버튼을 쓰게 한다(CameraView에 `onError` prop을 새로 만들지 않아도 되는 방법).
+  - **검증(2026-08-08, 브라우저)**: 샌드박스는 실제 카메라가 막혀 있어 **canvas `captureStream()`으로 가짜 웹캠을 물려** 체인 전체를 확인했다 — 그 앱의 `<video>.srcObject`가 **CameraView가 만든 그 스트림 객체와 동일**(`sameStream: true`), 640×480, 그 앱의 `ou()`가 실행돼 canvas 크기가 잡혔고, wasm 2.5MB·손 모델 200, overlay canvas가 매 프레임 리페인트됨. 재현 방법: 홈에서 `navigator.mediaDevices.getUserMedia`를 스텁한 뒤 **클라이언트 사이드 내비게이션**으로 이동(하드 리로드하면 스텁이 날아간다).
+  - **알려진 노이즈**: 번들에 `@vercel/analytics`가 들어 있어 `/_vercel/insights/script.js`를 찾는다 — 로컬에선 404, Vercel 배포에선 우리 프로젝트 경로로 200(iframe 경로가 페이지뷰로 잡힘). 제거하려면 번들을 고쳐야 해서 **바이트 동일성을 지키는 쪽을 택했다.**
+  - **한계 / 다음 단계**: 우리 디자인 시스템·결과카드(`ResultActions`)·`frameSchedule`이 안 붙고, tasks-vision을 두 버전(0.10.14 + 우리 0.10.35) 받는다(이 페이지 한정 일회성). 제대로 통합하려면 포팅해야 하는데 앱 자체 로직은 **10.8KB(번들의 7%)** 뿐이다. 소스맵은 없다 — 저자에게 소스를 받는 게 가장 싸고, 그러면 그 임계값들을 어느 MediaPipe 버전에 맞춰 튜닝했는지도 알 수 있다.
+
 단위 테스트: `npm test`(Node 내장 `node --test`, `.ts` 직접 실행). `deepPhys.test.ts`는 `onnxruntime-web` 미설치 환경에서 import 에러로 실패할 수 있음(로직 무관, `npm install` 후 정상).
 
 ## 배포 정보

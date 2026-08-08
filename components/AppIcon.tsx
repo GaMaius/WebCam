@@ -46,6 +46,17 @@ export function AppIcon({ name, size = 26 }: { name: AppIconKey; size?: number }
           <path d="M12 22.08V12" />
         </svg>
       );
+    case "synth":
+      // A hand over a waveform: gestures shaping sound.
+      return (
+        <svg {...common}>
+          <path d="M2 17c1.2 0 1.8-4 3-4s1.8 4 3 4" />
+          <path d="M11.5 21v-4.5" />
+          <path d="M11.5 16.5V5.5a1.4 1.4 0 0 1 2.8 0v6" />
+          <path d="M14.3 12v-1.2a1.4 1.4 0 0 1 2.8 0V12" />
+          <path d="M17.1 12.4v-.8a1.4 1.4 0 0 1 2.8 0V15a6 6 0 0 1-6 6h-1.4" />
+        </svg>
+      );
     default:
       return null;
   }
