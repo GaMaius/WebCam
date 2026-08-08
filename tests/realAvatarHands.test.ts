@@ -44,7 +44,12 @@ import fs from "node:fs";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin } from "@pixiv/three-vrm";
-import { applyHandRig, applyWorldRotation, vrmSideForHand } from "../lib/vrm/boneRig.ts";
+import {
+  applyHandRig,
+  applyWorldRotation,
+  solveFingerRig,
+  vrmSideForHand,
+} from "../lib/vrm/boneRig.ts";
 import { solveWristWorldQuaternion } from "../lib/vrm/wristSolver.ts";
 import type { MotionAvatar } from "../lib/vrm/motionAvatar.ts";
 // @ts-expect-error - the rolled-up bundle ships no type declarations; the package
@@ -144,8 +149,7 @@ test("a solved fist curls the real avatar's fingers toward the palm", async () =
 
     // Fingers only: drop the wrist entry so tilting the hand can't be mistaken
     // for a finger curl.
-    const solved = Kalidokit.Hand.solve(fistLandmarks(), side) as Record<string, unknown>;
-    delete solved[`${side}Wrist`];
+    const solved = solveFingerRig(fistLandmarks(), side) as Record<string, unknown>;
 
     for (let i = 0; i < 40; i++) {
       applyHandRig(avatar, solved as never, side, prefix);
@@ -176,8 +180,7 @@ test("a hand is written to the mirrored avatar side, matching the arm", async ()
   const before = worldOf("rightIndexDistal").clone();
   const untouched = worldOf("leftIndexDistal").clone();
 
-  const solved = Kalidokit.Hand.solve(fistLandmarks(), "Left") as Record<string, unknown>;
-  delete solved["LeftWrist"];
+  const solved = solveFingerRig(fistLandmarks(), "Left") as Record<string, unknown>;
   for (let i = 0; i < 40; i++) {
     applyHandRig(avatar, solved as never, "Left", vrmSideForHand("Left"));
     vrm.humanoid.update();

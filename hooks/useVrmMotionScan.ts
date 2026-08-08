@@ -24,6 +24,12 @@ import {
 // lib/vrm/frameSchedule.ts — including why the hands get every frame and the
 // face/pose alternate rather than the other way round.
 
+/** One hand's two landmark sets, kept together so a held hand keeps both. */
+interface HandReading {
+  landmarks: NonNullable<LandmarkFrameData["leftHandLandmarks"]>;
+  world?: LandmarkFrameData["leftHandWorldLandmarks"];
+}
+
 export function useVrmMotionScan(
   vrm: MotionAvatar | null,
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -46,9 +52,11 @@ export function useVrmMotionScan(
   const fpsRef = useRef(0);
   const tickRef = useRef(0);
   // Each hand is held independently: one hand leaving the frame must not stall
-  // the other, and a single dropped detection must not snap it to rest.
-  const leftHandRef = useRef<HeldValue<NonNullable<LandmarkFrameData["leftHandLandmarks"]>>>(EMPTY_HELD);
-  const rightHandRef = useRef<HeldValue<NonNullable<LandmarkFrameData["rightHandLandmarks"]>>>(EMPTY_HELD);
+  // the other, and a single dropped detection must not snap it to rest. Both
+  // landmark sets travel together — the bridge needs the normalized set for the
+  // wrist and the metric one for the finger angles.
+  const leftHandRef = useRef<HeldValue<HandReading>>(EMPTY_HELD);
+  const rightHandRef = useRef<HeldValue<HandReading>>(EMPTY_HELD);
   // The face also runs on alternate frames now, so its last reading is reused in
   // between. No timed hold: a lost face should drop the expressions promptly.
   const lastFaceRef = useRef<{
@@ -159,14 +167,17 @@ export function useVrmMotionScan(
         if (handLandmarker && plan.hands) {
           try {
             const handResult = handLandmarker.detectForVideo(video, now);
-            let left: LandmarkFrameData["leftHandLandmarks"];
-            let right: LandmarkFrameData["rightHandLandmarks"];
+            let left: HandReading | undefined;
+            let right: HandReading | undefined;
             const hands = handResult.landmarks ?? [];
             hands.forEach((lm, i) => {
+              // The metric landmarks share the normalized list's indexing; the
+              // bridge needs both (normalized wrist, metric finger angles).
+              const reading: HandReading = { landmarks: lm, world: handResult.worldLandmarks?.[i] };
               // MediaPipe's handedness label is used verbatim as the VRM side.
               const label = handResult.handedness?.[i]?.[0]?.categoryName;
-              if (label === "Left") left = lm;
-              else if (label === "Right") right = lm;
+              if (label === "Left") left = reading;
+              else if (label === "Right") right = reading;
             });
             leftHandRef.current = holdLandmarks(leftHandRef.current, left, now, HAND_HOLD_MS);
             rightHandRef.current = holdLandmarks(rightHandRef.current, right, now, HAND_HOLD_MS);
@@ -177,8 +188,10 @@ export function useVrmMotionScan(
             // ignore frame error
           }
         }
-        frameData.leftHandLandmarks = leftHandRef.current.value;
-        frameData.rightHandLandmarks = rightHandRef.current.value;
+        frameData.leftHandLandmarks = leftHandRef.current.value?.landmarks;
+        frameData.leftHandWorldLandmarks = leftHandRef.current.value?.world;
+        frameData.rightHandLandmarks = rightHandRef.current.value?.landmarks;
+        frameData.rightHandWorldLandmarks = rightHandRef.current.value?.world;
 
         // Apply tracking solved result to VRM avatar
         if (vrm) {

@@ -11,7 +11,7 @@ import {
   resolvePoseGates,
   rigFaceRotation,
   rigRotation,
-  solveThumbRig,
+  solveFingerRig,
   vrmSideForHand,
   withLandmarkVisibility,
   type HandSide,
@@ -27,6 +27,10 @@ export interface LandmarkFrameData {
   faceBlendshapes?: BlendshapeCategory[];
   leftHandLandmarks?: NormalizedLandmark[];
   rightHandLandmarks?: NormalizedLandmark[];
+  /** HandLandmarker's METRIC hand landmarks (meters, origin at the hand's
+   * centre). Finger joint angles are measured off these — see applyHand. */
+  leftHandWorldLandmarks?: { x: number; y: number; z: number }[];
+  rightHandWorldLandmarks?: { x: number; y: number; z: number }[];
 }
 
 /** "full" drives the whole body; "upper" is the face+hands version — legs are
@@ -155,25 +159,52 @@ export function applyTrackingToVRM(
   // 3. Hands — wrist + 15 finger joints, crossed to the mirrored avatar side so
   // each hand lands on the arm driven by that same real limb. Runs after the pose
   // so the wrist's world->local conversion sees the final forearm rotation.
-  applyHand(vrm, frame.leftHandLandmarks, "Left");
-  applyHand(vrm, frame.rightHandLandmarks, "Right");
+  applyHand(vrm, frame.leftHandLandmarks, frame.leftHandWorldLandmarks, "Left");
+  applyHand(vrm, frame.rightHandLandmarks, frame.rightHandWorldLandmarks, "Right");
 }
 
-/** Solves one hand from MediaPipe landmarks and writes it to the avatar. */
+/**
+ * Solves one hand from MediaPipe landmarks and writes it to the avatar.
+ *
+ * The two landmark sets are NOT interchangeable, and which one each part reads
+ * is the whole reason fingers curl or don't:
+ *
+ * - FINGER ANGLES come from the WORLD landmarks. Joint angle is a 3D quantity,
+ *   and the normalized landmarks are a bad space to measure it in: x is divided
+ *   by the frame width but y by its height (so a 4:3 frame stretches y by a
+ *   third), and their z is a weak relative depth. A fist pointed at the camera is
+ *   the pose that breaks worst — the chain wrist->knuckle->joint->tip is almost
+ *   entirely along the view axis, so once depth flattens, the projected chain is
+ *   very nearly a straight line and every joint measures ~180 degrees, i.e. a
+ *   fully OPEN hand. That was the on-device symptom: a tight fist barely curled.
+ *   The world landmarks are metric and isotropic, which is what the angle
+ *   formula assumes. Only angle MAGNITUDES are read here (Kalidokit's finger
+ *   branch and solveThumbRig both use unsigned joint angles, with direction
+ *   coming from the fixed per-side convention), so changing spaces cannot flip
+ *   a curl direction — it only changes how much.
+ *
+ * - THE WRIST stays on the normalized landmarks: solveWristWorldQuaternion maps
+ *   camera axes to model axes with per-axis signs pinned to how the raw frame is
+ *   oriented, and that mapping was settled on a real device. World landmarks
+ *   don't share the frame's axes, so reusing it there would silently rotate the
+ *   hand.
+ */
 function applyHand(
   vrm: MotionAvatar,
   landmarks: NormalizedLandmark[] | undefined,
+  worldLandmarks: { x: number; y: number; z: number }[] | undefined,
   solveSide: HandSide
 ) {
   if (!landmarks || landmarks.length < 21) return;
   const vrmSide = vrmSideForHand(solveSide);
-  // Fingers: Kalidokit, solved with the ANATOMICAL side (it picks palm points and
-  // clamp ranges from it), written to the mirrored avatar side.
-  const handRig = Kalidokit.Hand.solve(landmarks as never, solveSide) as
-    | Record<string, Rot>
-    | undefined;
-  // Kalidokit's thumb branch is unusable on VRM 1.0 (see solveThumbRig).
-  if (handRig) Object.assign(handRig, solveThumbRig(landmarks, solveSide));
+  // Fall back to the normalized set when the metric one is missing, so a hand
+  // still animates (just flatter) rather than freezing.
+  const forAngles = worldLandmarks && worldLandmarks.length >= 21 ? worldLandmarks : landmarks;
+  // Fingers: our own solver for all five digits (Kalidokit's joint measure runs
+  // backwards past a right angle, and its thumb is hardcoded for VRM0 naming —
+  // see solveFingerRig). Solved with the ANATOMICAL side, which fixes the curl
+  // sign, then written to the mirrored avatar side.
+  const handRig = solveFingerRig(forAngles, solveSide);
   // Wrist: our own solver, straight off the palm geometry.
   const wristWorld = solveWristWorldQuaternion(landmarks, vrmSide);
   applyHandRig(vrm, handRig, solveSide, vrmSide, wristWorld);

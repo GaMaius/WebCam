@@ -6,7 +6,7 @@ import {
   applyHandRig,
   resolvePoseGates,
   rigFaceRotation,
-  solveThumbRig,
+  solveFingerRig,
   vrmSideForHand,
   withLandmarkVisibility,
 } from "../lib/vrm/boneRig.ts";
@@ -321,16 +321,40 @@ test("face rotations negate pitch and roll, but not yaw", () => {
 test("the thumb curls with the other fingers' convention, no constant offset", () => {
   // Kalidokit's thumb branch carries VRM0-era constants (startPos.x alone is 1.2
   // rad), and VRM 1.0 shifted the thumb chain by a joint, so those offsets landed
-  // on the wrong joint and bent the thumb off on its own. solveThumbRig replaces
+  // on the wrong joint and bent the thumb off on its own. solveFingerRig replaces
   // it with the finger formula.
-  const straight = [
+  // The solver reads all five digits, so the four fingers have to exist even when
+  // the thumb is what's under test — laid out straight, so they read as open and
+  // can't be confused for the thumb's contribution.
+  // Each finger runs along a ray FROM THE WRIST, so wrist/knuckle/joints are
+  // exactly collinear and the knuckle angle really is zero. Fanning them out from
+  // a shared column instead tilts wrist->knuckle away from the finger's own axis,
+  // which is a genuine bend of ~35 degrees — a fixture that looks open but isn't.
+  const withOpenFingers = (thumb: { x: number; y: number; z: number }[]) => {
+    const wrist = thumb[0];
+    const pts = [...thumb];
+    for (let digit = 0; digit < 4; digit++) {
+      const dx = 0.02 * (digit - 1.5);
+      const len = Math.hypot(dx, 0.05);
+      for (let joint = 1; joint <= 4; joint++) {
+        pts.push({
+          x: wrist.x + (dx / len) * 0.05 * joint,
+          y: wrist.y - (0.05 / len) * 0.05 * joint,
+          z: 0,
+        });
+      }
+    }
+    return pts;
+  };
+
+  const straight = withOpenFingers([
     { x: 0.5, y: 0.8, z: 0 },
     { x: 0.47, y: 0.76, z: 0 },
     { x: 0.44, y: 0.72, z: 0 },
     { x: 0.41, y: 0.68, z: 0 },
     { x: 0.38, y: 0.64, z: 0 },
-  ];
-  const restRig = solveThumbRig(straight, "Left");
+  ]);
+  const restRig = solveFingerRig(straight, "Left");
   for (const [key, rot] of Object.entries(restRig)) {
     assert.ok(
       Math.abs(rot.z) < 0.2,
@@ -341,24 +365,26 @@ test("the thumb curls with the other fingers' convention, no constant offset", (
   }
 
   // A bent thumb: fold the tip back so each joint has a real angle.
-  const bent = [
+  const bent = withOpenFingers([
     { x: 0.5, y: 0.8, z: 0 },
     { x: 0.47, y: 0.76, z: 0 },
     { x: 0.45, y: 0.72, z: 0 },
     { x: 0.47, y: 0.7, z: 0 },
     { x: 0.5, y: 0.71, z: 0 },
-  ];
-  const leftBent = solveThumbRig(bent, "Left");
-  const rightBent = solveThumbRig(bent, "Right");
+  ]);
+  const thumbZ = (rig: Record<string, { z: number }>, side: "Left" | "Right") =>
+    ["Proximal", "Intermediate", "Distal"].map((j) => rig[`${side}Thumb${j}`].z);
 
   // Same per-side signs as the four fingers, so the mirror crossing lines up.
+  const leftBent = thumbZ(solveFingerRig(bent, "Left"), "Left");
+  const rightBent = thumbZ(solveFingerRig(bent, "Right"), "Right");
   assert.ok(
-    Object.values(leftBent).some((r) => r.z > 0.1),
-    `left thumb should bend +Z, got ${JSON.stringify(Object.values(leftBent).map((r) => r.z))}`
+    leftBent.some((z) => z > 0.1),
+    `left thumb should bend +Z, got ${JSON.stringify(leftBent)}`
   );
   assert.ok(
-    Object.values(rightBent).some((r) => r.z < -0.1),
-    `right thumb should bend -Z, got ${JSON.stringify(Object.values(rightBent).map((r) => r.z))}`
+    rightBent.some((z) => z < -0.1),
+    `right thumb should bend -Z, got ${JSON.stringify(rightBent)}`
   );
 });
 
