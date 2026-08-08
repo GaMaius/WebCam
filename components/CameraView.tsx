@@ -35,6 +35,7 @@ export function CameraView({
   allowSwitch = true,
   autoStart = false,
   maxWidth = 720,
+  maxHeight,
   guide = "none",
   guideHint,
   record = true,
@@ -52,6 +53,11 @@ export function CameraView({
   allowSwitch?: boolean;
   autoStart?: boolean;
   maxWidth?: number;
+  /** Optional ideal capture height. Left unset the camera picks its own aspect
+   * ratio (usually 16:9). Setting it asks for a specific frame shape — 4:3 gives
+   * a hand near the top or bottom of the frame more pixels to be found in, which
+   * is what the trackers care about. */
+  maxHeight?: number;
   guide?: "none" | "face";
   guideHint?: string;
   /** Show the on-stage control bar (facing tag / switch / stop). Set false for
@@ -132,7 +138,11 @@ export function CameraView({
         streamRef.current = null;
       }
       try {
-        const videoConstraints = { facingMode: mode, width: { ideal: maxWidth } };
+        const videoConstraints: MediaTrackConstraints = {
+          facingMode: mode,
+          width: { ideal: maxWidth },
+          ...(maxHeight ? { height: { ideal: maxHeight } } : {}),
+        };
         let stream: MediaStream;
         try {
           // Record audio too (default). One combined camera+mic permission prompt.
@@ -183,7 +193,7 @@ export function CameraView({
         }
       }
     },
-    [maxWidth, onReady, audio, finalizeRecorder, beginRecording]
+    [maxWidth, maxHeight, onReady, audio, finalizeRecorder, beginRecording]
   );
 
   const switchCamera = useCallback(() => {

@@ -11,20 +11,18 @@ import {
   type TrackingMode,
 } from "@/lib/vrm/kalidokitBridge";
 import type { MotionAvatar } from "@/lib/vrm/motionAvatar";
+import {
+  EMPTY_HELD,
+  HAND_HOLD_MS,
+  POSE_HOLD_MS,
+  holdLandmarks,
+  planFrame,
+  type HeldValue,
+} from "@/lib/vrm/frameSchedule";
 
-// Tracking quality is mostly a frame-rate problem: MediaPipe's VIDEO mode tracks
-// between frames, so starving it makes every stage worse. Running face + pose +
-// hands on every frame is far more than a phone can do, so the two expensive
-// stages alternate — each frame does the face plus ONE of pose/hands, and the
-// other's last result is held. That roughly halves the per-frame cost.
-//
-// (Reference point: the gesture-synth app the user found tracks hands well while
-// running the same model with the same options — its advantage is that hands are
-// the only model it runs, at 640x480.)
-const HAND_EVERY_N_FRAMES = 2;
-const POSE_EVERY_N_FRAMES = 2;
-/** Offset so pose and hands never land on the same frame. */
-const POSE_PHASE = 1;
+// Which stages run on which frame, and how stale a reading may get, both live in
+// lib/vrm/frameSchedule.ts — including why the hands get every frame and the
+// face/pose alternate rather than the other way round.
 
 export function useVrmMotionScan(
   vrm: MotionAvatar | null,
@@ -45,18 +43,25 @@ export function useVrmMotionScan(
   const animFrameIdRef = useRef<number | null>(null);
   const frameCountRef = useRef(0);
   const lastFpsCalcTimeRef = useRef(performance.now());
+  const fpsRef = useRef(0);
   const tickRef = useRef(0);
-  // Hands persist across skipped frames so the avatar doesn't drop back to a
-  // rest pose every other frame.
-  const lastHandsRef = useRef<{
-    left?: LandmarkFrameData["leftHandLandmarks"];
-    right?: LandmarkFrameData["rightHandLandmarks"];
-  }>({});
-  // Same for the pose, which now also runs at half rate.
-  const lastPoseRef = useRef<{
-    landmarks?: LandmarkFrameData["poseLandmarks"];
-    world?: LandmarkFrameData["poseWorldLandmarks"];
-  }>({});
+  // Each hand is held independently: one hand leaving the frame must not stall
+  // the other, and a single dropped detection must not snap it to rest.
+  const leftHandRef = useRef<HeldValue<NonNullable<LandmarkFrameData["leftHandLandmarks"]>>>(EMPTY_HELD);
+  const rightHandRef = useRef<HeldValue<NonNullable<LandmarkFrameData["rightHandLandmarks"]>>>(EMPTY_HELD);
+  // The face also runs on alternate frames now, so its last reading is reused in
+  // between. No timed hold: a lost face should drop the expressions promptly.
+  const lastFaceRef = useRef<{
+    landmarks: NonNullable<LandmarkFrameData["faceLandmarks"]>;
+    blendshapes?: LandmarkFrameData["faceBlendshapes"];
+  } | null>(null);
+  // The pose runs on alternate frames, so it's always held for at least a frame.
+  const poseRef = useRef<
+    HeldValue<{
+      landmarks: NonNullable<LandmarkFrameData["poseLandmarks"]>;
+      world?: LandmarkFrameData["poseWorldLandmarks"];
+    }>
+  >(EMPTY_HELD);
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -105,75 +110,88 @@ export function useVrmMotionScan(
         tickRef.current++;
 
         const frameData: LandmarkFrameData = {};
+        const plan = planFrame(tickRef.current, fpsRef.current);
 
-        // Face tracking
-        if (faceLandmarker) {
+        // Face tracking — head/neck plus the ARKit blendshapes. Halved rate: a
+        // head turns far slower than a finger, and LERP_FACE smooths it anyway.
+        if (faceLandmarker && plan.face) {
           try {
             const faceResult = faceLandmarker.detectForVideo(video, now);
             if (faceResult.faceLandmarks && faceResult.faceLandmarks.length > 0) {
-              frameData.faceLandmarks = faceResult.faceLandmarks[0];
-              frameData.faceBlendshapes = faceResult.faceBlendshapes?.[0]?.categories;
+              lastFaceRef.current = {
+                landmarks: faceResult.faceLandmarks[0],
+                blendshapes: faceResult.faceBlendshapes?.[0]?.categories,
+              };
               setIsFaceTracked(true);
             } else {
+              lastFaceRef.current = null;
               setIsFaceTracked(false);
             }
           } catch (err) {
             // ignore frame error
           }
         }
+        frameData.faceLandmarks = lastFaceRef.current?.landmarks;
+        frameData.faceBlendshapes = lastFaceRef.current?.blendshapes;
 
         // Pose tracking — still needed in "upper" mode: arms/torso come from it,
-        // only the legs are left undriven. Runs on alternate frames from the hands.
-        if (poseLandmarker && tickRef.current % POSE_EVERY_N_FRAMES === POSE_PHASE) {
+        // only the legs are left undriven.
+        if (poseLandmarker && plan.pose) {
           try {
             const poseResult = poseLandmarker.detectForVideo(video, now);
-            if (poseResult.landmarks && poseResult.landmarks.length > 0) {
-              lastPoseRef.current = {
-                landmarks: poseResult.landmarks[0],
-                world: poseResult.worldLandmarks?.[0],
-              };
-              setIsPoseTracked(true);
-            } else {
-              lastPoseRef.current = {};
-              setIsPoseTracked(false);
-            }
+            const landmarks = poseResult.landmarks?.[0];
+            poseRef.current = holdLandmarks(
+              poseRef.current,
+              landmarks ? { landmarks, world: poseResult.worldLandmarks?.[0] } : undefined,
+              now,
+              POSE_HOLD_MS
+            );
+            setIsPoseTracked(Boolean(poseRef.current.value));
           } catch (err) {
             // ignore frame error
           }
         }
-        frameData.poseLandmarks = lastPoseRef.current.landmarks;
-        frameData.poseWorldLandmarks = lastPoseRef.current.world;
+        frameData.poseLandmarks = poseRef.current.value?.landmarks;
+        frameData.poseWorldLandmarks = poseRef.current.value?.world;
 
-        // Hand tracking, at reduced cadence.
-        if (handLandmarker && tickRef.current % HAND_EVERY_N_FRAMES === 0) {
+        // Hand tracking, every frame. This is the stage that collapses when it's
+        // starved, so it never gives up its slot (see frameSchedule.ts).
+        if (handLandmarker && plan.hands) {
           try {
             const handResult = handLandmarker.detectForVideo(video, now);
-            const next: typeof lastHandsRef.current = {};
+            let left: LandmarkFrameData["leftHandLandmarks"];
+            let right: LandmarkFrameData["rightHandLandmarks"];
             const hands = handResult.landmarks ?? [];
             hands.forEach((lm, i) => {
               // MediaPipe's handedness label is used verbatim as the VRM side.
               const label = handResult.handedness?.[i]?.[0]?.categoryName;
-              if (label === "Left") next.left = lm;
-              else if (label === "Right") next.right = lm;
+              if (label === "Left") left = lm;
+              else if (label === "Right") right = lm;
             });
-            lastHandsRef.current = next;
-            setHandCount(hands.length);
+            leftHandRef.current = holdLandmarks(leftHandRef.current, left, now, HAND_HOLD_MS);
+            rightHandRef.current = holdLandmarks(rightHandRef.current, right, now, HAND_HOLD_MS);
+            setHandCount(
+              (leftHandRef.current.value ? 1 : 0) + (rightHandRef.current.value ? 1 : 0)
+            );
           } catch (err) {
             // ignore frame error
           }
         }
-        frameData.leftHandLandmarks = lastHandsRef.current.left;
-        frameData.rightHandLandmarks = lastHandsRef.current.right;
+        frameData.leftHandLandmarks = leftHandRef.current.value;
+        frameData.rightHandLandmarks = rightHandRef.current.value;
 
         // Apply tracking solved result to VRM avatar
         if (vrm) {
           applyTrackingToVRM(vrm, frameData, modeRef.current);
         }
 
-        // FPS calculation
+        // FPS calculation. Kept in a ref as well, because the scheduler reads it
+        // on the next frame and state updates land a render too late.
         frameCountRef.current++;
         if (now - lastFpsCalcTimeRef.current >= 1000) {
-          setFps((frameCountRef.current * 1000) / (now - lastFpsCalcTimeRef.current));
+          const measured = (frameCountRef.current * 1000) / (now - lastFpsCalcTimeRef.current);
+          fpsRef.current = measured;
+          setFps(measured);
           frameCountRef.current = 0;
           lastFpsCalcTimeRef.current = now;
         }
