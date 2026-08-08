@@ -3,6 +3,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { MotionAvatar } from "./motionAvatar";
 import { vrmExpressionsFromBlendshapes, type BlendshapeCategory } from "./faceExpressions";
 import { solveWristWorldQuaternion } from "./wristSolver";
+import { solveArmAim, applyArmAim } from "./armSolver";
 import {
   applyHandRig,
   LERP_BODY,
@@ -140,10 +141,21 @@ export function applyTrackingToVRM(
         }
 
         if (gates.arms) {
-          rigRotation(vrm, "rightUpperArm", poseRig.RightUpperArm as Rot, 1, LERP_BODY, true);
-          rigRotation(vrm, "rightLowerArm", poseRig.RightLowerArm as Rot, 1, LERP_BODY, true);
-          rigRotation(vrm, "leftUpperArm", poseRig.LeftUpperArm as Rot, 1, LERP_BODY, true);
-          rigRotation(vrm, "leftLowerArm", poseRig.LeftLowerArm as Rot, 1, LERP_BODY, true);
+          // Arms are aimed at the measured joint positions rather than taken from
+          // Kalidokit, whose clamps make a hand-to-face pose unreachable no matter
+          // what the landmarks say (see armSolver). Kalidokit's arm output is the
+          // fallback for when a joint isn't visible enough to aim from.
+          for (const side of ["left", "right"] as const) {
+            const aim = solveArmAim(frame.poseWorldLandmarks, frame.poseLandmarks, side);
+            if (aim) {
+              applyArmAim(vrm, side, aim);
+            } else {
+              const upper = side === "right" ? poseRig.RightUpperArm : poseRig.LeftUpperArm;
+              const lower = side === "right" ? poseRig.RightLowerArm : poseRig.LeftLowerArm;
+              rigRotation(vrm, `${side}UpperArm`, upper as Rot, 1, LERP_BODY, true);
+              rigRotation(vrm, `${side}LowerArm`, lower as Rot, 1, LERP_BODY, true);
+            }
+          }
         }
 
         if (gates.legs) {
