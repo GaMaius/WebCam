@@ -124,7 +124,7 @@ export default function HeartPulsePage() {
           <li>안경에 빛이 반사되면 잠시 벗는 것을 권장해요.</li>
           <li>측정 중에는 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
           <li>
-            턱 아래 <strong>목(경동맥 부근)</strong>이 보이면 그 피부도 함께 측정에 사용돼요. 경동맥은
+            <strong>목(경동맥)과 가슴 위쪽 피부</strong>가 함께 보이면 정확도가 더 높아져요. 경동맥은
             피부 가까이 지나가서 맥동이 크게 잡힙니다.
           </li>
         </ul>
@@ -150,8 +150,8 @@ export default function HeartPulsePage() {
             <p className={styles.startDesc}>
               밝은 곳에서 정면을 바라보고, 측정 시간 동안 움직이지 않으면 돼요.
               <br />
-              <strong>턱 아래 목이 보이면</strong> 경동맥 부근 피부도 함께 측정에 사용됩니다 — 옷깃으로
-              목을 가리지 않는 편이 좋아요.
+              <strong>목(경동맥)과 가슴 위쪽 피부가 함께 보이면</strong> 맥동이 더 잘 잡혀 정확도가
+              올라갑니다 — 옷깃으로 목을 가리지 않는 편이 좋아요.
             </p>
           </div>
 
