@@ -1,11 +1,12 @@
-// Turns the POS pulse signal into a heart rate (BPM) and short-window HRV
+// Turns an rPPG pulse signal (TS-CAN or the POS fallback) into a heart rate
+// (BPM) and short-window HRV
 // estimate (SDNN, RMSSD). Two FFT passes: one to bandpass-filter the signal
 // in the frequency domain (keeping only the physiologically plausible
 // 42-240 BPM band), one to find the dominant frequency (= BPM). Beat
 // timestamps for HRV come from simple time-domain peak-picking on the
 // filtered waveform.
 //
-// A short (~15s), non-periodic-in-window signal has real spectral leakage:
+// A short (30s and under), non-periodic-in-window signal has real spectral leakage:
 // any slow drift that doesn't complete a whole number of cycles within the
 // window creates a boundary discontinuity once zero-padded to the next
 // power of two, which spreads energy across the whole spectrum — including
@@ -16,7 +17,7 @@
 // the peak frequency; the un-windowed, detrended signal is what actually
 // gets bandpass-filtered and returned for time-domain peak (HRV) detection.
 //
-// Caveat: a ~15s window is short for HRV in the clinical sense (SDNN and
+// Caveat: even a 30s window is short for HRV in the clinical sense (SDNN and
 // frequency-domain metrics are normally computed over minutes) — treat these
 // as approximate, same-session indicators rather than diagnostic values.
 // RMSSD/SD1 are the metrics that survive short windows, so the stress index
@@ -27,6 +28,53 @@ import { fft, ifft, nextPowerOfTwo } from "./fft.ts";
 
 const MIN_HZ = 0.7; // 42 BPM
 const MAX_HZ = 4.0; // 240 BPM
+
+/**
+ * Resamples an irregularly-timed signal onto a uniform grid.
+ *
+ * Everything downstream — the FFT bandpass, the dominant-frequency search, the
+ * RR intervals — assumes samples are evenly spaced in time. A webcam does not
+ * deliver that: browsers drop frames under load, and a rAF-driven capture reads
+ * whatever frame happens to be current. Passing an *average* fps papers over the
+ * mean but leaves the jitter, which smears the pulse peak across neighbouring
+ * bins — exactly where a few BPM of error comes from.
+ *
+ * The upstream demo assumes a fixed 30 Hz and never measures it, so this is one
+ * place we deliberately do more than the reference rather than less.
+ *
+ * `timesMs` must be non-decreasing and the same length as `values`. Linear
+ * interpolation is enough here: we resample to a rate at or above the capture
+ * rate, so this interpolates between neighbours rather than decimating (which
+ * would need an anti-alias filter first).
+ */
+export function resampleUniform(
+  values: number[],
+  timesMs: number[],
+  targetFps: number
+): number[] {
+  if (values.length < 2 || values.length !== timesMs.length) return values.slice();
+
+  const start = timesMs[0];
+  const end = timesMs[timesMs.length - 1];
+  const durationSec = (end - start) / 1000;
+  if (!(durationSec > 0)) return values.slice();
+
+  const count = Math.floor(durationSec * targetFps) + 1;
+  const out: number[] = new Array(count);
+  let cursor = 0;
+
+  for (let i = 0; i < count; i++) {
+    const t = start + (i / targetFps) * 1000;
+    while (cursor < timesMs.length - 2 && timesMs[cursor + 1] < t) cursor++;
+    const t0 = timesMs[cursor];
+    const t1 = timesMs[cursor + 1];
+    const span = t1 - t0;
+    // Coincident timestamps would divide by zero; hold the earlier sample.
+    const alpha = span > 0 ? Math.min(1, Math.max(0, (t - t0) / span)) : 0;
+    out[i] = values[cursor] + (values[cursor + 1] - values[cursor]) * alpha;
+  }
+  return out;
+}
 
 export function bandpassFilter(signal: number[], fps: number, lowHz = MIN_HZ, highHz = MAX_HZ): number[] {
   const detrended = detrend(signal);
@@ -263,7 +311,7 @@ function detectPeaks(signal: number[], minDistance: number): number[] {
   }
   // Refine each integer sample index to a sub-sample position via parabolic
   // interpolation. Without this, RR intervals are quantized to whole video
-  // frames (e.g. ~67ms at the DeepPhys path's reduced ~15fps), and that
+  // frames (e.g. ~33ms at the 30Hz analysis grid), and that
   // jitter alone is enough to inflate RMSSD past any reasonable stress-scale
   // denominator — this is what was collapsing the stress index to 0 on
   // otherwise-good captures.

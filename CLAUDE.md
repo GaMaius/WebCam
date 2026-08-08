@@ -13,7 +13,7 @@
 ## 현재 상태 (2026-08-06 기준)
 
 - **VL-1** 파운데이션: 디자인 시스템(라벤더 헤이즈 `#92A9E1` + 소프트 그래파이트 다크 테마, `app/globals.css`), 랜딩 페이지, `CameraView` 전/후면 전환 컴포넌트
-- **VL-2** HeartPulse: rPPG POS(`ubicomplab/rPPG-Toolbox` 실제 포팅) + 사전학습 DeepPhys(ONNX, `onnxruntime-web`) 이중 엔진, MediaPipe FaceLandmarker, 자체 FFT로 BPM/스트레스/HRV 계산
+- **VL-2** HeartPulse: **TS-CAN 신경망**(주엔진) + POS(폴백), MediaPipe FaceLandmarker, 자체 FFT로 BPM/스트레스/HRV 계산. **2026-08-08에 DeepPhys를 버리고 전면 교체함** — 아래 참조.
 - **VL-3** PersonalFrame: 전/후면 순차 스캔 → CIELAB 퍼스널컬러 + 얼굴형 분석 (MediaPipe 랜드마크 인덱스는 공식 소스에서 검증)
 - **VL-4** ~~통합 결과지~~ → **앱별 결과 저장으로 전환**(2026-07-24): 제품을 "독립 앱 런처" 모델로 재구성. 홈은 `lib/apps.ts` 레지스트리를 렌더링(앱 추가 = 항목 1개 + `app/<slug>` 라우트). 각 앱이 자기 결과를 Canvas 이미지로 저장/공유(`components/ResultActions.tsx` + `lib/resultCard.ts`의 `drawHeartPulseCard`/`drawPersonalFrameCard`, Web Share API + 다운로드 폴백). 두 앱을 합치던 `/summary` 라우트와 `lib/summaryCard.ts`는 제거함(이 모델과 충돌). `ModuleCard`는 `status:"soon"`으로 준비 중 앱 표시 지원.
 - **VL-5** Vercel 배포: 완료, 아래 참고
@@ -152,7 +152,21 @@
    - **조치 2 (사용자 요청)**: `AI 정밀 4대 세부 분석 리포트` UI 섹션을 완전히 제거.
    - **조치 3 (2026-07-29)**: 허브 붕괴/사람마다 같은 결과 문제를 랭킹 엔진 레벨에서 해결(humanMean 차감 + muUnique/sdUnique + 저기준선 몬스터 배제 + NMS 다양성). 자세한 내용은 위 **VL-6 "랭킹 엔진 최종형"** 항목 참조. 이후 사용자 재보고 없음 → 일단 해결된 것으로 본다.
 
-3. **HeartPulse — 심박 측정 정확도가 많이 떨어지는 듯**: (사용자 지시로 이제 착수) 실제 심박 대비 오차 큼. 점검 대상: DeepPhys 경로 실제 사용 여부/전처리, POS 폴백 빈도, 밴드패스·피크검출·`estimateBpmAndHrv`의 FFT 지배주파수 산출, 30초 창/프레임레이트 추정(`effectiveFps`), 조명·움직임 영향. 가능하면 알려진 BPM(맥박계)과 비교할 수 있게 사용자에게 기준값 요청.
+3. **HeartPulse — 심박 정확도: TS-CAN으로 전면 교체 (2026-08-08)**. 사용자가 지목한 레포 [`ubicomplab/rppg-web`](https://github.com/ubicomplab/rppg-web)(UW Ubicomp Lab 공식 웹 데모, TypeScript)를 기준으로 다시 만들었다. DeepPhys(ONNX)는 **제거**했다 — 같은 연구실의 후속 모델이 TS-CAN이라 병행할 이유가 없다.
+   - **모델**: `public/models/tscan/{model.json,group1-shard1of1.bin}`(2.1MB, 커밋됨). 그 레포가 배포하는 가중치 그대로. 입력 2개 `[None,36,36,3]`(motion·appearance), 출력 1개 = **프레임당 맥파 미분값 1개**(pulse-only TS-CAN이고 호흡 헤드는 없다). 논문: Liu et al., *Multi-Task Temporal Shift Attention Networks*, NeurIPS 2020.
+   - **런타임**: `@tensorflow/tfjs`(WebGL, 실패 시 CPU 폴백)를 **동적 import**한다 — 1MB급이라 이 앱에서만 받는다. 실제로 heartpulse First Load JS는 273kB → **169kB로 줄었다**(onnxruntime이 이 라우트에서 빠져서).
+   - **⚠️ 커스텀 레이어 이름**: 모델 JSON은 `Attention_mask`인데 **등록은 `AttentionMask`로 해야 한다** — tfjs가 snake_case `class_name`을 PascalCase로 바꿔서 조회하기 때문. JSON 철자 그대로 등록하면 `Unknown layer: AttentionMask`로 죽는다(추측이 아니라 실제로 그렇게 실패했다). `TSM`은 대문자라 영향 없음. `tests/tsCan.test.ts`가 **실제 모델 파일을 Node에서 로드**하므로 이걸 잘못 고치면 테스트에서 죽는다.
+   - **⚠️ 전처리는 레퍼런스와 정확히 같아야 한다**(`lib/heartpulse/tsCan.ts`): `/255` 후 **`[1/255,1]` 클립**(motion 분모가 0이 되는 것 방지) → motion `=(c−p)/(c+p)`, appearance `=(c−mean(c))`, **각각 프레임 전체(픽셀·3채널 통합) 표준편차로 나눈다**. 채널별 std로 바꾸면 맥파가 실제로 실려 있는 색비가 재조정돼 버린다. 학습 통계라서 "동등한" 변형이 동등하지 않다.
+   - **⚠️ TSM에서 배치 = 시간축**: `TSCAN_WINDOW`(10) 프레임을 **연속·순서대로** 한 배치로 넣어야 한다. 윈도우 사이에 `previousFrame`을 이어줘서 경계마다 샘플을 잃지 않게 한다(레퍼런스도 동일).
+   - **출력은 미분값**이므로 `integratePulse`로 누적(cumsum)한 뒤 밴드패스에 넣는다. 안 하면 주파수가 어긋난 그럴듯한 오답이 나온다.
+   - **레퍼런스보다 더 하는 것 3가지**(여기가 정확도의 핵심):
+     1. **ROI를 얼굴에 추적시킨다** — 그쪽은 **고정 박스**(`[0.1,0.3,0.56,0.7]`)에 사용자가 얼굴을 맞추게 한다. 우리는 MediaPipe 랜드마크로 `computeFaceCropBox` → 36×36. 학습 분포(얼굴 crop)와 같고 정렬 부담이 없다.
+     2. **프레임 시각을 재서 균일 격자로 리샘플**(`resampleUniform`, 30Hz) — 그쪽은 `Fs=30`을 하드코딩하고 실제 캡처율을 재지 않는다. 브라우저는 프레임을 흘리므로 평균 fps만 맞춰도 **지터가 남아 피크가 옆 빈으로 번진다**. BPM 몇 개 오차가 여기서 나온다.
+     3. **중복 프레임 가드** — `video.currentTime`이 안 바뀌면 샘플을 넣지 않는다. rAF 60Hz vs 카메라 30fps면 절반이 같은 프레임이고, 그게 파형에 평평한 구간을 만들어 스펙트럼을 DC로 끌어당긴다.
+   - **스캔 30초**(기존 15초에서 변경). 주파수 분해능이 1/윈도우라 15초는 노이즈 이전에 이미 ±4BPM 수준이고, 움직임·조명 아티팩트 평균화에도 창이 길수록 유리하다. 레퍼런스·논문도 30초다.
+   - **추론은 캡처 중에 진행**한다(`pumpInference`, 한 번에 윈도우 1개). 끝나고 몰아서 돌리면 30초 캡처 뒤에 수 초가 더 걸린다. rAF 루프에서 **await 하지 않는다** — 프레임 수집이 밀리면 신호에 구멍이 난다.
+   - **폴백**: 모델 로드(8초 타임아웃)나 추론이 실패하면 POS로 간다. POS도 같은 리샘플 경로를 타므로 하류 가정이 동일하다. UI가 어느 엔진이었는지 표시한다.
+   - **아직 검증 안 된 것**: 실제 맥박계 대비 오차. 샌드박스에 카메라가 없어 **실기기 확인 필요** — 가능하면 맥박계/스마트워치 값과 나란히 비교해 달라고 요청할 것.
 
 4. **PersonalFrame — 턱 각도(jawAngle) 측정이 이상함 (2026-07-27 수정됨)**: `lib/faceShape.ts`의 `JAW_RIGHT/JAW_LEFT` 랜드마크 인덱스를 `172/397`(하부 중간)에서 `58/288`(MediaPipe 하악각 / Gonion 코너)로 변경하여 Chin(152) 기준 하악각 턱선 형성각이 비상식적 수치(130°~150°) 대신 정상 수치(70°~110°)로 계산되도록 보정함. `classifyFaceShape` 사각턱 임계값도 92°로 재조정.
 
@@ -160,7 +174,7 @@
 
 ## 남은 일
 
-- **HeartPulse 심박 정확도**: 위 3번 항목이 **여전히 미해결**된 최우선 과제. (VrmMotion 작업이 먼저 들어와서 계속 밀렸음.)
+- **HeartPulse 심박 정확도**: TS-CAN으로 전면 교체 완료(위 3번). **남은 건 실기기 검증** — 맥박계 대비 오차가 실제로 줄었는지. 여전히 틀리면 다음 후보: 노출/화이트밸런스 고정(AE/AWB가 재조정되면 광대역 노이즈가 들어온다), 창을 60초로, `computeFaceCropBox` 여유값 조정.
 - **VrmMotion — 실기기 확인된 것 / 남은 것** (2026-08-06 여러 라운드):
   - 확인됨: 좌우 거울 방향, 손가락 커브 방향, 표정(ARKit)·손 인식 동작, 팔이 손을 따라오는 것.
   - 남음: ① **손바닥 앞/뒤 방향**(`wristSolver.ts`의 `DEPTH_SIGN` 1비트) ② **손 인식 체감 + FPS** — 2026-08-08에 스케줄러를 "손 매 프레임 + 얼굴/pose 교대 + 드롭아웃 홀드"로 바꿨다(레퍼런스 앱 번들 분석 결과). 실기기에서 손 추적이 실제로 나아졌는지, 얼굴이 15Hz로 떨어진 게 눈에 보이는지 확인 필요. 부족하면 `LOW_FPS`/pose `lite` 손잡이 사용 ③ **손가락 접힘 정도** — 2026-08-08에 world 랜드마크 + 접힘 없는 관절각 + 해부학 상한으로 고쳤다(위 `solveFingerRig` 항목). 실기기에서 주먹이 실제로 쥐어지는지, 반대로 과하게 접히지 않는지 확인 필요 — 손잡이는 `FINGER_CURL_GAIN` 하나 ④ **몸 앞으로 모으는 팔 자세** — Kalidokit `rigArm`이 `UpperArm.x`를 `[−0.5, π]`, `LowerArm.x`를 `[−0.3, 0.3]`으로 강하게 clamp하고 `−0.3` 오프셋까지 넣어서 구조적으로 안 나온다. 다음 수단은 **손목 위치로 2본 IK**(어깨→손목 목표, 팔꿈치는 힌트 축) ⑤ 20초 flush로 vrmmotion 클립이 B2에 실제로 쌓이는지.

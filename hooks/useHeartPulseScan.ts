@@ -9,25 +9,41 @@ import {
   sampleRegionAsRgbFrame,
 } from "@/lib/roi";
 import { posSignalFromRgbSeries, type RgbSample } from "@/lib/pos";
-import { bandpassFilter, estimateBpmAndHrv } from "@/lib/signalProcessing";
-import { loadDeepPhysSession, runDeepPhysInference, DEEPPHYS_IMG_SIZE, type RgbFrame } from "@/lib/deepPhys";
+import { bandpassFilter, estimateBpmAndHrv, resampleUniform } from "@/lib/signalProcessing";
+import {
+  loadTsCanModel,
+  runTsCanWindow,
+  integratePulse,
+  TSCAN_IMG_SIZE,
+  TSCAN_WINDOW,
+  type RgbFrame,
+} from "@/lib/heartpulse/tsCan";
 import { SESSION_KEYS, type HeartPulseResult } from "@/lib/types";
 
-// 15s scan: a shorter, more comfortable capture window. BPM and the spectral
-// stress read remain reliable at this length; RMSSD/SD1-based HRV is noisier
-// than at 30s, so treat those as rougher estimates on webcam data.
-const SCAN_DURATION_MS = 15_000;
-const SCAN_DURATION_SEC = SCAN_DURATION_MS / 1000;
-const MIN_USABLE_SAMPLES = 60; // guards against a near-instant, unusable clip
+// 30s scan, matching ubicomplab/rppg-web and the window the TS-CAN paper
+// evaluates on. This is longer than the 15s we used before, and deliberately so:
+// frequency resolution is 1/window, so 15s can only place the pulse peak to about
+// ±4 BPM before any noise, and a longer window also averages down the motion and
+// lighting artifacts that dominate webcam rPPG. Accuracy was the complaint; this
+// is part of the answer.
+const SCAN_DURATION_MS = 30_000;
+const MIN_USABLE_SAMPLES = 120;
 const WAVEFORM_POINTS = 150;
-const DEEPPHYS_LOAD_TIMEOUT_MS = 4_000; // don't make the user wait indefinitely for the model
+
+// Everything downstream is resampled onto this grid, so the bandpass and FFT see
+// evenly spaced samples whatever the camera actually delivered. 30Hz is the rate
+// TS-CAN was trained and evaluated at.
+const ANALYSIS_FPS = 30;
+
+const MODEL_LOAD_TIMEOUT_MS = 8_000;
 
 export type HeartPulseScanPhase = "idle" | "aligning" | "scanning" | "analyzing" | "done" | "error";
-export type HeartPulseEngine = "deepphys" | "pos";
+/** "tscan" is the UW TS-CAN network; "pos" is the classical fallback. */
+export type HeartPulseEngine = "tscan" | "pos";
 
 export interface HeartPulseScanState {
   phase: HeartPulseScanPhase;
-  /** 0-1 progress through the 15s scan window. */
+  /** 0-1 progress through the scan window. */
   progress: number;
   waveform: number[];
   result: HeartPulseResult | null;
@@ -50,13 +66,24 @@ export function useHeartPulseScan() {
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cropCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** RGB region means, kept for the POS fallback. Cheap, and it means the
+   * fallback needs no second pass over the video. */
   const samplesRef = useRef<RgbSample[]>([]);
-  const faceCropsRef = useRef<RgbFrame[]>([]);
+  /** Face crops awaiting inference, with the timestamp of each. */
+  const pendingRef = useRef<{ frames: RgbFrame[]; times: number[] }>({ frames: [], times: [] });
+  /** The frame before the pending window, so windows chain without dropping a
+   * sample at each boundary. */
+  const previousFrameRef = useRef<RgbFrame | null>(null);
+  /** Model output so far: one pulse-derivative value per frame, plus its time. */
+  const pulseRef = useRef<{ derivative: number[]; times: number[] }>({ derivative: [], times: [] });
+  const inferenceBusyRef = useRef(false);
+  const modelRef = useRef<Awaited<ReturnType<typeof loadTsCanModel>> | null>(null);
   const motionRef = useRef<{ totalDisplacement: number; sampleCount: number }>({
     totalDisplacement: 0,
     sampleCount: 0,
   });
   const lastCenterRef = useRef<{ x: number; y: number } | null>(null);
+  const lastVideoTimeRef = useRef(-1);
   const scanStartRef = useRef<number>(0);
 
   const stop = useCallback(() => {
@@ -71,13 +98,46 @@ export function useHeartPulseScan() {
     setState({ phase: "idle", progress: 0, waveform: [], result: null, errorMessage: "", engine: null });
   }, [stop]);
 
+  /**
+   * Runs whatever whole windows are buffered, one at a time.
+   *
+   * Called from the capture loop but never awaited there: inference must not
+   * throttle frame collection, because a dropped frame is a hole in the signal.
+   * `inferenceBusyRef` keeps a single pump running instead of piling up
+   * concurrent predicts on one WebGL context.
+   */
+  const pumpInference = useCallback(async () => {
+    if (inferenceBusyRef.current) return;
+    const model = modelRef.current;
+    if (!model) return;
+    inferenceBusyRef.current = true;
+    try {
+      while (pendingRef.current.frames.length >= TSCAN_WINDOW) {
+        const frames = pendingRef.current.frames.splice(0, TSCAN_WINDOW);
+        const times = pendingRef.current.times.splice(0, TSCAN_WINDOW);
+        const previous = previousFrameRef.current;
+        const values = await runTsCanWindow(model, frames, previous);
+        // Without a seed frame the first sample funds the difference, so the
+        // outputs line up with the TAIL of the window's timestamps.
+        const offset = times.length - values.length;
+        pulseRef.current.derivative.push(...values);
+        pulseRef.current.times.push(...times.slice(offset));
+        previousFrameRef.current = frames[frames.length - 1];
+      }
+    } catch (err) {
+      console.warn("TS-CAN inference failed; the POS fallback will be used:", err);
+      modelRef.current = null;
+    } finally {
+      inferenceBusyRef.current = false;
+    }
+  }, []);
+
   const finish = useCallback(() => {
     stop();
     setState((s) => ({ ...s, phase: "analyzing" }));
 
     void (async () => {
       const samples = samplesRef.current;
-
       if (samples.length < MIN_USABLE_SAMPLES) {
         setState((s) => ({
           ...s,
@@ -88,51 +148,34 @@ export function useHeartPulseScan() {
       }
 
       try {
-        const totalSeconds = samples[samples.length - 1].t / 1000;
-        const fps = totalSeconds > 0 ? samples.length / totalSeconds : 30;
+        // Drain the frames captured after the last pump.
+        await pumpInference();
 
-        let rawSignal: number[] | null = null;
-        let effectiveFps = fps;
+        let signal: number[] | null = null;
         let engine: HeartPulseEngine = "pos";
 
-        // Prefer the pretrained DeepPhys model; fall back to the classical
-        // POS algorithm if the model can't be loaded in time or inference
-        // fails for any reason. Both feed the same downstream bandpass/BPM
-        // pipeline, so the fallback is transparent to the rest of finish().
-        //
-        // DeepPhys runs one WASM inference call per frame (~15ms each in
-        // testing) — at the full capture rate (~30fps) that's several
-        // seconds of sequential inference. The target heart-rate band
-        // (0.7-4Hz) only needs >8Hz by Nyquist, so we subsample frames for
-        // this path specifically rather than making the user wait longer
-        // than necessary; the effective (post-subsample) fps is what gets
-        // passed to the bandpass/BPM step below.
-        try {
-          const session = await withTimeout(loadDeepPhysSession(), DEEPPHYS_LOAD_TIMEOUT_MS);
-          const stride = 2;
-          const subsampled = faceCropsRef.current.filter((_, i) => i % stride === 0);
-          if (session && subsampled.length >= MIN_USABLE_SAMPLES) {
-            rawSignal = await runDeepPhysInference(session, subsampled);
-            effectiveFps = fps / stride;
-            engine = "deepphys";
-          }
-        } catch (err) {
-          console.warn("DeepPhys inference unavailable, falling back to POS:", err);
+        const { derivative, times } = pulseRef.current;
+        if (modelRef.current && derivative.length >= MIN_USABLE_SAMPLES) {
+          // The model emits the pulse derivative, so integrate first, then put it
+          // on a uniform time base before any spectral work.
+          signal = resampleUniform(integratePulse(derivative), times, ANALYSIS_FPS);
+          engine = "tscan";
         }
 
-        if (!rawSignal) {
-          rawSignal = posSignalFromRgbSeries(samples, fps);
-          effectiveFps = fps;
+        if (!signal) {
+          // POS on the region means. Resampled the same way so both engines feed
+          // the downstream stage identical assumptions.
+          const posTimes = samples.map((s) => s.t);
+          const totalSeconds = (posTimes[posTimes.length - 1] - posTimes[0]) / 1000;
+          const posFps = totalSeconds > 0 ? samples.length / totalSeconds : ANALYSIS_FPS;
+          signal = resampleUniform(posSignalFromRgbSeries(samples, posFps), posTimes, ANALYSIS_FPS);
           engine = "pos";
         }
 
-        const filtered = bandpassFilter(rawSignal, effectiveFps);
-        // The whole HRV/stress/SNR pipeline lives in estimateBpmAndHrv so it
-        // stays testable in one place. Stress is a composite of RMSSD/SD1 and
-        // heart-rate elevation; SNR is the spectral signal-quality measure.
+        const filtered = bandpassFilter(signal, ANALYSIS_FPS);
         const { bpm, sdnn, rmssd, stressIndex, snrDb, beatsDetected, cleanBeats } = estimateBpmAndHrv(
           filtered,
-          effectiveFps
+          ANALYSIS_FPS
         );
 
         const avgMotion =
@@ -141,19 +184,15 @@ export function useHeartPulseScan() {
             : 0;
         // Confidence blends two real quality signals — how cleanly the beats
         // survived artifact rejection (retention) and the spectral SNR of the
-        // pulse peak — then attenuates by head motion. SNR uses a gentle map
-        // and neither factor alone can zero the score, so a decent capture
-        // reads a sensible ~60-90% rather than being punished to near zero.
+        // pulse peak — then attenuates by head motion.
         const retention = beatsDetected > 0 ? Math.min(1, cleanBeats / beatsDetected) : 0;
         const snr01 = Math.max(0, Math.min(1, (snrDb + 8) / 16)); // -8dB→0, +8dB→1
         const quality = 0.6 * retention + 0.4 * snr01;
         const motionFactor = 1 - Math.min(0.4, avgMotion * 0.05);
         const confidence = Math.max(0, Math.round(100 * quality * motionFactor));
 
-        const clampedBpm = Math.min(220, Math.max(35, Math.round(bpm)));
-
         const result: HeartPulseResult = {
-          bpm: clampedBpm,
+          bpm: Math.min(220, Math.max(35, Math.round(bpm))),
           stressIndex,
           sdnn: sdnn !== null ? Math.round(sdnn) : null,
           rmssd: rmssd !== null ? Math.round(rmssd) : null,
@@ -177,23 +216,31 @@ export function useHeartPulseScan() {
         }));
       }
     })();
-  }, [stop]);
+  }, [pumpInference, stop]);
 
   const start = useCallback(
     async (video: HTMLVideoElement) => {
       stop();
       samplesRef.current = [];
-      faceCropsRef.current = [];
+      pendingRef.current = { frames: [], times: [] };
+      pulseRef.current = { derivative: [], times: [] };
+      previousFrameRef.current = null;
+      inferenceBusyRef.current = false;
       motionRef.current = { totalDisplacement: 0, sampleCount: 0 };
       lastCenterRef.current = null;
+      lastVideoTimeRef.current = -1;
       setState({ phase: "aligning", progress: 0, waveform: [], result: null, errorMessage: "", engine: null });
 
-      // Kick off the (larger, network-fetched) DeepPhys model load in
-      // parallel with face-landmark loading, so it has the whole scan
-      // window to finish rather than only starting once scanning ends.
-      void loadDeepPhysSession().catch(() => {
-        /* handled at finish()-time via the timeout + fallback */
-      });
+      // Start the model load in parallel with the face landmarker so it has the
+      // alignment period to finish rather than only starting once scanning does.
+      const modelLoad = withTimeout(loadTsCanModel(), MODEL_LOAD_TIMEOUT_MS)
+        .then((model) => {
+          modelRef.current = model;
+        })
+        .catch((err) => {
+          console.warn("TS-CAN model unavailable, falling back to POS:", err);
+          modelRef.current = null;
+        });
 
       let landmarker;
       try {
@@ -207,6 +254,7 @@ export function useHeartPulseScan() {
         }));
         return;
       }
+      void modelLoad;
 
       if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
       if (!cropCanvasRef.current) cropCanvasRef.current = document.createElement("canvas");
@@ -225,6 +273,17 @@ export function useHeartPulseScan() {
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
+
+        // Only sample when the camera has actually produced a new frame. rAF can
+        // run at 60Hz+ against a 30fps camera, and re-reading the same frame
+        // would inject duplicate samples — a flat stretch in the waveform that
+        // pulls the spectrum toward DC and biases the estimate.
+        if (video.currentTime === lastVideoTimeRef.current) {
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
+        lastVideoTimeRef.current = video.currentTime;
+
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -232,7 +291,6 @@ export function useHeartPulseScan() {
 
         const detection = landmarker.detectForVideo(video, now);
         const landmarks = detection.faceLandmarks?.[0];
-
         if (!landmarks || landmarks.length === 0) {
           // No face yet (or momentarily lost) — keep waiting rather than
           // recording a bogus sample.
@@ -246,14 +304,16 @@ export function useHeartPulseScan() {
         const forehead = sampleRegionMean(ctx, regions.forehead, canvas.width, canvas.height);
         const leftCheek = sampleRegionMean(ctx, regions.leftCheek, canvas.width, canvas.height);
         const rightCheek = sampleRegionMean(ctx, regions.rightCheek, canvas.width, canvas.height);
-
         const r = (forehead.r + leftCheek.r + rightCheek.r) / 3;
         const g = (forehead.g + leftCheek.g + rightCheek.g) / 3;
         const b = (forehead.b + leftCheek.b + rightCheek.b) / 3;
 
+        // The model's own ROI: a tracked face crop at 36x36. The upstream demo
+        // uses a FIXED box and asks the user to line their face up inside it; we
+        // have landmarks, so the crop follows the face instead — the same input
+        // the network was trained on, minus the alignment burden.
         const faceCropBox = computeFaceCropBox(landmarks, canvas.width, canvas.height);
-        const faceCrop = sampleRegionAsRgbFrame(video, faceCropBox, cropCanvas, DEEPPHYS_IMG_SIZE);
-        faceCropsRef.current.push(faceCrop);
+        const faceCrop = sampleRegionAsRgbFrame(video, faceCropBox, cropCanvas, TSCAN_IMG_SIZE);
 
         if (lastCenterRef.current) {
           const dx = regions.center.x - lastCenterRef.current.x;
@@ -271,6 +331,11 @@ export function useHeartPulseScan() {
 
         const elapsed = now - scanStartRef.current;
         samplesRef.current.push({ t: elapsed, r, g, b });
+        pendingRef.current.frames.push(faceCrop);
+        pendingRef.current.times.push(elapsed);
+        // Not awaited: inference runs alongside capture so there's no long stall
+        // at the end of the scan.
+        void pumpInference();
 
         setState((s) => {
           const nextWaveform = [...s.waveform, g];
@@ -293,10 +358,10 @@ export function useHeartPulseScan() {
 
       rafRef.current = requestAnimationFrame(loop);
     },
-    [finish, stop]
+    [finish, pumpInference, stop]
   );
 
-  return { ...state, start, stop, reset };
+  return { ...state, start, stop, reset, scanSeconds: SCAN_DURATION_MS / 1000 };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

@@ -28,7 +28,7 @@ export const APPS: AppMeta[] = [
     slug: "heartpulse",
     title: "HeartPulse",
     subtitle: "rPPG · 생체 신호",
-    desc: "전면 카메라로 15초간 얼굴 미세 혈류를 추적해 심박수(BPM)와 자율신경 스트레스 지수를 측정합니다.",
+    desc: "전면 카메라로 30초간 얼굴 미세 혈류를 추적해 심박수(BPM)와 자율신경 스트레스 지수를 측정합니다.",
     accent: "#c4553a",
     icon: "pulse",
   },

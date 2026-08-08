@@ -15,7 +15,7 @@ import styles from "./page.module.css";
 
 const ACCENT = "#c4553a";
 
-const STEPS = ["원리 안내", "15초 스캔", "결과 리포트"];
+const STEPS = ["원리 안내", "30초 스캔", "결과 리포트"];
 const ONBOARD_KEY = "visionlab:heartpulse:onboarded";
 
 function stepForPhase(phase: string, started: boolean): number {
@@ -108,12 +108,12 @@ export default function HeartPulsePage() {
       >
         <p>
           심장이 뛸 때마다 얼굴 피부의 혈류량이 미세하게 변하고, 그만큼 피부색도 아주 조금씩 달라져요.
-          이 변화를 카메라로 15초간 추적해 심박수(BPM)와 자율신경 균형(스트레스)을 추정합니다.
+          이 변화를 카메라로 30초간 추적해 심박수(BPM)와 자율신경 균형(스트레스)을 추정합니다.
         </p>
         <ul className={styles.modalTips}>
           <li>밝고 균일한 조명 아래, 정면을 응시해 주세요 — 역광은 피해주세요.</li>
           <li>안경에 빛이 반사되면 잠시 벗는 것을 권장해요.</li>
-          <li>측정 15초 동안 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
+          <li>측정 30초 동안 머리를 움직이지 마세요. 움직임이 클수록 신뢰도가 낮아져요.</li>
         </ul>
       </InfoModal>
 
@@ -135,7 +135,7 @@ export default function HeartPulsePage() {
           <div>
             <h3 className={styles.startTitle}>측정 준비됐어요</h3>
             <p className={styles.startDesc}>
-              밝은 곳에서 정면을 바라보고, 15초간 움직이지 않으면 돼요.
+              밝은 곳에서 정면을 바라보고, 30초간 움직이지 않으면 돼요.
             </p>
           </div>
           <div className={styles.startActions}>
@@ -162,7 +162,7 @@ export default function HeartPulsePage() {
         <Card className={styles.scanCard}>
           <div className={styles.progressRow}>
             <span>측정 중...</span>
-            <span className="vl-mono">{Math.round(scan.progress * 15)}s / 15s</span>
+            <span className="vl-mono">{Math.round(scan.progress * 30)}s / 30s</span>
           </div>
           <div className={styles.progressTrack}>
             <div className={styles.progressFill} style={{ width: `${scan.progress * 100}%` }} />
@@ -184,7 +184,7 @@ export default function HeartPulsePage() {
           <div className={styles.resultHeader}>
             <h3 className={styles.resultTitle}>측정 결과</h3>
             <span className={styles.engineTag}>
-              {scan.engine === "deepphys" ? "DeepPhys AI 모델" : "POS 신호처리"}
+              {scan.engine === "tscan" ? "TS-CAN 신경망 (UW Ubicomp Lab)" : "POS 신호처리 (폴백)"}
             </span>
           </div>
 

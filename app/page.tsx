@@ -43,7 +43,7 @@ export default function Home() {
 
       <footer className={styles.footer}>
         <span className="vl-mono">VisionLab</span>
-        <span>DeepPhys rPPG · MediaPipe · CIELAB</span>
+        <span>TS-CAN rPPG · MediaPipe · CIELAB</span>
       </footer>
     </main>
   );

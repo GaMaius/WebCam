@@ -65,7 +65,7 @@ export function computeRoiRegions(
 }
 
 /**
- * The face crop box used for the DeepPhys model: the tight face bounding
+ * The face crop box the rPPG network sees: the tight face bounding
  * box enlarged by `coef` around its own center, matching this checkpoint's
  * training config (CROP_FACE.LARGE_BOX_COEF: 1.5), clamped to frame bounds.
  */
@@ -216,7 +216,7 @@ export function sampleRegionSkinMean(
 /**
  * Draws a region of the source video, scaled to `size x size`, onto a
  * scratch canvas and reads it back as a flat channel-last RGB Float32Array
- * — the frame representation lib/deepPhys.ts's preprocessing expects.
+ * — the frame representation lib/heartpulse/tsCan.ts's preprocessing expects.
  */
 export function sampleRegionAsRgbFrame(
   source: CanvasImageSource,
