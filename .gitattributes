@@ -1,0 +1,6 @@
+# Vendored third-party artifact (Eric Wei's Gesture Synth, embedded with
+# permission — see app/gesturesynth/page.tsx). Keep it byte-identical to what the
+# author shipped: the stored blob already matches, but line-ending normalization
+# would rewrite it on checkout, so a fresh clone would serve a file whose bytes —
+# and md5 — no longer match the original.
+public/gesture-synth/** -text
