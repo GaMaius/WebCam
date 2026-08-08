@@ -2,13 +2,33 @@
   position: relative;
   width: 100%;
   /* The embedded app lays itself out against its own viewport (100vw/100dvh), so
-     the iframe box IS its screen. Portrait-ish on phones, landscape on desktop. */
+     the iframe box IS its screen — a bigger box is genuinely more room to play in,
+     not just a bigger picture. Phones get the tall box. */
   height: min(76vh, 680px);
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border-strong);
   background: #111;
   box-shadow: var(--shadow);
+}
+
+/* Desktop: break out of ModuleShell's 720px reading column, which otherwise
+   leaves this app as a small square in the middle of a wide monitor. The shell
+   centres its content in a flex column, so `align-self: center` is enough to
+   centre a child that's WIDER than the column — no negative-margin trick — and
+   .wrap sets no overflow, so the spill isn't clipped.
+   16/9 with a viewport cap: on a short screen the height clamps and the box just
+   gets wider still, which is the direction we want. */
+@media (min-width: 760px) {
+  .stage {
+    align-self: center;
+    /* Not 100vw: that includes the scrollbar and would force a horizontal
+       scrollbar of its own. */
+    width: min(calc(100vw - 44px), 1440px);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: 86vh;
+  }
 }
 
 .frame {

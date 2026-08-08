@@ -49,6 +49,7 @@ export default function GestureSynthPage() {
   // aren't, so a failure still shows its own message and retry button.
   const [revealCamera, setRevealCamera] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const publishStream = (stream: MediaStream | null) => {
     const w = window as unknown as { __visionlabStream?: MediaStream };
@@ -80,6 +81,27 @@ export default function GestureSynthPage() {
   // Don't leave a stale stream on the global for the next page to pick up.
   useEffect(() => () => publishStream(null), []);
 
+  /**
+   * Tell the instrument when its box changes.
+   *
+   * It sizes its canvas from its own viewport on startup and on `resize`, which
+   * covers a user resizing the browser. But the frame's box here also depends on
+   * the page's layout, and a box change that doesn't come from a window resize
+   * doesn't notify it — observed while testing: the frame measured 1394x772 while
+   * its canvas was still 1234x617, and everything it draws was cropped to the
+   * stale size. Forwarding the box change fixes it without touching the vendored
+   * app.
+   */
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!appMounted || !frame || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      frame.contentWindow?.dispatchEvent(new Event("resize"));
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [appMounted]);
+
   return (
     <ModuleShell eyebrow="제스처 · 신스" title="Gesture Synth" accent={ACCENT}>
       <div className={styles.stage}>
@@ -91,7 +113,9 @@ export default function GestureSynthPage() {
             window, and `allow-scripts allow-same-origin` together is not a real
             boundary anyway, while dropping `allow-popups` would break the external
             links in the app's own help dialog. This is code we vendored and read. */}
-        {appMounted && <iframe className={styles.frame} src={APP_URL} title="Gesture Synth" />}
+        {appMounted && (
+          <iframe ref={frameRef} className={styles.frame} src={APP_URL} title="Gesture Synth" />
+        )}
         {!appMounted && (
           <div className={styles.overlay}>
             {revealCamera ? (
