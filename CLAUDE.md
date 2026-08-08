@@ -7,7 +7,8 @@
 > 제품 컨셉 = **"카메라로 나를 스캔하는 독립 앱 모음"**(웰니스+스타일+재미). 홈은 `lib/apps.ts` 레지스트리를 렌더링하는
 > 런처. 브랜드는 **"VisionLab"**로 통일됨(탭 타이틀·히어로 H1·푸터·결과 이미지·공유 문구 모두 "VisionLab", 2026-07-25).
 > 개발: `npm run dev`(3000 사용 중이면 다른 포트), `npm run build`, `npm test`.
-> 리포 루트의 `AGENTS.md`는 이 파일의 Codex용 미러(구버전)다 — CLAUDE.md가 최신 기준이며, 크게 바뀌면 같이 갱신할 것.
+> 리포 루트의 `AGENTS.md`는 **이 파일을 가리키는 포인터**다(예전엔 손으로 맞추는 복사본이었는데 내용이 어긋나서 정리함) —
+> 컨텍스트는 여기 한 곳만 고치면 된다.
 
 ## 현재 상태 (2026-08-06 기준)
 
@@ -31,51 +32,68 @@
     4. **NMS 다양성 재랭킹**: 상위 후보 중 이미 뽑힌 종과 **코사인 ≥ 0.72**면 억제(같은 진화계열/비슷한 외형이 상위 5개를 독식하는 것 방지). 억제로 5개가 안 차면 원래 순위로 채움.
     5. 표시 `percent`는 여전히 얼굴별 z 표준화 후 `zToPercent(sz, topSz)` 매핑.
   - **검증 스크립트**: 위 결정들은 `scratch/`의 파이썬 진단 스크립트(`diagnose_hubs_detailed.py`, `test_cluster_dedup.py`, `test_dampen_monsters.py`, `diagnose_user_result.py` 등)로 실제 테스터 임베딩에 대해 확인함. `scratch/`는 리포에 커밋돼 있으니 재조정할 때 그대로 재사용할 것.
-- **VL-7** VrmMotion("VRM Capture", `/vrmmotion`) — 실시간 3D 모션캡쳐 앱, 2026-08-02~06 구현:
-  - **파이프라인**(`모션캡쳐기획.md`): 웹캠 → MediaPipe(FaceLandmarker + PoseLandmarker) → **Kalidokit**(좌표→회전값 solve) → **@pixiv/three-vrm**(정규화 휴머노이드 본에 주입) → three.js 렌더. 의존성: `three ^0.185`, `@pixiv/three-vrm ^3.5`, `kalidokit ^1.1.5`.
-  - **파일**: `app/vrmmotion/page.tsx`, `components/vrm/VrmCanvas.tsx`(three 캔버스 + `loadVRM`/`takeSnapshot` ref), `components/vrm/VrmControlPanel.tsx`(배경 스타일·VRM 업로드·스냅샷·FPS), `lib/vrm/vrmScene.ts`(`VRMSceneManager`: 렌더러/카메라/OrbitControls/배경 dark·chromakey·transparent), `lib/vrm/kalidokitBridge.ts`(매핑), `hooks/useVrmMotionScan.ts`(rAF 트래킹 루프·FPS·트래킹 상태), `lib/poseLandmarker.ts`, `lib/resultCard.ts`의 `drawVrmMotionCard`.
-  - **모델**: 기본 아바타 `public/models/avatar.vrm`(VRM 1.0, 10MB, 커밋됨). 사용자가 자기 `.vrm`을 업로드하면 `loader.parse(ArrayBuffer)`로 교체 가능(기본으로 되돌리기 버튼 있음). Pose 모델은 **`pose_landmarker_full`**(lite는 트래킹이 나빴고 heavy는 실시간에 너무 느림), GPU delegate 실패 시 CPU 폴백.
-  - **FBX / glTF 업로드 지원 (2026-08-06)**: `.vrm` 외에 **`.fbx`·`.glb`·`.gltf`** 캐릭터도 업로드해 쓸 수 있다. 트래커는 three-vrm의 **정규화 휴머노이드**만 구동하므로, 非VRM 리그는 `lib/vrm/humanoidRigger.ts`가 VRM 휴머노이드로 **어댑트**한다(`VRMHumanoid`는 뼈 맵만 주면 직접 생성 가능하다는 점을 이용). 추상화는 `lib/vrm/motionAvatar.ts`의 `MotionAvatar`(브리지·훅·캔버스가 이제 `VRM` 대신 이 타입을 받는다), 로더 분기는 `vrmScene.ts`의 `loadAvatar(source, nameHint)`.
-    1. **본 이름 매핑**: 노드 이름을 토큰화해 규약 무관하게 매칭(`mixamorig:LeftForeArm`·`Bip001 L UpperArm`·`J_Bip_L_UpperArm`·`thigh.L`·`Spine1` 전부 처리). 손가락/눈/턱은 트래커가 안 쓰므로 의도적으로 매핑하지 않고, twist/IK/helper 류는 제외.
-    2. **⚠️ rest 포즈 = 트래커의 영점 (핵심)**: `VRMHumanoidRig.update()`가 원본 본의 rest 회전을 영점으로 되곱하기 때문에 **모델의 rest 포즈가 곧 identity 포즈**다. VRM은 규격이 T-pose라 그냥 동작하지만 Mixamo FBX는 **A-pose**라서 그대로 쓰면 팔이 항상 ~45° 내려간 채 움직인다. 그래서 휴머노이드 생성 **전에** 팔/다리를 실제 T-pose로 회전시킨다(`alignChain`이 world 축 델타를 로컬로 변환). 이 외에 Z-up→Y-up, cm→m 스케일(1.6m 기준), 발 접지, 정면 방향(VRM 1.0은 +Z 정면 ⇒ 캐릭터 왼팔이 −X) 자동 보정. 적용된 보정은 `MotionAvatar.notes`로 화면에 표시.
-    3. **한계**: 표정(blink·모음)은 VRM 전용(FBX엔 대응 블렌드셰이프가 없음) — 브리지가 `expressionManager` 없으면 건너뛴다. 스프링본/외부 텍스처 참조도 없음.
-    4. **프리셋 구조**: `lib/vrm/avatarPresets.ts`의 `AVATAR_PRESETS`가 기본 제공 아바타 목록(현재 기본 VRM 하나뿐이라 UI 선택 버튼은 `length > 1`일 때만 렌더). 프리셋에 FBX를 넣으면 `textureBase`/`textures` 표가 필요하다 — FBX는 텍스처 참조를 아예 안 들고 있는 경우가 흔해서 머테리얼↔맵 연결이 데이터가 아니라 규약이 된다.
-    5. **⚠️ 서드파티 모델 자산 커밋 금지**: Sketchfab류 다운로드는 4096×4096 PNG 세트라 통째로 수백 MB다(스파이더맨 사례: 텍스처만 **636MB**, 노멀맵 1장이 57MB). git·Vercel·브라우저 전부 불가능하므로 **반드시 다운스케일 후** `public/models/`에 넣을 것. `.gitignore`가 `*/source/`·`*/textures/`·`*-raw/`를 막아둔다.
-    6. **스파이더맨 프리셋은 제거됨 (2026-08-06, 추가한 당일)**: 사용자 실기기에서 **너무 무겁게 돌아가서** 모델·텍스처·전용 스크립트 전부 삭제(30MB FBX + 스킨드 메시 7개가 각자 52본 스켈레톤 + 1024 base/normal 셰이딩 + 동시에 pose_landmarker_full 추론). 무거운 서드파티 캐릭터를 프리셋으로 넣는 방향은 이 앱에 안 맞는다는 결론 — **다시 넣지 말 것**. FBX/glTF **업로드** 지원은 그대로 유지되므로 가벼운 리그를 쓰면 된다.
-    7. **검증**: `tests/humanoidRigger.test.ts` — 이름 매핑, 스케일/접지, A-pose→T-pose 보정, 정면 180° 보정, 그리고 **"어댑트된 A-pose 리그가 T-pose 리그와 동일하게 반응한다"** 는 end-to-end 등가성(정규화 본에 같은 회전을 넣고 raw 손 위치 델타 비교). 보정을 끄면 같은 입력에서 손 위치가 **0.226m** 어긋나므로(임계 0.05m) 이 테스트는 실제로 회귀를 잡는다.
-    8. **새 FBX 검증 도구**: `node scratch/inspect_avatar_rig.mjs <model.fbx>` — 브라우저·웹캠 없이 "이 모델이 동작할까?"에 답한다(본 매핑, 적용된 자동 보정, T-pose rest 방향, side-raise가 손을 올리는지, 스켈레톤 복사본이 중첩인지). 실제 스파이더맨 FBX에서 필수 본 15개 전부 매핑·967→1.6m·정면 180°·팔 52° 보정 후 rest dir `(∓1,0,0)`·dy +0.25로 통과한 바 있음(성능 때문에 제거된 것이고 리깅은 정상이었다). ⚠️ 그 모델처럼 **메시별 스켈레톤 복사본**이 있는 FBX는 복사본이 0 오프셋으로 중첩돼 최상단이 전체의 조상이라 `collectBones`의 **최소 depth 선택**이 전체 메시를 구동한다 — 이 선택 규칙을 바꾸면 일부 메시만 움직인다.
-  - **⚠️ 축 매핑 — 절대 임의로 되돌리지 말 것**: Kalidokit rig는 VRM0 시대 **raw 본** 축 규약으로 만들어졌는데 우리는 three-vrm의 **normalized 본**을 쓴다. `?debug`(`window.__vrmDebug`)로 두 개의 DOF 분리 포즈(측면 들기=roll, 전방 들기=pitch)를 축 스윕한 결과, **오직 로컬 Z(roll)만 반전**돼 있었다(그래서 팔을 옆으로 들면 아바타 팔이 내려감). 그래서 `rigRotation(..., flipZ)`로 **포즈 유래 본에만 Z만 부호 반전**한다 — X(pitch)/Y(yaw)까지 반전시키면 pitch가 다시 깨지고, 좌우 **본 스왑은 하지 않는다**(Kalidokit이 이미 MediaPipe 좌우를 교차시켜 거울상 결과를 낸다. 예전에 스왑+전축반전을 동시에 쌓아 모션이 반대로 나왔던 버그가 이것). Face(`Face.solve`)의 head/neck 회전은 다른 규약이라 그대로 둔다.
-  - **얼굴+손 모드 (2026-08-06, 기본값)**: 앉아서 쓰는 앱에서 전신은 거의 안 쓰이므로 `TrackingMode = "upper" | "full"` 을 두고 **`upper`가 기본**(`app/vrmmotion/page.tsx`의 "트래킹 범위" 토글, 3D 카메라도 `setFraming`으로 흉상 프레이밍). `upper`는 다리 본을 아예 구동하지 않는다(무릎 visibility 게이팅보다 강한 보장).
-    - **표정**: `lib/faceLandmarker.ts`의 `outputFaceBlendshapes`를 **true로 켰다** — FaceLandmarker가 같은 모델의 별도 헤드로 **ARKit 52 blendshape**을 내주므로 모델 추가 비용 없이 Kalidokit의 기하학적 추정보다 훨씬 안정적이고, 눈썹·시선까지 얻는다. 매핑은 `lib/vrm/faceExpressions.ts`(순수 함수 → 테스트됨): 눈은 좌우 독립 + 데드존 리맵, **모음은 최댓값 하나만 출력**(ARKit은 입 모양이 서로 겹쳐서 여러 VRM 비셈을 동시에 넣으면 입이 뭉개진다), 눈썹/시선은 상충 방향 중 하나만. blendshape이 없으면 기존 Kalidokit 경로로 폴백.
-    - **손**: `lib/handLandmarker.ts`(`hand_landmarker.task`, numHands 2, GPU→CPU 폴백) + `Kalidokit.Hand.solve` → `lib/vrm/boneRig.ts`의 `applyHandRig`.
-    - **⚠️ 인식 품질 = 사실상 프레임레이트 문제 (2026-08-06)**: MediaPipe VIDEO 모드는 프레임 간 트래킹을 하므로 **굶기면 모든 단계가 나빠진다**. 그래서 무거운 두 단계를 **번갈아 실행**한다 — 매 프레임 얼굴 + (pose 또는 hands) 중 하나, 나머지는 직전 결과 유지(`HAND_EVERY_N_FRAMES`/`POSE_EVERY_N_FRAMES`=2, `POSE_PHASE`로 위상 분리). 유지가 필요한 이유: 안 하면 한 프레임씩 rest 포즈로 튄다. 캡처 해상도도 이 페이지만 **640**으로 낮췄다(`maxWidth={640}`, 추론 비용은 프레임 크기에 비례).
-      - **참고 사례**: 사용자가 찾아준 gesture-synth 앱(`Desktop/www.indecisiveeric.com`)은 손 인식이 훨씬 좋았는데, 설정을 까보니 **모델·delegate·numHands가 우리와 동일**했다(`hand_landmarker.task` float16, GPU, VIDEO, numHands 2, confidence 전부 기본값). 차이는 **손 모델만 단독 실행 + 640×480**. 즉 튜닝 파라미터의 문제가 아니라 동시 실행 모델 수의 문제였다.
-    - **⚠️⚠️ 손은 좌우를 교차해서 붙여야 한다 (2026-08-06 4차, 이게 근본 원인이었다)**: Kalidokit **Pose 솔버가 이미 좌우를 교차**한다 — `Arms.Hand.r = findRotation(lm[15], …)`인데 lm[15]는 MediaPipe **왼쪽** 손목이고 이게 `RightHand`로 나간다. 즉 **아바타의 오른쪽 전체가 사용자의 왼쪽으로 구동**되고, 그게 거울이 되는 이유다. 그런데 손 경로는 handedness 라벨을 그대로 VRM 좌우에 썼으니 **손이 남의 팔에 얹혀 있었고 손목 roll도 반대쪽 팔에서 가져왔다.** 양손을 대칭으로 들면 스왑은 안 보이고 **손 각도만 심하게 틀어져 보인다** — 실기기 증상이 정확히 이거였다.
-      - 규칙: **`Hand.solve`는 해부학적 라벨로**(팔레트 점·clamp가 그 기준), **적용은 반대쪽 VRM 손에**. `vrmSideForHand()` / `poseHandKeyForHand()`가 이 교차를 한 곳에서 담당한다.
-      - 부수 효과: 교차하면 **손가락 flipZ가 필요 없어진다**. Kalidokit 왼손 커브는 +Z이고 아바타 오른손 커브도 +Z(실측)라 그대로 맞는다. (교차 안 하던 시절엔 flipZ=true가 필요했다 — 부호가 맞는다고 매핑이 맞는 건 아니라는 예.)
-    - **⚠️ 손목은 자체 솔버로 푼다 (`lib/vrm/wristSolver.ts`)**: Kalidokit의 wrist는 못 쓴다 — `handRotation.y = handRotation.z`로 roll을 yaw에 복사하고 −0.4 바이어스까지 줘서 손이 팔뚝에서 비틀린다. 그렇다고 roll을 팔 체인에서만 가져오면(중간에 그렇게 했었다) `Pose`의 `Hand.z`는 손목→손 **방향**에서 나온 값이라 **손목을 돌려도 아바타 손이 안 돌아간다**. 그래서 손바닥 기하로 직접 방향을 만든다: 랜드마크에서 (손가락 방향, 손바닥 법선) 기저를 세우고 rest 기저와의 상대 회전을 구해 **월드 회전으로 넣는다**(`applyWorldRotation`이 부모의 현재 월드 회전으로 로컬 변환 — 그래서 **pose를 먼저 풀어야** 팔뚝 회전이 반영된다).
-      - 카메라→모델 매핑은 **전 축 부호 반전**(x는 거울, y는 이미지 y가 아래로, z는 MediaPipe가 카메라에서 멀어질수록 +). 반전이 3개면 **반사(det −1)** 이고, 거울 쪽 팔에 붙이는 것과 맞물려 결과적으로 올바른 회전이 된다.
-      - 손바닥 법선은 **해부학적 항등식**으로 구한다: 왼손 `palm = −(fingers × across)`, 오른손 `palm = +(...)` (`across` = index→little). 이건 실제 아바타 rest에서 양손 다 확인됨. ⚠️ "손가락 위 + 손바닥 정면"은 엄지가 안/밖 두 자세가 다 가능해서(손목 roll 180° 차이) **랜드마크를 직관으로 배치하면 안 된다** — 테스트 픽스처는 원하는 결과 방향에서 항등식으로 **거꾸로 생성**한다.
-      - **미검증 1비트**: `DEPTH_SIGN`(z 부호). x·y는 관측으로 고정되지만 z는 손바닥이 앞/뒤를 보는지로만 드러난다. 실기기에서 손바닥이 뒤집혀 보이면 **이 상수 하나만 뒤집으면 된다.**
-    - **⚠️ 손목은 두 소스를 합친다**: `Hand.solve`는 손바닥 평면에서 roll을 뽑은 뒤 **yaw에도 같은 값을 복사**한다(`handRotation.y = handRotation.z`). 그래서 손목 회전을 통째로 넣으면 손이 이상한 각도로 꺾인다. 지금은 **flex/deviation(x·y)은 손 솔버, roll(z)은 팔 체인(`Pose.solve`의 `{side}Hand.z`, `rigArm`이 스케일·좌우보정 완료)** 에서 가져온다. 그래서 **pose를 hands보다 먼저 푼다**(순서 바꾸지 말 것).
-    - **⚠️ world 랜드마크에 visibility를 채워줘야 한다**: `Pose.solve`는 **world** 랜드마크의 `visibility < 0.23`이면 그 팔을 "화면 밖"으로 보고 **RestingDefault로 덮어쓴다**. MediaPipe는 world 쪽 visibility를 안 채워주는 경우가 많아(0), 그대로 넘기면 **팔이 무슨 짓을 해도 쉬는 포즈에 고정된다**(실기기에서 이 증상이 났다). `withLandmarkVisibility`가 normalized의 값을 world로 복사한다.
-    - **⚠️ 엄지 본 이름이 한 칸 밀려 있다**: Kalidokit은 VRM0 이름(`ThumbProximal/Intermediate/Distal`)을 내는데 VRM 1.0은 같은 세 관절을 `thumbMetacarpal/Proximal/Distal`로 부른다. 이름만 맞춰 꽂으면 엄지 회전이 전부 한 관절씩 밖으로 밀린다 → `FINGER_BONE_BY_RIG_SUFFIX`가 이걸 흡수한다. 나머지 네 손가락은 이름 그대로.
-    - **구조**: 축 규약(`rigRotation`·flipZ)과 손가락 매핑을 `lib/vrm/boneRig.ts`로 분리했다 — kalidokit 패키지 엔트리가 디렉터리 re-export라서 Node ESM에서 import가 안 되는데, 이걸 분리해두면 **핵심 로직을 `node --test`로 검증**할 수 있다(테스트는 `kalidokit/dist/kalidokit.es.js` 번들을 직접 import). 이 파일은 상대 경로 런타임 import를 두지 말 것.
-    - **⚠️ 측정된 VRM 축 규약 (`node scratch/probe_vrm_axes.mjs`)**: 실제 `avatar.vrm`(VRM 1.0)에서 측정한 값이며 **추론보다 이 숫자를 신뢰할 것**.
-      - **캐릭터의 왼쪽 = 월드 +X** (leftUpperArm x=+0.109, rightUpperArm x=−0.109). ⚠️ `humanoidRigger`가 한동안 −X로 가정하고 있어서 FBX **정면 180° 판정과 T-pose 팔 목표가 반대**였다(2026-08-06 수정). VRM 경로는 영향 없었고 FBX 업로드만 영향받던 잠복 버그.
-      - **rest 포즈에서 손바닥은 −Y**(T포즈 palm down). 손등 법선이 왼손 기준 +Y로 측정됨.
-      - **주먹 = 손끝이 −Y로 이동**: 왼손 index는 **−Z**가 커브(+Z는 역굽힘), 오른손은 **+Z**가 커브.
-      - ⚠️ `fingerDir × (index→little)`로 손바닥 법선을 구하려 하지 말 것 — 좌우가 거울이라 **부호가 뒤집혀서** 한쪽은 손등이 나온다. 양손 모두 −Y로 두면 된다.
-    - **검증**: `tests/handTracking.test.ts`(엄지 밀림 매핑, 손가락 이름, 커브 부호, 손목 roll 출처, world visibility 병합, blendshape 거울) + **`tests/realAvatarHands.test.ts`(실제 `avatar.vrm`을 Node에서 로드해 "주먹 쥐면 손끝이 손바닥 쪽으로 간다"를 기하학적으로 검증)**. 후자가 이 버그를 잡는 테스트다 — DOM/URL 스텁을 조금 넣으면 Node에서 `.vrm`을 파싱할 수 있다(`node --test`는 파일별 프로세스라 스텁이 새지 않는다).
-      - **⚠️ 테스트 교훈 2가지.** ① **거리는 방향이 아니다** — "주먹 쥐면 손끝~손목 거리가 짧아진다"로 검증했더니 **뒤로 꺾여도 똑같이 짧아져서**(실측 0.110 vs 0.103) 부호가 반대인 코드가 통과했다. ② **내가 추론한 값을 그대로 테스트에 박으면 테스트가 버그를 보증한다** — 손가락 부호를 소스 clamp 범위에서 추론해 테스트에 넣었고, 그 테스트가 통과하는 채로 실기기에서 역굽힘이 났다. 지금은 실제 모델 지오메트리를 기준으로 삼는다.
-    - **실기기 1차 피드백 반영 완료 (2026-08-06)**: ARKit 이름·손 handedness는 실제로 동작 확인됨(손가락·표정 모두 반응). 고쳐야 했던 건 위의 **부위별 게이팅**과 **거울 방향(머리 roll, 윙크/시선)** 2건. 남은 미검증은 **모델 3개 동시 추론 FPS** — 느리면 `upper`에서 pose를 `lite`로 내리거나 `HAND_EVERY_N_FRAMES`를 3으로 올릴 것.
-    - **팔꿈치가 화면을 벗어날 때**: 어깨만 보이면 상완은 따라오지만 하완 추정이 나빠질 수 있다. 그때의 다음 수단은 **손 위치로 팔을 IK 배치**하는 것(2본 IK: 어깨→손목 목표, 팔꿈치는 힌트 축으로 해석). 지금은 필요 없어서 넣지 않았다 — 팔은 이미 pose로 추적되고 있었고 문제는 게이팅이었다.
-  - **⚠️ 부위별 게이팅 — 전역 return 금지 (2026-08-06 실기기 버그 수정)**: 예전엔 "엉덩이 visibility < 0.3이면 **전체 포즈 스킵**"이었는데, 얼굴+손 프레이밍에선 카메라에 가까이 앉아 골반이 화면 밖이라 **팔까지 통째로 얼어붙었다**(어깨·팔꿈치는 완벽히 추적되는데 아바타는 T포즈 유지, 손가락과 얼굴만 움직임). 지금은 `lib/vrm/boneRig.ts`의 `resolvePoseGates`가 부위마다 필요한 랜드마크로 판단한다 — **팔은 어깨 ≥ 0.5**, 몸통(hips/spine)은 골반 ≥ 0.3(골반 없이 추정하면 아바타가 저절로 기운다), 다리는 `full` 모드 + 무릎 > 0.4. `tests/handTracking.test.ts`의 "hidden hips must not freeze the arms"가 이 회귀를 고정한다. **다시 전역 early-return으로 되돌리지 말 것.**
-  - **⚠️ 얼굴 회전은 X(pitch)·Z(roll) 둘 다 반전 (`rigFaceRotation`)**: 고개를 내리면 아바타가 위를 보던 문제. Kalidokit head는 VRM0 raw 본 규약이고 VRM0→VRM1은 **Y축 180° 회전**이라, 회전을 그 변환으로 conjugate하면 **X와 Z 성분이 부호 반전**된다(Y는 살아남는다). 그래서 얼굴 전용 헬퍼로 x·z만 반전하고 yaw는 건드리지 않는다. (팔은 실측 결과 Z만 반전이면 맞다 — Kalidokit `rigArm`이 자체적으로 좌우 부호를 섞기 때문. 얼굴과 팔의 규칙이 다른 게 정상이다.)
-  - **⚠️ 엄지는 Kalidokit 출력을 안 쓴다 (`solveThumbRig`)**: Kalidokit 엄지 분기는 VRM0 이름 기준으로 튜닝된 상수 덩어리다(`startPos.x`만 **1.2rad ≈ 69°**). VRM 1.0이 엄지 체인을 한 관절 밀어놨으니 그 상수가 엉뚱한 관절에 얹혀 **엄지만 혼자 꺾인다**. 실측하니 엄지도 **왼손 −Z / 오른손 +Z**로 손바닥 쪽으로 굽으므로(나머지 네 손가락과 동일 축·부호) 같은 공식(정규화 관절각 × −π × invert, gain 0.7)으로 직접 계산한다. 상수 오프셋 없음.
-  - **⚠️ 거울 방향 (2026-08-06 실기기 수정)**: ① **머리 roll(고개 까딱)도 Z 반전**이 필요했다 — 예전엔 "Face.solve는 다른 규약이라 그대로 둔다"였지만 실제로는 몸과 같이 뒤집혀 있었다. 이제 이 파일의 **솔버 유래 본은 전부 flipZ**(예외 없는 한 가지 규칙). ② **윙크/시선 좌우 스왑**: ARKit 이름은 해부학 기준(`eyeBlinkLeft` = 본인의 왼눈)인데 아바타는 거울상이라, 왼눈을 감으면 화면에서 같은 쪽에 있는 아바타의 **오른눈**이 감겨야 한다. `faceExpressions.ts`에서 좌우를 교차시킨다(Kalidokit 폴백 경로도 동일). 수평 시선(`lookLeft/Right`)도 같은 이유로 교차.
-  - **안정화**: 각 본에 deadzone(0.02rad ≈ 1.1°) + slerp 스무딩(body 0.3 / leg 0.22 / face 0.3). 표정은 blink(`clampThreshold 0.15~0.85`) + 모음 5종(`aa/ih/ou/ee/oh`, cutoff 0.08).
-  - **UI**: 3D 아바타가 히어로 스테이지, 실제 카메라는 우상단 **PiP**(`CameraView`에 `showControls={false}`·`allowSwitch={false}`)로 겹쳐서 **둘을 한 화면에서 동시에** 본다. 3D 카메라는 뒤로 빼고 시선을 가슴 높이로 맞춰 든 팔이 프레임에 남게 함. 스냅샷 → 결과 모달(아바타·FPS·트래킹 센서) → `ResultActions`로 공유/저장.
+- **VL-7** VrmMotion("VRM Capture", `/vrmmotion`) — 실시간 3D 모션캡쳐 앱, 2026-08-02~06 구현. 아래는 **현재 상태 기준**이며, ⚠️ 표시는 실기기에서 한 번씩 틀렸다가 고친 것들이라 **되돌리기 전에 반드시 읽을 것**.
+  - **파이프라인**(`모션캡쳐기획.md`): 웹캠 → MediaPipe(**Face + Pose + Hand** Landmarker) → **Kalidokit**(좌표→회전값 solve) → **@pixiv/three-vrm**(정규화 휴머노이드 본에 주입) → three.js 렌더. 의존성: `three ^0.185`, `@pixiv/three-vrm ^3.5`, `kalidokit ^1.1.5`.
+  - **파일**: `app/vrmmotion/page.tsx`, `components/vrm/{VrmCanvas,VrmControlPanel}.tsx`, `hooks/useVrmMotionScan.ts`(rAF 루프·모델 스케줄링·FPS), `lib/{face,pose,hand}Landmarker.ts`, `lib/resultCard.ts`의 `drawVrmMotionCard`, 그리고 `lib/vrm/`:
+    - `vrmScene.ts` — `VRMSceneManager`(렌더러/카메라/OrbitControls/배경, `loadAvatar`·`loadPreset`·`setFraming`)
+    - `motionAvatar.ts` — `MotionAvatar`. 트래커가 구동하는 대상의 추상화(VRM이든 어댑트된 FBX든). 브리지·훅·캔버스가 `VRM` 대신 이 타입을 받는다.
+    - `kalidokitBridge.ts` — 솔버 호출과 프레임 적용 순서
+    - `boneRig.ts` — 축 규약·본 매핑·게이팅. **kalidokit을 import하지 않는다**(이유는 아래 "구조")
+    - `wristSolver.ts` — 손목 방향 자체 솔버
+    - `faceExpressions.ts` — ARKit blendshape → VRM 표정
+    - `humanoidRigger.ts` — 非VRM 리그를 VRM 휴머노이드로 어댑트
+    - `avatarPresets.ts` — 기본 제공 아바타 목록
+  - **모델**: 기본 아바타 `public/models/avatar.vrm`(VRM 1.0, 10MB, 커밋됨). Pose는 **`pose_landmarker_full`**(lite는 트래킹이 나빴고 heavy는 실시간에 너무 느림), Hand는 `hand_landmarker.task`(numHands 2). 전부 GPU delegate, 실패 시 CPU 폴백.
+  - **트래킹 범위**: `TrackingMode = "upper" | "full"`, **`upper`가 기본**(앉아서 쓰는 앱에서 전신은 거의 안 쓰임). `upper`는 다리 본을 아예 구동하지 않고, 3D 카메라도 `setFraming`으로 흉상 프레이밍. UI 토글은 컨트롤 패널의 "트래킹 범위".
+
+  - **⚠️⚠️ 좌우 교차 — 이 앱의 가장 중요한 규약**: Kalidokit **Pose 솔버가 이미 좌우를 교차**한다(`Arms.Hand.r = findRotation(lm[15], …)`인데 lm[15]는 MediaPipe **왼쪽** 손목이고 이게 `RightHand`로 나간다). 즉 **아바타의 오른쪽 전체가 사용자의 왼쪽으로 구동**되고, 그게 거울이 되는 이유다. 그래서:
+    - Pose 본은 **같은 이름끼리** 꽂는다(좌우 스왑 금지 — 예전에 스왑까지 쌓아서 모션이 반대로 나온 버그가 있었다).
+    - 손도 **같이 교차**해야 한다: `Hand.solve`는 **해부학적 라벨**로 풀고(팔레트 점·clamp가 그 기준) **적용은 반대쪽 VRM 손에**. `vrmSideForHand()`가 이걸 한 곳에서 담당한다. 교차를 안 하면 **손이 남의 팔에 얹히고** 손목 roll도 반대쪽 팔에서 오는데, 양손을 대칭으로 들면 스왑은 안 보이고 **손 각도만 심하게 틀어져 보인다** — 실기기에서 오래 헤맨 증상이 이거였다.
+  - **⚠️ 축 부호 규약 — 부위마다 다르고, 그게 정상이다**: Kalidokit rig는 VRM0 시대 **raw 본** 기준인데 우리는 three-vrm의 **normalized 본**을 쓴다. 부위별로 실측해서 정한 값이며 **한 규칙으로 통일하려 하지 말 것**(그 시도가 매번 회귀를 만들었다).
+    | 부위 | 처리 | 근거 |
+    |---|---|---|
+    | Pose(몸통·팔·다리) | **Z만 반전** (`rigRotation(..., flipZ=true)`) | `?debug` 축 스윕. X까지 반전하면 pitch가 깨진다 |
+    | 얼굴(head·neck) | **X·Z 반전** (`rigFaceRotation`) | VRM0→VRM1은 Y축 180° 회전 ⇒ conjugate하면 X·Z 부호 반전, Y는 생존. 고개 내리면 위 보던 문제 |
+    | 손가락 | **반전 없음** | 교차가 이미 부호를 맞춘다(Kalidokit 왼손 커브 +Z = 아바타 오른손 커브 +Z, 실측) |
+    | 손목 | 자체 솔버가 월드 회전으로 | 아래 항목 |
+  - **⚠️ 손목은 자체 솔버 (`wristSolver.ts`)**: Kalidokit wrist는 못 쓴다 — 손바닥 평면 roll을 **yaw에도 복사**하고(`handRotation.y = handRotation.z`) −0.4 바이어스까지 줘서 손이 팔뚝에서 비틀린다. 그렇다고 roll을 팔 체인에서만 가져오면 `Pose`의 `Hand.z`는 손목→손 **방향** 값이라 **손목을 돌려도 안 돌아간다**(둘 다 실기기에서 겪었다). 그래서 손바닥 기하로 직접 만든다: (손가락 방향, 손바닥 법선) 기저 ↔ rest 기저의 상대 회전을 **월드 회전**으로 넣는다(`applyWorldRotation`이 부모의 현재 월드 회전으로 로컬 변환).
+    - 카메라→모델 매핑은 **전 축 부호 반전**(x는 거울, y는 이미지 y가 아래로, z는 MediaPipe가 멀어질수록 +). 반전 3개 = **반사(det −1)** 이고, 거울 쪽 팔에 붙이는 것과 맞물려 결과적으로 올바른 회전이 된다.
+    - 손바닥 법선은 **해부학적 항등식**: 왼손 `palm = −(fingers × across)`, 오른손 `+(…)` (`across` = index→little). 실제 아바타 rest에서 양손 확인됨.
+    - **미검증 1비트**: `DEPTH_SIGN`(z 부호). x·y는 관측으로 고정되지만 z는 손바닥이 앞/뒤를 보는지로만 드러난다. 손바닥이 뒤집혀 보이면 **이 상수 하나만 뒤집으면 된다.**
+  - **⚠️ 엄지·손가락 이름**: ① Kalidokit은 VRM0 이름(`ThumbProximal/Intermediate/Distal`)을 내는데 VRM 1.0은 같은 세 관절을 `thumbMetacarpal/Proximal/Distal`로 부른다 → `FINGER_BONE_BY_RIG_SUFFIX`가 한 칸 밀림을 흡수한다(나머지 네 손가락은 이름 그대로). ② **엄지는 Kalidokit 출력을 아예 안 쓴다**(`solveThumbRig`) — Kalidokit 엄지 분기는 VRM0 이름 기준 상수 덩어리라(`startPos.x`만 **1.2rad ≈ 69°**) 밀린 관절에 얹혀 **엄지만 혼자 꺾인다**. 실측상 엄지도 나머지와 같은 축·부호(왼손 −Z / 오른손 +Z)로 굽으므로 같은 공식(정규화 관절각 × −π × invert, gain 0.7)으로 직접 계산하고 상수 오프셋은 없다.
+  - **⚠️ 부위별 게이팅 — 전역 return 금지**: 예전엔 "골반 visibility < 0.3이면 **전체 포즈 스킵**"이었는데, 얼굴+손 프레이밍은 카메라에 가까이 앉아 골반이 화면 밖이라 **팔까지 통째로 얼어붙었다**(어깨·팔꿈치는 완벽히 추적되는데 아바타는 T포즈 유지). 지금은 `resolvePoseGates`가 부위마다 판단한다 — **팔은 어깨 ≥ 0.5**, 몸통(hips/spine)은 골반 ≥ 0.3(골반 없이 추정하면 아바타가 저절로 기운다), 다리는 `full` + 무릎 > 0.4. **다시 전역 early-return으로 되돌리지 말 것.**
+  - **⚠️ world 랜드마크에 visibility를 채워줘야 한다**: `Pose.solve`는 **world** 랜드마크의 `visibility < 0.23`이면 그 팔을 "화면 밖"으로 보고 **RestingDefault로 덮어쓴다**. MediaPipe는 world 쪽 visibility를 자주 0으로 남기므로 그대로 넘기면 **팔이 무슨 짓을 해도 쉬는 포즈에 고정된다**. `withLandmarkVisibility`가 normalized 값을 복사한다.
+  - **적용 순서**: 얼굴 → **pose** → 손. 손목의 월드→로컬 변환이 팔뚝의 최종 회전을 봐야 하므로 **pose가 손보다 먼저**여야 한다(순서 바꾸지 말 것).
+
+  - **표정**: `lib/faceLandmarker.ts`의 `outputFaceBlendshapes`를 **켰다** — FaceLandmarker가 같은 모델의 별도 헤드로 **ARKit 52 blendshape**을 내주므로 모델 추가 비용 없이 Kalidokit의 기하학적 추정보다 훨씬 안정적이고 눈썹·시선까지 얻는다. 매핑은 `faceExpressions.ts`(순수 함수): 눈은 좌우 독립 + 데드존 리맵, **모음은 최댓값 하나만 출력**(ARKit 입 모양이 서로 겹쳐서 여러 비셈을 동시에 넣으면 입이 뭉개진다), 눈썹/시선도 상충 방향 중 하나만. blendshape이 없으면 Kalidokit 경로로 폴백.
+    - **⚠️ 윙크·시선은 좌우 교차**: ARKit 이름은 해부학 기준(`eyeBlinkLeft` = 본인의 왼눈)인데 아바타는 거울상이라, 왼눈을 감으면 화면상 같은 쪽인 아바타의 **오른눈**이 감겨야 한다. 폴백 경로도 동일하게 교차.
+  - **⚠️ 인식 품질 = 사실상 프레임레이트 문제**: MediaPipe VIDEO 모드는 프레임 간 트래킹을 하므로 **굶기면 모든 단계가 나빠진다**. 그래서 무거운 두 단계를 **번갈아 실행**한다 — 매 프레임 얼굴 + (pose 또는 hands) 하나, 나머지는 직전 결과 유지(`HAND_EVERY_N_FRAMES`/`POSE_EVERY_N_FRAMES`=2, `POSE_PHASE`로 위상 분리). 유지가 필요한 이유: 안 하면 한 프레임씩 rest 포즈로 튄다. 캡처 해상도도 이 페이지만 **640**(`maxWidth={640}`).
+    - **참고 사례**: 사용자가 찾아준 gesture-synth 앱(`Desktop/www.indecisiveeric.com`)은 손 인식이 훨씬 좋았는데, 설정을 까보니 **모델·delegate·numHands·confidence가 우리와 전부 동일**했다. 차이는 **손 모델만 단독 실행 + 640×480**. 튜닝 파라미터 문제가 아니라 동시 실행 모델 수의 문제였다.
+    - 더 필요하면 다음 손잡이: `upper`에서 pose를 `lite`로 내리기, 얼굴도 2프레임마다로, `HAND_EVERY_N_FRAMES`=3.
+  - **안정화**: 본별 deadzone(0.02rad ≈ 1.1°) + slerp(body 0.3 / leg 0.22 / face 0.3 / hand 0.4).
+  - **UI**: 3D 아바타가 히어로 스테이지, 실제 카메라는 우상단 **PiP**(`showControls={false}`·`allowSwitch={false}`)로 겹쳐 **둘을 한 화면에서** 본다. 스냅샷 → 결과 모달(아바타·FPS·트래킹 센서) → `ResultActions`로 공유/저장.
+
+  - **⚠️ 측정된 VRM 축 규약 (`node scratch/probe_vrm_axes.mjs`)**: 실제 `avatar.vrm`에서 측정한 값. **추론보다 이 숫자를 신뢰할 것.**
+    - **캐릭터의 왼쪽 = 월드 +X** (leftUpperArm x=+0.109, right −0.109). 한동안 코드가 −X로 가정해서 FBX의 정면 180° 판정과 T-pose 팔 목표가 반대였다(VRM 경로는 무영향, FBX 업로드만 영향받던 잠복 버그).
+    - **rest 손바닥은 −Y**(T포즈 palm down), 손등 법선은 왼손 기준 +Y.
+    - **주먹 = 손끝이 −Y로 이동**: 아바타 왼손 index는 **−Z**가 커브, 오른손은 **+Z**(+Z/−Z 반대는 역굽힘).
+    - ⚠️ `fingerDir × (index→little)`로 손바닥 법선을 구하려 하지 말 것 — 좌우가 거울이라 부호가 뒤집혀 한쪽은 손등이 나온다. 양손 모두 −Y로 두면 된다.
+  - **검증**: `tests/handTracking.test.ts`(본 이름·엄지 밀림, 손가락/엄지 부호, 얼굴 pitch·yaw·roll 부호, 게이팅, world visibility 병합, blendshape 거울) + **`tests/realAvatarHands.test.ts`(실제 `avatar.vrm`을 Node에서 로드해 기하학적으로 검증 — 주먹이 손바닥 쪽으로 접히는지, 손이 교차된 쪽 손에 붙는지, 손바닥이 카메라를 보는지, 손목 비틀림이 반영되는지)**. DOM/URL 스텁을 조금 넣으면 Node에서 `.vrm`을 파싱할 수 있다(`node --test`는 파일별 프로세스라 스텁이 새지 않는다).
+    - **⚠️ 테스트 교훈 3가지 — 이 앱에서 반복해서 값을 치른 부분이다.**
+      1. **거리는 방향이 아니다.** "주먹 쥐면 손끝~손목 거리가 짧아진다"로 검증했더니 **뒤로 꺾여도 똑같이 짧아져서**(실측 0.110 vs 0.103) 부호가 반대인 코드가 통과했다.
+      2. **추론한 값을 테스트에 박으면 테스트가 버그를 보증한다.** 손가락 부호를 솔버 소스의 clamp 범위에서 추론해 기대값으로 넣었고, 통과하는 채로 실기기에서 역굽힘이 났다.
+      3. **직관으로 만든 픽스처는 코드와 싸운다.** "손가락 위 + 손바닥 정면"은 엄지가 안/밖 두 자세가 다 가능해서(손목 roll 180° 차이) 손으로 배치하면 그중 하나를 몰래 가정한다. 지금은 **원하는 결과 방향에서 항등식으로 거꾸로 생성**한다.
+  - **구조 메모**: 축 규약·본 매핑·게이팅을 `boneRig.ts`로 분리한 이유는 kalidokit 패키지 엔트리가 디렉터리 re-export라서 **Node ESM에서 import가 안 되기** 때문이다. 분리해두면 핵심 로직을 `node --test`로 검증할 수 있다(테스트는 `kalidokit/dist/kalidokit.es.js` 번들을 직접 import). **이 파일에 상대 경로 런타임 import를 두지 말 것.**
+
+  - **FBX / glTF 업로드 지원**: `.vrm` 외에 **`.fbx`·`.glb`·`.gltf`** 캐릭터도 업로드해 쓸 수 있다. 트래커는 정규화 휴머노이드만 구동하므로 非VRM 리그는 `humanoidRigger.ts`가 VRM 휴머노이드로 어댑트한다(`VRMHumanoid`는 뼈 맵만 주면 직접 생성 가능). 로더 분기는 `vrmScene.ts`의 `loadAvatar(source, nameHint)`.
+    1. **본 이름 매핑**: 노드 이름을 토큰화해 규약 무관하게 매칭(`mixamorig:LeftForeArm`·`Bip001 L UpperArm`·`J_Bip_L_UpperArm`·`thigh.L`·`Spine1`). **손가락도 매핑한다**(`LeftHandThumb1`→`thumbMetacarpal` 식, VRM1 밀림 반영). twist/IK/helper 류는 제외. 눈·턱은 트래커가 안 써서 미매핑.
+    2. **⚠️ rest 포즈 = 트래커의 영점 (핵심)**: `VRMHumanoidRig.update()`가 원본 본의 rest 회전을 영점으로 되곱하므로 **모델의 rest 포즈가 곧 identity 포즈**다. VRM은 규격이 T-pose라 그냥 되지만 Mixamo FBX는 **A-pose**라 그대로 쓰면 팔이 항상 ~45° 내려간 채 움직인다. 그래서 휴머노이드 생성 **전에** 팔/다리를 실제 T-pose로 회전시킨다(`alignChain`). 이 외에 Z-up→Y-up, cm→m 스케일(1.6m 기준), 발 접지, 정면 방향(왼팔이 **+X**여야 함) 자동 보정. 적용된 보정은 `MotionAvatar.notes`로 화면에 표시.
+    3. **한계**: 표정은 VRM 전용(FBX엔 대응 블렌드셰이프가 없음) — 브리지가 `expressionManager` 없으면 건너뛴다. 스프링본·외부 텍스처 참조도 없음.
+    4. **프리셋 구조**: `avatarPresets.ts`의 `AVATAR_PRESETS`(현재 기본 VRM 하나뿐이라 선택 버튼은 `length > 1`일 때만 렌더). 프리셋에 FBX를 넣으면 `textureBase`/`textures` 표가 필요하다 — FBX는 텍스처 참조를 아예 안 들고 있는 경우가 흔해서 머테리얼↔맵 연결이 데이터가 아니라 규약이 된다.
+    5. **⚠️ 서드파티 모델 자산 커밋 금지**: Sketchfab류 다운로드는 4096² PNG 세트라 수백 MB다(스파이더맨 사례: 텍스처만 **636MB**, 노멀맵 1장이 57MB). git·Vercel·브라우저 전부 불가능하므로 **반드시 다운스케일 후** `public/models/`에 넣을 것. `.gitignore`가 `*/source/`·`*/textures/`·`*-raw/`를 막아둔다.
+    6. **스파이더맨 프리셋은 제거됨(추가한 당일)**: 실기기에서 **너무 무겁게 돌아가서** 모델·텍스처·전용 스크립트 전부 삭제(30MB FBX + 스킨드 메시 7개가 각자 52본 스켈레톤 + 1024 base/normal 셰이딩 + 동시에 세 모델 추론). 무거운 서드파티 캐릭터를 프리셋으로 넣는 방향은 이 앱에 안 맞는다 — **다시 넣지 말 것**. 업로드 지원은 유지되므로 가벼운 리그를 쓰면 된다.
+    7. **검증·도구**: `tests/humanoidRigger.test.ts`(이름 매핑, 스케일/접지, A-pose→T-pose, 정면 180°, 그리고 **"어댑트된 A-pose 리그가 T-pose 리그와 동일하게 반응한다"** 는 end-to-end 등가성 — 보정을 끄면 손 위치가 **0.226m** 어긋난다). 새 모델은 `node scratch/inspect_avatar_rig.mjs <model.fbx>`로 브라우저·웹캠 없이 미리 볼 수 있다(본 매핑·자동 보정·rest 방향·side-raise가 손을 올리는지·스켈레톤 복사본 중첩 여부).
+    8. **⚠️ 메시별 스켈레톤 복사본**: 스파이더맨 FBX처럼 메시마다 스켈레톤 사본이 있는 파일은 사본들이 **0 오프셋으로 중첩**돼 최상단이 전체의 조상이다. 그래서 `collectBones`의 **최소 depth 선택**이 전체 메시를 구동한다 — 이 선택 규칙을 바꾸면 일부 메시만 움직인다.
 
 단위 테스트: `npm test`(Node 내장 `node --test`, `.ts` 직접 실행). `deepPhys.test.ts`는 `onnxruntime-web` 미설치 환경에서 import 에러로 실패할 수 있음(로직 무관, `npm install` 후 정상).
 
@@ -120,8 +138,10 @@
 
 ## 남은 일
 
-- **HeartPulse 심박 정확도**: 위 3번 항목이 **여전히 미해결**된 최우선 과제. (VrmMotion 작업이 먼저 들어와서 밀렸음.)
-- **VrmMotion 실기기 확인**: 축 매핑은 `?debug` 축 스윕 + `applyTrackingToVRM` end-to-end로 수치 검증됨(측면 들기 dY −0.60→+0.615, 전방 들기 +0.167→+0.435). 남은 건 실제 웹캠에서의 체감 — 좌우 거울 방향, 다리/허리 흔들림, 모바일 FPS(pose full 모델 부담), 20초 flush로 vrmmotion 클립이 B2에 실제로 쌓이는지.
+- **HeartPulse 심박 정확도**: 위 3번 항목이 **여전히 미해결**된 최우선 과제. (VrmMotion 작업이 먼저 들어와서 계속 밀렸음.)
+- **VrmMotion — 실기기 확인된 것 / 남은 것** (2026-08-06 여러 라운드):
+  - 확인됨: 좌우 거울 방향, 손가락 커브 방향, 표정(ARKit)·손 인식 동작, 팔이 손을 따라오는 것.
+  - 남음: ① **손바닥 앞/뒤 방향**(`wristSolver.ts`의 `DEPTH_SIGN` 1비트) ② **FPS 체감** — 모델 3개를 번갈아 돌리도록 바꾼 뒤의 수치 미확인, 부족하면 pose를 `lite`로/얼굴도 격프레임으로 ③ **몸 앞으로 모으는 팔 자세** — Kalidokit `rigArm`이 `UpperArm.x`를 `[−0.5, π]`, `LowerArm.x`를 `[−0.3, 0.3]`으로 강하게 clamp하고 `−0.3` 오프셋까지 넣어서 구조적으로 안 나온다. 다음 수단은 **손목 위치로 2본 IK**(어깨→손목 목표, 팔꿈치는 힌트 축) ④ 20초 flush로 vrmmotion 클립이 B2에 실제로 쌓이는지.
 - **실제 기기(진짜 웹캠)로 테스트**: 이 프로젝트를 다루는 Claude 세션은 샌드박스 브라우저라 실제 카메라 접근이 정책상 막혀 있어 직접 테스트 불가능. 사용자가 실제 폰/노트북으로 열어봐야 함. 콘솔 에러 있으면 붙여넣어 달라고 요청하면 됨.
 - **오디오 녹음 실기기 확인**: 권한창에 마이크가 함께 뜨는지, 업로드 파일에 소리가 들어가는지.
 
