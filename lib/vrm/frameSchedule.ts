@@ -45,11 +45,19 @@ export const LOW_FPS = 18;
  */
 export function planFrame(tick: number, fps: number): FramePlan {
   if (fps > 0 && fps < LOW_FPS) {
+    // Not keeping up: hands keep every frame, the face halves, the body thins
+    // hard. ~1.75 inferences per frame.
     const phase = ((tick % 4) + 4) % 4;
-    return { hands: true, face: phase === 0, pose: phase === 2 };
+    return { hands: true, face: phase % 2 === 0, pose: phase === 1 };
   }
-  const phase = ((tick % 2) + 2) % 2;
-  return { hands: true, face: phase === 0, pose: phase === 1 };
+  // Healthy: hands AND face every frame, body every third. ~2.33 per frame.
+  //
+  // The face used to alternate with the pose, and on a real device that showed —
+  // expressions at 15Hz read as "the face isn't being tracked". Hands and face
+  // are the two the user actually watches, so the body is what gives ground: arms
+  // and torso move slowly and LERP_BODY smooths them anyway, whereas a finger or
+  // an eyebrow is gone by the next frame.
+  return { hands: true, face: true, pose: ((tick % 3) + 3) % 3 === 0 };
 }
 
 /** A landmark reading plus the timestamp it was last actually detected at. */

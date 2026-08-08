@@ -203,28 +203,35 @@ test("the thumb goes through the same solver as the other four digits", () => {
   // The thumb used to be a separate path (Kalidokit's, then a hand-written one)
   // and it was the joint the user called out as worst. It's now just another digit
   // under one formula, so the only thumb-specific behavior left is its damping.
-  const z = (rig: Record<string, Rot>, key: string) => Math.abs(rig[key].z);
+  // The thumb is driven on Y, the fingers on Z — measured, see solveFingerRig.
+  const driven = (rig: Record<string, Rot>, key: string) =>
+    Math.abs(key.includes("Thumb") ? rig[key].y : rig[key].z);
   const closed = solveFingerRig(metricHand([90, 100, 70]), "Right");
   const open = solveFingerRig(metricHand([3, 3, 3]), "Right");
 
   assert.ok(
-    z(closed, "RightThumbProximal") > 0.5,
-    `a closed thumb should bend, got ${z(closed, "RightThumbProximal").toFixed(3)}`
+    driven(closed, "RightThumbProximal") > 0.5,
+    `a closed thumb should bend, got ${driven(closed, "RightThumbProximal").toFixed(3)}`
   );
   assert.ok(
-    z(open, "RightThumbProximal") < 0.1,
-    `an open thumb should stay straight, got ${z(open, "RightThumbProximal").toFixed(3)}`
+    driven(open, "RightThumbProximal") < 0.1,
+    `an open thumb should stay straight, got ${driven(open, "RightThumbProximal").toFixed(3)}`
   );
   // Damped relative to a finger at the same real angle, which is the one thing
-  // that still sets the thumb apart.
+  // that still sets the thumb apart beyond its axis.
   assert.ok(
-    z(closed, "RightThumbIntermediate") < z(closed, "RightIndexIntermediate"),
+    driven(closed, "RightThumbIntermediate") < driven(closed, "RightIndexIntermediate"),
     "the thumb's range should stay damped below a finger's"
   );
   // Signs mirror per side, so the crossing to the avatar's other hand lines up.
+  // Note the thumb's pattern is the OPPOSITE of the fingers' — an anatomical right
+  // hand drives the avatar's LEFT thumb, which folds on +Y.
   const closedLeft = solveFingerRig(metricHand([90, 100, 70]), "Left");
-  assert.ok(closed["RightThumbProximal"].z < 0, "right thumb curls -Z");
-  assert.ok(closedLeft["LeftThumbProximal"].z > 0, "left thumb curls +Z");
+  assert.ok(closed["RightThumbProximal"].y > 0, "anatomical-right thumb drives +Y");
+  assert.ok(closedLeft["LeftThumbProximal"].y < 0, "anatomical-left thumb drives -Y");
+  // Never on Z, the axis that folded it backwards.
+  assert.equal(closed["RightThumbProximal"].z, 0);
+  assert.equal(closedLeft["LeftThumbProximal"].z, 0);
 });
 
 test("curl keeps increasing past a right angle instead of reversing", () => {

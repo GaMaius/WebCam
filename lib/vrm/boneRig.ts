@@ -355,13 +355,32 @@ export function solveFingerRig(
 
   const invert = solveSide === "Right" ? 1 : -1;
   for (const [rigSuffix, [a, b, c]] of Object.entries(FINGER_JOINT_LANDMARKS)) {
-    const damping = rigSuffix.startsWith("Thumb") ? THUMB_DAMPING : 1;
+    const isThumb = rigSuffix.startsWith("Thumb");
+    const damping = isThumb ? THUMB_DAMPING : 1;
     const segment = rigSuffix.replace(/^(Thumb|Index|Middle|Ring|Little)/, "");
     const limit = MAX_FLEXION_BY_SEGMENT[segment] ?? Math.PI;
     const flexion = Math.min(
       jointFlexion(landmarks[a], landmarks[b], landmarks[c]) * FINGER_CURL_GAIN * damping,
       limit
     );
+
+    if (isThumb) {
+      // ⚠️ THE THUMB TURNS ON A DIFFERENT AXIS FROM THE OTHER FOUR — measured, and
+      // it used to be wrong. Driving the thumb on Z like a finger moves its tip
+      // AWAY from the knuckles (scratch/probe_thumb_axis.mjs: the gap to
+      // middleProximal opens by 0.02-0.04 on either Z sign), which on a real
+      // device reads exactly as "the thumb bends backwards".
+      //
+      // A thumb doesn't fold perpendicular to the palm the way a finger does; it
+      // folds ACROSS the palm toward the little finger. On this rig that is local
+      // Y, mirrored per side: the avatar's left thumb on +Y and its right on -Y
+      // both close the gap to the knuckle by 0.028. Note the per-side pattern is
+      // the OPPOSITE of the fingers' (left -Z / right +Z), which is why one shared
+      // `invert` can't cover both.
+      out[`${solveSide}${rigSuffix}`] = { x: 0, y: flexion * invert, z: 0 };
+      continue;
+    }
+
     // boostCurl clamps to the side's valid half-range too, so a joint can never
     // come out bent the wrong way. The gain is already applied above.
     out[`${solveSide}${rigSuffix}`] = boostCurl({ x: 0, y: 0, z: -flexion * invert }, solveSide, 1);

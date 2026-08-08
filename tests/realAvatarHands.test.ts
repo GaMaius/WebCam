@@ -114,7 +114,23 @@ function fistLandmarks(): { x: number; y: number; z: number }[] {
   const wristY = 0.8;
 
   push(0.5, wristY);
-  for (let i = 1; i <= 4; i++) push(0.5 - 0.03 * i, wristY - 0.02 * i);
+  // Thumb: a chain that actually TURNS, 50 degrees per joint. The previous
+  // fixture stepped in a straight line, which makes every thumb joint angle
+  // exactly zero — so the thumb test moved nothing and passed on a rig that
+  // never folded. Generated from the angle rather than placed by eye.
+  {
+    const seg = 0.03;
+    const step = (50 * Math.PI) / 180;
+    let angle = Math.PI * 0.85;
+    let x = 0.5;
+    let y = wristY;
+    for (let i = 1; i <= 4; i++) {
+      x += Math.cos(angle) * seg;
+      y += Math.sin(angle) * seg;
+      push(x, y);
+      angle += step;
+    }
+  }
   for (const x of [0.47, 0.5, 0.53, 0.56]) {
     for (let j = 1; j <= 4; j++) push(x, wristY - 0.055 * j * 0.2);
   }
@@ -315,4 +331,36 @@ test("the avatar follows the VRM 1.0 axis convention this code assumes", async (
     left.x > right.x,
     `the character's left should sit on +X: left=${left.x.toFixed(3)} right=${right.x.toFixed(3)}`
   );
+});
+
+test("a solved fist folds the thumb IN toward the knuckles, not away", () => {
+  // The thumb was the one digit driven on the wrong axis, and no sign-only test
+  // caught it: on Z the tip still moves "toward the palm" by the palm-normal
+  // measure, it just travels away from the hand while doing so. The criterion
+  // that separates a fist from a backward bend is the gap between the thumb tip
+  // and the middle-finger knuckle — folding in shortens it, hyperextending
+  // lengthens it.
+  return (async () => {
+    for (const side of ["Left", "Right"] as const) {
+      const { vrm, scene, avatar, worldOf } = await loadAvatar();
+      const prefix = vrmSideForHand(side);
+      const gap = () =>
+        worldOf(`${prefix}ThumbDistal`).distanceTo(worldOf(`${prefix}MiddleProximal`));
+
+      const before = gap();
+      const solved = solveFingerRig(fistLandmarks(), side) as Record<string, unknown>;
+      for (let i = 0; i < 40; i++) {
+        applyHandRig(avatar, solved as never, side, prefix);
+        vrm.humanoid.update();
+        scene.updateMatrixWorld(true);
+      }
+      const after = gap();
+
+      assert.ok(
+        after < before - 0.002,
+        `${side} hand -> avatar ${prefix}: the thumb must close toward the knuckle, ` +
+          `got ${before.toFixed(4)} -> ${after.toFixed(4)} (a larger gap means it bent backwards)`
+      );
+    }
+  })();
 });

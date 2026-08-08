@@ -356,12 +356,16 @@ test("the thumb curls with the other fingers' convention, no constant offset", (
   ]);
   const restRig = solveFingerRig(straight, "Left");
   for (const [key, rot] of Object.entries(restRig)) {
+    // A straight digit stays near rest on whichever axis drives it: Z for the
+    // four fingers, Y for the thumb (measured — see solveFingerRig).
+    const driven = key.includes("Thumb") ? rot.y : rot.z;
+    const idle = key.includes("Thumb") ? rot.z : rot.y;
     assert.ok(
-      Math.abs(rot.z) < 0.2,
-      `a straight thumb must stay near rest, ${key} got z=${rot.z.toFixed(3)}`
+      Math.abs(driven) < 0.2,
+      `a straight digit must stay near rest, ${key} got ${driven.toFixed(3)}`
     );
+    assert.equal(idle, 0, `${key} should not be driven on its idle axis`);
     assert.equal(rot.x, 0, "no constant offset on x — that was the old bug");
-    assert.equal(rot.y, 0);
   }
 
   // A bent thumb: fold the tip back so each joint has a real angle.
@@ -372,20 +376,29 @@ test("the thumb curls with the other fingers' convention, no constant offset", (
     { x: 0.47, y: 0.7, z: 0 },
     { x: 0.5, y: 0.71, z: 0 },
   ]);
-  const thumbZ = (rig: Record<string, { z: number }>, side: "Left" | "Right") =>
-    ["Proximal", "Intermediate", "Distal"].map((j) => rig[`${side}Thumb${j}`].z);
+  // The thumb turns on Y, NOT the fingers' Z, and its per-side pattern is the
+  // opposite of theirs. Both facts are measured (scratch/probe_thumb_axis.mjs):
+  // on Z the thumb tip moves AWAY from the knuckles, which is what "the thumb
+  // bends backwards" looked like on a real device.
+  const thumbAxis = (rig: Record<string, { y: number; z: number }>, side: "Left" | "Right") =>
+    ["Proximal", "Intermediate", "Distal"].map((j) => rig[`${side}Thumb${j}`]);
 
-  // Same per-side signs as the four fingers, so the mirror crossing lines up.
-  const leftBent = thumbZ(solveFingerRig(bent, "Left"), "Left");
-  const rightBent = thumbZ(solveFingerRig(bent, "Right"), "Right");
+  const leftBent = thumbAxis(solveFingerRig(bent, "Left"), "Left");
+  const rightBent = thumbAxis(solveFingerRig(bent, "Right"), "Right");
+  // solveSide Left drives the avatar's RIGHT thumb, which folds on -Y.
   assert.ok(
-    leftBent.some((z) => z > 0.1),
-    `left thumb should bend +Z, got ${JSON.stringify(leftBent)}`
+    leftBent.some((r) => r.y < -0.1),
+    `anatomical-left thumb should drive -Y, got ${JSON.stringify(leftBent.map((r) => r.y))}`
   );
+  // solveSide Right drives the avatar's LEFT thumb, which folds on +Y.
   assert.ok(
-    rightBent.some((z) => z < -0.1),
-    `right thumb should bend -Z, got ${JSON.stringify(rightBent)}`
+    rightBent.some((r) => r.y > 0.1),
+    `anatomical-right thumb should drive +Y, got ${JSON.stringify(rightBent.map((r) => r.y))}`
   );
+  // And nothing on Z, the axis that bent it backwards.
+  for (const r of [...leftBent, ...rightBent]) {
+    assert.equal(r.z, 0, "the thumb must not be driven on Z");
+  }
 });
 
 test("blendshapes drive blink per eye with a dead zone", () => {

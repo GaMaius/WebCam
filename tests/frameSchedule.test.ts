@@ -20,23 +20,27 @@ test("hands run on every frame, at any frame rate", () => {
   }
 });
 
-test("face and pose alternate, never sharing a frame", () => {
-  // Two inferences per frame is the budget; hands hold one slot permanently, so
-  // face and pose must not both claim the other.
-  for (let tick = 0; tick < 12; tick++) {
-    const plan = planFrame(tick, 30);
-    assert.ok(!(plan.face && plan.pose), `face and pose collided at tick ${tick}`);
-  }
-  // Each still gets half the frames.
+test("the face also runs every frame; the body is what gives ground", () => {
+  // Expressions at half rate read on a real device as the face not being tracked
+  // at all, so face joined hands at full rate and the body took the cut. Don't
+  // put the face back on a shared slot with the pose.
   const ticks = [...Array(12).keys()];
-  assert.equal(ticks.filter((t) => planFrame(t, 30).face).length, 6);
-  assert.equal(ticks.filter((t) => planFrame(t, 30).pose).length, 6);
+  assert.equal(ticks.filter((t) => planFrame(t, 30).face).length, 12, "face every frame");
+  assert.equal(ticks.filter((t) => planFrame(t, 30).pose).length, 4, "body every third");
+  // Still well under three full inferences a frame, which is what made everything
+  // worse the first time round.
+  const perFrame =
+    ticks.reduce((sum, t) => {
+      const p = planFrame(t, 30);
+      return sum + Number(p.hands) + Number(p.face) + Number(p.pose);
+    }, 0) / ticks.length;
+  assert.ok(perFrame < 2.5, `budget should stay under 2.5, got ${perFrame.toFixed(2)}`);
 });
 
 test("a starving frame rate thins the slow stages, not the hands", () => {
   const ticks = [...Array(12).keys()];
   const starved = ticks.map((t) => planFrame(t, LOW_FPS - 1));
-  assert.equal(starved.filter((p) => p.face).length, 3);
+  assert.equal(starved.filter((p) => p.face).length, 6, "face halves rather than stopping");
   assert.equal(starved.filter((p) => p.pose).length, 3);
   assert.equal(starved.filter((p) => p.hands).length, 12);
   // Fewer inferences per frame than the healthy plan — that's the whole point.
