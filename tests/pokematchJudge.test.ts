@@ -11,81 +11,62 @@ import {
 // The judge is an LLM, so its output is untrusted input. Everything the prompt
 // asks for is re-checked here; these tests pin that, not the model's manners.
 
-const allowed = new Set(["pikachu", "gengar", "lucario", "gardevoir", "eevee"]);
+// Candidates are addressed by 1-based number in the order given to
+// buildUserPrompt — normalizePicks must resolve against that same array.
+const candidates = sanitizeCandidates(
+  ["pikachu", "gengar", "lucario", "gardevoir", "eevee"].map((slug) => ({ slug, curated: true }))
+);
 
-test("picks outside the shortlist are dropped — they have no image or pokedex entry", () => {
+test("numbers resolve to the candidate at that position", () => {
+  const picks = normalizePicks({ picks: [{ n: 3, reason: "a" }, { n: 1, reason: "b" }] }, candidates);
+  assert.deepEqual(picks.map((p) => p.slug), ["lucario", "pikachu"]);
+  assert.equal(picks[0].reason, "a");
+});
+
+test("out-of-range numbers are dropped — an invented id can't resolve to anything", () => {
   const picks = normalizePicks(
-    {
-      picks: [
-        { slug: "pikachu", percent: 92, reason: "a" },
-        { slug: "missingno", percent: 88, reason: "hallucinated" },
-        { slug: "gengar", percent: 85, reason: "b" },
-      ],
-    },
-    allowed
+    { picks: [{ n: 2 }, { n: 999 }, { n: 0 }, { n: -1 }, { n: 5 }] },
+    candidates
   );
-  assert.deepEqual(
-    picks.map((p) => p.slug),
-    ["pikachu", "gengar"]
-  );
+  assert.deepEqual(picks.map((p) => p.slug), ["gengar", "eevee"]);
 });
 
 test("duplicate picks collapse", () => {
-  const picks = normalizePicks(
-    { picks: [{ slug: "eevee", percent: 90 }, { slug: "EEVEE", percent: 80 }] },
-    allowed
-  );
+  const picks = normalizePicks({ picks: [{ n: 5 }, { n: 5 }, { slug: "EEVEE" }] }, candidates);
   assert.equal(picks.length, 1);
 });
 
-test("percentages are forced strictly descending even if the model ignores that", () => {
+test("a legacy slug object still works, and an unknown slug still doesn't", () => {
   const picks = normalizePicks(
-    {
-      picks: [
-        { slug: "pikachu", percent: 80 },
-        { slug: "gengar", percent: 95 }, // higher than the winner
-        { slug: "lucario", percent: 95 }, // tied
-      ],
-    },
-    allowed
+    { picks: [{ slug: "lucario", reason: "x" }, { slug: "missingno" }] },
+    candidates
   );
-  assert.deepEqual(picks.map((p) => p.percent), [80, 77, 74]);
-  for (let i = 1; i < picks.length; i++) {
-    assert.ok(picks[i].percent < picks[i - 1].percent);
-  }
+  assert.deepEqual(picks.map((p) => p.slug), ["lucario"]);
 });
 
-test("percent is clamped and non-numeric values don't produce NaN", () => {
-  const picks = normalizePicks(
-    { picks: [{ slug: "pikachu", percent: 1000 }, { slug: "gengar", percent: "삼십" }] },
-    allowed
-  );
-  assert.equal(picks[0].percent, 99);
-  assert.ok(Number.isInteger(picks[1].percent));
+test("a bare array of numbers is accepted too", () => {
+  const picks = normalizePicks([4, 2], candidates);
+  assert.deepEqual(picks.map((p) => p.slug), ["gardevoir", "gengar"]);
 });
 
 test("no more than the requested number of picks come back", () => {
-  const picks = normalizePicks(
-    { picks: [...allowed].concat([...allowed]).map((slug, i) => ({ slug, percent: 95 - i })) },
-    allowed
-  );
+  const picks = normalizePicks([1, 2, 3, 4, 5, 1, 2, 3], candidates);
   assert.ok(picks.length <= PICK_COUNT);
 });
 
+test("the model is not asked for a percent, and never supplies one", () => {
+  const picks = normalizePicks({ picks: [{ n: 1, percent: 93 }] }, candidates);
+  assert.ok(!("percent" in picks[0]), "percent must be computed from z, not taken from the model");
+});
+
 test("JSON survives code fences, reasoning tags and surrounding prose", () => {
-  const wrapped = '<think>고민 중</think>\n결과입니다:\n```json\n{"picks":[{"slug":"pikachu","percent":91}]}\n```\n끝!';
-  const parsed = extractJson(wrapped);
-  assert.deepEqual(normalizePicks(parsed, allowed).map((p) => p.slug), ["pikachu"]);
+  const wrapped = '<think>고민 중</think>\n결과입니다:\n```json\n{"picks":[{"n":1,"reason":"ㅇㅇ"}]}\n```\n끝!';
+  assert.deepEqual(normalizePicks(extractJson(wrapped), candidates).map((p) => p.slug), ["pikachu"]);
 });
 
 test("unparseable output yields no picks rather than a broken result", () => {
   assert.equal(extractJson("모델이 그냥 말로 대답했습니다"), null);
-  assert.deepEqual(normalizePicks(null, allowed), []);
-});
-
-test("a bare array of picks is accepted too", () => {
-  const picks = normalizePicks([{ slug: "lucario", percent: 88, reason: "x" }], allowed);
-  assert.equal(picks[0].slug, "lucario");
+  assert.deepEqual(normalizePicks(null, candidates), []);
 });
 
 test("candidate sanitizing rejects unsafe slugs and caps the list", () => {
@@ -103,15 +84,33 @@ test("candidate sanitizing rejects unsafe slugs and caps the list", () => {
   assert.equal(clean[1].z, 1.23);
 });
 
-test("the prompt lists every candidate slug the model is allowed to pick", () => {
+test("the prompt numbers candidates and contains no English identifiers", () => {
   const clean = sanitizeCandidates([
-    { slug: "pikachu", nameKo: "피카츄", nameEn: "Pikachu", types: ["전기"], shape: "quadruped", z: 2.1 },
-    { slug: "gengar", nameKo: "팬텀", types: ["고스트", "독"], z: 1.8 },
+    { slug: "pikachu", nameKo: "피카츄", nameEn: "Pikachu", look: "동그란 얼굴", curated: true, z: 2.1 },
+    { slug: "gengar", nameKo: "팬텀", nameEn: "Gengar", look: "장난기 어린 미소", curated: true, z: 1.8 },
   ]);
   const prompt = buildUserPrompt("얼굴형: 계란형", clean);
-  assert.ok(prompt.includes("slug=pikachu"));
-  assert.ok(prompt.includes("slug=gengar"));
+
+  assert.ok(prompt.includes("1. 피카츄"));
+  assert.ok(prompt.includes("2. 팬텀"));
   assert.ok(prompt.includes("얼굴형: 계란형"));
+  // English costs tokens and buys nothing — `look` is what the judge matches on.
+  assert.ok(!/[A-Za-z]{3,}/.test(prompt), `English leaked into the prompt: ${prompt}`);
+});
+
+test("numbering is global, so splitting into sections doesn't shift it", () => {
+  const clean = sanitizeCandidates([
+    { slug: "pikachu", nameKo: "피카츄", look: "동그란 얼굴", curated: true },
+    { slug: "bulbasaur", nameKo: "이상해씨", shape: "quadruped", curated: false },
+    { slug: "gengar", nameKo: "팬텀", look: "장난기 어린 미소", curated: true },
+  ]);
+  const prompt = buildUserPrompt("얼굴형: 계란형", clean);
+  // The wildcard is printed last but keeps its array position (2).
+  assert.ok(prompt.includes("2. 이상해씨"), prompt);
+  assert.ok(prompt.includes("3. 팬텀"), prompt);
+  assert.ok(prompt.indexOf("3. 팬텀") < prompt.indexOf("2. 이상해씨"), "sections out of order");
+  // And that number still resolves to the wildcard, not to the 2nd curated entry.
+  assert.equal(normalizePicks([2], clean)[0].slug, "bulbasaur");
 });
 
 test("an over-long description is truncated before it reaches the prompt", () => {

@@ -77,9 +77,9 @@ test("the prompt separates the curated pool from wildcards and labels the prefer
   assert.ok(prompt.includes("최대 1마리"));
 
   // The look text has to reach the model — it's the only appearance info it gets.
-  assert.ok(prompt.includes("생김새=") && prompt.includes("볼이 도톰"));
+  assert.ok(prompt.includes("볼이 도톰"), prompt);
   // Wildcards have no look text, so they keep the coarse type/shape hints.
-  assert.ok(prompt.slice(wildAt).includes("형태=quadruped"));
+  assert.ok(prompt.slice(wildAt).includes("quadruped"));
   // A wildcard must not be silently promoted into the curated section.
-  assert.ok(!prompt.slice(curatedAt, wildAt).includes("bulbasaur"));
+  assert.ok(!prompt.slice(curatedAt, wildAt).includes("이상해씨"));
 });

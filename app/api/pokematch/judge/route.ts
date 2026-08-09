@@ -139,7 +139,9 @@ export async function POST(request: Request) {
     choices?: { message?: { content?: string } }[];
   } | null;
   const content = payload?.choices?.[0]?.message?.content ?? "";
-  const picks = normalizePicks(extractJson(content), new Set(candidates.map((c) => c.slug)));
+  // Picks come back as numbers into `candidates`, so the same array that built
+  // the prompt has to resolve them — order matters, don't sort in between.
+  const picks = normalizePicks(extractJson(content), candidates);
 
   if (picks.length === 0) {
     console.error("pokematch judge: unusable model output:", content.slice(0, 500));

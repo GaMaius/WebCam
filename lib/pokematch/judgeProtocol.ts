@@ -25,7 +25,6 @@ export interface CandidateInput {
 
 export interface Pick {
   slug: string;
-  percent: number;
   reason: string;
 }
 
@@ -70,48 +69,55 @@ export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 �
 - [그 외 후보] 이미지 유사도만 높게 나온 종입니다. 추천 목록에 정말 맞는 게 없을 때만, 그리고 명백히 더 닮았을 때만 쓰세요. 최대 1마리까지만 허용합니다.
 
 판정 규칙:
-1. 반드시 주어진 후보 목록 안에서만 고르세요. 목록에 없는 slug는 절대 만들어내지 마세요.
-2. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요.
+1. 후보는 **번호**로 지목하세요. 목록에 있는 번호만 쓰고, 없는 번호는 절대 쓰지 마세요.
+2. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요. 첫 번째가 가장 닮은 것입니다.
 3. 판단의 중심은 **얼굴 수치 설명 ↔ 후보의 생김새 설명**의 일치입니다. 얼굴형·눈매·눈 크기·턱선·인상을 맞춰보세요. 후보에 붙은 유사도(z) 점수는 "이미지가 비슷해 보인다"는 약한 참고값일 뿐이니, z가 높아도 생김새가 어긋나면 과감히 버리세요.
 4. 5마리가 서로 거의 똑같은 인상이면 안 됩니다. 날카로운/우아한/귀여운/듬직한/개성 있는 인상이 섞이도록 고르되, 1위는 가장 잘 맞는 하나여야 합니다.
-5. percent는 55~97 사이 정수이며, 1위부터 5위까지 반드시 내림차순이고 서로 다른 값이어야 합니다.
-6. reason은 한국어 한 문장(공백 포함 60자 이내)이고, 반드시 주어진 얼굴 수치 중 구체적인 근거 하나 이상을 언급해야 합니다. (예: "턱각이 크고 눈매가 올라가 있어 ~와 겹칩니다")
-7. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 절대 쓰지 마세요. 읽는 사람이 기분 좋을 문장으로 쓰세요.
+5. reason은 한국어 한 문장(공백 포함 45자 이내)이고, 반드시 주어진 얼굴 수치 중 구체적인 근거 하나 이상을 언급해야 합니다. (예: "턱각이 크고 눈매가 올라가 있어 잘 맞습니다")
+6. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 절대 쓰지 마세요. 읽는 사람이 기분 좋을 문장으로 쓰세요.
 
-출력은 오직 아래 형태의 JSON 하나입니다. 다른 텍스트를 덧붙이지 마세요.
-{"picks":[{"slug":"pikachu","percent":93,"reason":"..."}]}`;
+출력은 오직 아래 형태의 JSON 하나입니다. 이름·영문·점수는 쓰지 마세요.
+{"picks":[{"n":7,"reason":"..."},{"n":21,"reason":"..."}]}`;
 
-function candidateLine(c: CandidateInput): string {
+/**
+ * One candidate, addressed by NUMBER rather than by slug.
+ *
+ * The number is the cheapest possible identifier (1-2 tokens against ~6 for an
+ * English slug, over ~46 candidates) and it also removes a whole failure mode:
+ * the model can't misspell or invent a number that isn't on the list. English
+ * text is kept out entirely — the judge never needs the English name, because
+ * `look` (not the model's memory of the species) is what it matches against.
+ */
+function candidateLine(c: CandidateInput, number: number): string {
   const name = c.nameKo ?? c.nameEn ?? c.slug;
-  // The curated entries lead with their look description because that's what
-  // the judge actually matches against; type/color/shape are secondary hints
-  // and only carry weight for wildcards, which have no look text at all.
-  const bits = [
-    `slug=${c.slug}`,
-    `이름=${name}`,
-    c.look ? `생김새=${c.look}` : null,
-    c.look ? null : c.types?.length ? `타입=${c.types.join("/")}` : null,
-    c.look ? null : c.color ? `대표색=${c.color}` : null,
-    c.look ? null : c.shape ? `형태=${c.shape}` : null,
-    c.z !== undefined ? `z=${c.z}` : null,
-  ].filter(Boolean);
-  return `- ${bits.join(", ")}`;
+  // Curated entries carry a look description, which is the thing worth reading.
+  // Wildcards have none, so they fall back to the coarse type/shape hints.
+  const detail = c.look
+    ? c.look
+    : [c.types?.length ? c.types.join("/") : null, c.shape].filter(Boolean).join(" ");
+  return `${number}. ${name}${detail ? ` · ${detail}` : ""}${c.z !== undefined ? ` · z=${c.z}` : ""}`;
 }
 
 export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  const curated = candidates.filter((c) => c.curated);
-  const wildcards = candidates.filter((c) => !c.curated);
+  // Numbering is global and follows the array order, so the sections below can
+  // split the list without the numbers shifting — normalizePicks maps a
+  // returned number straight back through this same array.
+  const numbered = candidates.map((c, i) => ({ c, n: i + 1 }));
+  const curated = numbered.filter(({ c }) => c.curated);
+  const wildcards = numbered.filter(({ c }) => !c.curated);
 
   const sections = [`[사용자 얼굴 측정값]\n${description.slice(0, MAX_DESCRIPTION_CHARS)}`];
   if (curated.length) {
     sections.push(
-      `[추천 목록 ${curated.length}종 — 되도록 여기서 고르세요]\n${curated.map(candidateLine).join("\n")}`
+      `[추천 목록 ${curated.length}종 — 되도록 여기서 고르세요]\n${curated
+        .map(({ c, n }) => candidateLine(c, n))
+        .join("\n")}`
     );
   }
   if (wildcards.length) {
     sections.push(
       `[그 외 후보 ${wildcards.length}종 — 정말 더 닮았을 때만, 최대 1마리]\n${wildcards
-        .map(candidateLine)
+        .map(({ c, n }) => candidateLine(c, n))
         .join("\n")}`
     );
   }
@@ -140,40 +146,55 @@ export function extractJson(content: string): unknown {
 }
 
 /**
- * Turns the model's output into picks we can actually render. Every rule the
- * prompt states is re-enforced here — a slug outside the shortlist has no
- * image or pokedex entry, and a non-descending percent list reads as a bug to
- * the user, so neither is left to the model's compliance.
+ * Turns the model's output into picks we can actually render.
+ *
+ * Picks arrive as 1-based numbers into `candidates` (the same array
+ * buildUserPrompt numbered), which is why an out-of-range or invented
+ * identifier simply can't survive: it doesn't resolve to a candidate. A bare
+ * number, or a legacy `{slug}` object, is accepted too — cheap tolerance for
+ * a model that ignores the requested shape.
+ *
+ * Note there is no `percent` here. Ranking is the only thing the model is
+ * asked for; the displayed similarity is computed from the embedding z-scores
+ * client-side, where it's derived from real numbers instead of invented ones.
  */
-export function normalizePicks(raw: unknown, allowed: Set<string>): Pick[] {
+export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick[] {
   const list = Array.isArray(raw)
     ? raw
     : Array.isArray((raw as { picks?: unknown })?.picks)
     ? (raw as { picks: unknown[] }).picks
     : [];
 
+  const bySlug = new Map(candidates.map((c) => [c.slug, c]));
   const picks: Pick[] = [];
   const used = new Set<string>();
+
   for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-    const p = item as Record<string, unknown>;
-    const slug = typeof p.slug === "string" ? p.slug.trim().toLowerCase() : "";
-    if (!allowed.has(slug) || used.has(slug)) continue;
+    let slug = "";
+    let reason = "";
+
+    if (typeof item === "number" || typeof item === "string") {
+      const n = Number(item);
+      if (Number.isInteger(n)) slug = candidates[n - 1]?.slug ?? "";
+      else if (typeof item === "string" && bySlug.has(item.trim().toLowerCase())) {
+        slug = item.trim().toLowerCase();
+      }
+    } else if (item && typeof item === "object") {
+      const p = item as Record<string, unknown>;
+      const n = Number(p.n ?? p.number ?? p.index);
+      if (Number.isInteger(n) && n >= 1 && n <= candidates.length) {
+        slug = candidates[n - 1].slug;
+      } else if (typeof p.slug === "string" && bySlug.has(p.slug.trim().toLowerCase())) {
+        slug = p.slug.trim().toLowerCase();
+      }
+      if (typeof p.reason === "string") reason = p.reason.trim().slice(0, 120);
+    }
+
+    if (!slug || used.has(slug)) continue;
     used.add(slug);
-    const percentRaw = typeof p.percent === "number" ? p.percent : Number(p.percent);
-    const percent = Number.isFinite(percentRaw) ? Math.round(percentRaw) : 80;
-    picks.push({
-      slug,
-      percent: Math.max(50, Math.min(99, percent)),
-      reason: typeof p.reason === "string" ? p.reason.trim().slice(0, 120) : "",
-    });
+    picks.push({ slug, reason });
     if (picks.length >= PICK_COUNT) break;
   }
 
-  for (let i = 1; i < picks.length; i++) {
-    if (picks[i].percent >= picks[i - 1].percent) {
-      picks[i].percent = Math.max(50, picks[i - 1].percent - 3);
-    }
-  }
   return picks;
 }

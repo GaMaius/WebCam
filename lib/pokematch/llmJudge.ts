@@ -3,12 +3,11 @@
 // any failure returns null so the caller can fall back to the local z-score
 // ranking rather than showing the user an error for a fun feature.
 
-import type { PokematchCandidate, PokematchMatch, PokedexEntry } from "./matcher";
+import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
 import { isCurated, lookFor } from "./curatedPool";
 
 export interface JudgePick {
   slug: string;
-  percent: number;
   reason: string;
 }
 
@@ -56,19 +55,45 @@ export async function judgeCandidates(
   }
 }
 
-/** Maps the judge's picks back onto the pokedex so the UI and result card
- * render them exactly like locally-ranked matches. */
+/**
+ * Maps the judge's picks back onto the pokedex so the UI and result card
+ * render them exactly like locally-ranked matches.
+ *
+ * The displayed "닮은 정도 %" is computed HERE, not asked of the model: it
+ * comes from each pick's embedding z standardized across the candidate set,
+ * the same mapping the local ranker uses. That keeps the number tied to a real
+ * measurement, costs no tokens, and removes a rule the model used to break
+ * (it regularly returned ties or an ascending list). Rank order still comes
+ * from the model, so the sequence is enforced as strictly descending.
+ */
 export function picksToMatches(
   picks: JudgePick[],
   pokedex: Record<string, PokedexEntry>,
   candidates: PokematchCandidate[]
 ): PokematchMatch[] {
   const zBySlug = new Map(candidates.map((c) => [c.slug, c.z]));
-  return picks.map((p) => ({
+
+  const zs = candidates.map((c) => c.z);
+  const mean = zs.reduce((a, b) => a + b, 0) / (zs.length || 1);
+  const std =
+    Math.sqrt(zs.reduce((a, b) => a + (b - mean) ** 2, 0) / (zs.length || 1)) || 1;
+  const standardized = (slug: string) => ((zBySlug.get(slug) ?? mean) - mean) / std;
+
+  const topSz = picks.length ? standardized(picks[0].slug) : 0;
+  const matches = picks.map((p) => ({
     slug: p.slug,
     entry: pokedex[p.slug] ?? null,
     z: zBySlug.get(p.slug) ?? 0,
-    percent: p.percent,
+    percent: zToPercent(standardized(p.slug), topSz),
     reason: p.reason || undefined,
   }));
+
+  // The judge's ORDER is the ranking; z only sets the magnitude. A later pick
+  // showing a higher percent than an earlier one would read as a bug.
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i].percent >= matches[i - 1].percent) {
+      matches[i].percent = Math.max(50, matches[i - 1].percent - 2);
+    }
+  }
+  return matches;
 }
