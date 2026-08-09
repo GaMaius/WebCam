@@ -44,7 +44,7 @@ export const APPS: AppMeta[] = [
     slug: "pokematch",
     title: "PokéMatch",
     subtitle: "AI · 닮은꼴",
-    desc: "얼굴을 스캔해 시각적 특징이 가장 닮은 포켓몬 5마리를 찾아주는 재미용 앱입니다.",
+    desc: "얼굴을 스캔해 측정한 특징을 GPT-OSS 120B가 읽고, 가장 닮은 포켓몬 5마리를 이유와 함께 골라줍니다.",
     accent: "#d64541",
     icon: "pokeball",
   },

@@ -530,6 +530,8 @@ export function drawPersonalFrameCard(
 interface PokematchCardMatch {
   slug: string;
   percent: number;
+  /** The judge's one-line rationale, when the LLM ranked this result. */
+  reason?: string;
   entry: {
     nameKo: string | null;
     nameEn: string;
@@ -595,30 +597,39 @@ export async function drawPokematchCard(
     }
 
     const tx = cardX + pad + thumb + 30;
+    const textW = cardX + cardW - pad - tx;
     const nameKo = e?.nameKo ?? e?.nameEn ?? m.slug;
     const dex = e?.dex ? `#${e.dex} ` : "";
     ctx.fillStyle = COL.text;
-    ctx.font = `800 38px ${SANS}`;
-    ctx.fillText(`${dex}${nameKo}`, tx, rowY + 60);
+    ctx.font = `800 36px ${SANS}`;
+    ctx.fillText(`${dex}${nameKo}`, tx, rowY + 52);
 
     ctx.fillStyle = COL.textDim;
-    ctx.font = `600 25px ${SANS}`;
-    ctx.fillText(`닮은 정도 ${m.percent}%`, tx, rowY + 98);
+    ctx.font = `600 24px ${SANS}`;
+    ctx.fillText(`닮은 정도 ${m.percent}%`, tx, rowY + 88);
 
-    // Type badges — kept well inside the box (bottom ≈ rowY+150 vs box ${boxH}).
-    const badgeTop = rowY + 116;
-    const badgeH = 34;
+    // Type badges — kept well inside the box (bottom ≈ rowY+138 vs box ${boxH}).
+    const badgeTop = rowY + 106;
+    const badgeH = 32;
     let bx = tx;
     for (const t of e?.typesKo ?? []) {
-      ctx.font = `700 21px ${SANS}`;
-      const w = ctx.measureText(t).width + 26;
-      roundRect(ctx, bx, badgeTop, w, badgeH, 17);
+      ctx.font = `700 20px ${SANS}`;
+      const w = ctx.measureText(t).width + 24;
+      roundRect(ctx, bx, badgeTop, w, badgeH, 16);
       const c = typeColor(t);
       ctx.fillStyle = c.bg;
       ctx.fill();
       ctx.fillStyle = c.fg;
-      ctx.fillText(t, bx + 13, badgeTop + 23);
+      ctx.fillText(t, bx + 12, badgeTop + 22);
       bx += w + 10;
+    }
+
+    // The judge's rationale is the part people actually screenshot — one line,
+    // ellipsized, in the gap left below the badges.
+    if (m.reason) {
+      ctx.fillStyle = COL.textDim;
+      ctx.font = `400 21px ${SANS}`;
+      wrapTextKo(ctx, m.reason, tx, rowY + 166, textW, 24, 1);
     }
 
     y += rowH;

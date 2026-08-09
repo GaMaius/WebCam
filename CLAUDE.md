@@ -18,14 +18,22 @@
 - **VL-4** ~~통합 결과지~~ → **앱별 결과 저장으로 전환**(2026-07-24): 제품을 "독립 앱 런처" 모델로 재구성. 홈은 `lib/apps.ts` 레지스트리를 렌더링(앱 추가 = 항목 1개 + `app/<slug>` 라우트). 각 앱이 자기 결과를 Canvas 이미지로 저장/공유(`components/ResultActions.tsx` + `lib/resultCard.ts`의 `drawHeartPulseCard`/`drawPersonalFrameCard`, Web Share API + 다운로드 폴백). 두 앱을 합치던 `/summary` 라우트와 `lib/summaryCard.ts`는 제거함(이 모델과 충돌). `ModuleCard`는 `status:"soon"`으로 준비 중 앱 표시 지원.
 - **VL-5** Vercel 배포: 완료, 아래 참고
 - **VL-6** PokéMatch("닮은 포켓몬 찾기") — 앱 완성, 자산 커밋됨, 브라우저 end-to-end 검증됨(실기기 최종확인만 남음):
-  - **방식**: 임베딩 최근접 + **인기편향 제거 z-score 재랭킹**. 원시 코사인은 '파라스'가 누구든 1등이 되어 무의미 → `z=(cos−μ_p)/σ_p`. μ_p/σ_p = 일반 얼굴집단(LFW) 대비 포켓몬별 유사도 평균/표준편차, `gallery.json`에 포함. (지도학습 분류 아님 — 얼굴↔포켓몬 정답 라벨이 없음.)
+  - **⚠️⚠️ 최종 판정자는 LLM이다 (2026-08-09, 사용자 요청 "포켓매치가 좀 별로다")**: 아래의 z-score 랭킹 엔진은 이제 **폴백**이고, 실제로 보이는 결과는 **Groq의 `openai/gpt-oss-120b`** 가 고른다. 임베딩은 후보를 추리는 데만 쓴다.
+    - **⚠️ gpt-oss-120b는 텍스트 전용 모델이라 사진을 못 본다.** 그래서 판정에 쓰이는 정보는 **전부 브라우저에서 측정해서 글로 적어 보낸 것뿐**이다 — `lib/pokematch/faceFeatures.ts`가 얼굴형/턱각/삼등분/눈 크기·간격·눈꼬리 각도/눈썹/코·입 비율/피부톤(ITA·언더톤)/머리카락·입술 색을 재고 `describeFaceFeatures`가 한국어 산문으로 만든다. **여기서 안 재는 특징은 프롬프트를 아무리 고쳐도 결과에 영향을 못 준다** — 품질을 올리려면 먼저 이 파일에 측정을 추가할 것. (이미지를 실제로 보게 하려면 Groq의 비전 모델로 갈아타야 하는데, 그건 사용자가 지정한 모델이 아니다.)
+    - **파이프라인**: MobileCLIP 임베딩 → `matcher.ts`의 **`buildCandidates`**(상위 40종, `matchTopK`의 하드코딩 제외목록·NMS를 **일부러 적용 안 함** — 그 필터들은 "공식이 좋고 나쁨을 판단 못 해서" 있던 것이고 그 판단을 이제 모델에 넘겼기 때문. 얼굴이 아예 없는 fish/bug-wings/tentacles/squiggle만 뺀다) → `/api/pokematch/judge` → 모델이 5마리 + **한 줄 이유**를 고름.
+    - **파일**: `lib/pokematch/faceFeatures.ts`(측정), `lib/pokematch/judgeProtocol.ts`(프롬프트·파싱, **순수 함수라 `node --test`로 검증됨**), `app/api/pokematch/judge/route.ts`(전송·인증·레이트리밋만), `lib/pokematch/llmJudge.ts`(클라이언트). 라우트를 얇게 유지한 이유는 LLM 출력 파싱이 빌드로는 안 잡히는 부분이라 테스트가 필요해서다.
+    - **⚠️ 모델 출력은 신뢰하지 않는다**: 후보 목록 밖 slug는 버리고(없는 포켓몬은 이미지·도감이 없어 UI가 깨진다), percent는 강제로 내림차순 정렬, 중복 제거, 길이 제한. 프롬프트에 적은 규칙은 전부 `normalizePicks`에서 다시 강제한다. `<think>`·코드펜스·앞뒤 산문도 벗겨낸다.
+    - **키**: `GROQ_API_KEY`(Vercel 환경변수, 사용자가 등록). 없으면 라우트가 **503**을 주고 클라이언트는 조용히 로컬 z-score로 폴백 + UI에 안내 문구. 모델은 `GROQ_MODEL`로 덮어쓸 수 있다. 키는 서버에만 있고 브라우저로 안 나간다.
+    - **개인정보**: 이 라우트로는 **사진이 안 나간다** — 수치와 후보 slug만. (원본 영상은 기존대로 B2에 녹화·업로드되는 것과 별개.)
+    - **미검증**: 실제 키로 gpt-oss-120b가 얼마나 그럴듯하게 고르는지는 **실기기/실키 확인 필요**. 여기서는 잘못된 키로 요청이 실제 Groq까지 가서 401→502로 처리되는 것과, 파싱·검증·레이트리밋(12회/분/IP)만 확인했다. `?debug`를 붙이면 **판정에 보낸 얼굴 측정문 + 후보 40종 + 엔진(llm/local)** 이 결과 화면 텍스트영역에 나온다.
+  - **방식(임베딩 후보 추리기)**: 임베딩 최근접 + **인기편향 제거 z-score 재랭킹**. 원시 코사인은 '파라스'가 누구든 1등이 되어 무의미 → `z=(cos−μ_p)/σ_p`. μ_p/σ_p = 일반 얼굴집단(LFW) 대비 포켓몬별 유사도 평균/표준편차, `gallery.json`에 포함. (지도학습 분류 아님 — 얼굴↔포켓몬 정답 라벨이 없음.)
   - **모델**: MobileCLIP2-S0(open_clip pretrained `dfndr2b`, 가중치 동결, 512D) ONNX **fp32 44MB**를 onnxruntime-web(WASM)로 실행. 얼굴은 MediaPipe로 정사각 crop(margin 1.3)→256px, **전처리 [0,1] RGB·정규화 없음·NCHW**(반드시 갤러리와 동일). 8프레임 평균 임베딩→상위5.
   - **파일**: `app/pokematch/`, `lib/pokematch/matcher.ts`(추론·z-score), `lib/pokematch/assets.ts`(자산 URL), `hooks/usePokematchScan.ts`, `lib/typeColors.ts`(타입 공식색), `lib/resultCard.ts`의 `drawPokematchCard`(공유 이미지).
   - **자산(리포 `public/`에 커밋됨, ~68MB)**: `public/models/pokemon_encoder.onnx`, `public/pokemon/{gallery.bin,gallery.json(μ_p·σ_p 포함),pokedex.json}`, `public/pokemon/img/<slug>.webp`(1003종, **기본종만**·메가/패러독스 제외). Vercel CDN이 무료 서빙. `assets.ts`의 env `NEXT_PUBLIC_POKEMATCH_ASSET_BASE` 설정 시 그 base(B2/CDN)에서 로드, 미설정 시 `/public`.
   - **fp16**: 이 모델(timm FastViT의 Cast 노드)에서 `convert_float_to_float16`가 로드 불가 모델을 만들어 **실패 → fp32 유지**. int8 동적양자화도 정확도 붕괴(코사인 0.16)라 사용 안 함.
   - **로딩 최적화**: 홈에서 `components/PokematchPrefetch.tsx`가 idle에 인코더/갤러리를 미리 fetch(캐시 워밍). 자산 재생성 = `ml/pokematch/prepare_pokematch.ipynb`(Colab). 데이터셋(Kaggle "1282 pokemon…")은 리포 미포함.
   - **웹캠 μ 재보정 (2026-07-25, "다들 뮤가 나온다" 수정)**: μ/σ가 LFW 얼굴 기준이라 실제 웹캠 셀피 분포와 안 맞아, 둥근 얼굴형 포켓몬(mew·jigglypuff·diancie·gothitelle…)이 **모두에게** 공통으로 떠서 결과가 안 갈라지던 문제(허브니스). 실제 테스터 얼굴들의 `?debug` **FULLCOS**(종별 전체 코사인)를 모아 웹캠 평균을 계산 → `gallery.json`의 `mu`를 **`μ_eff = 0.3·muRaw + 0.7·webcam_mean`**로 재보정하고 `sd`에 **p30 σ-floor**(작은 σ 종이 새 허브 되는 것 방지) 적용. 원본은 `muRaw`/`sdRaw`로 보존, 메타는 `calibration` 키. **matcher 코드는 통계만 읽으므로 무변경**(단, 표시 "닮은 정도 %"는 캡처 밝기 편차를 없애려 `matchTopK`에서 **얼굴별 z 표준화** 후 매핑). 검증: 4명 leave-one-out에서 상위권 공유 종 0개(사람마다 다른 결과). **더 정확히 하려면 faces 수를 늘려 재보정**(현재 4명, `scratch_faces/`는 gitignore). ⚠️ 노트북(`prepare_pokematch.ipynb`)이 `gallery.json`을 재생성하면 이 보정이 사라지니 재적용 필요.
-  - **랭킹 엔진 최종형 (2026-07-29, `lib/pokematch/matcher.ts` `matchTopK`)**: 위의 단순 z-score에서 아래 하이브리드로 발전함. 사람마다 결과가 갈리게 하는 게 핵심 목표였고, 순서대로 적용됨.
+  - **랭킹 엔진 (2026-07-29, `lib/pokematch/matcher.ts` `matchTopK`) — 2026-08-09부터 폴백**: 위의 단순 z-score에서 아래 하이브리드로 발전함. **지금은 LLM 판정이 실패했을 때만 쓰인다**(그래도 지우지 말 것 — 키 없이도 앱이 결과를 낸다). `buildCandidates`는 이 로직의 앞부분(humanMean 차감 + 이중 z 혼합)만 공유하고 제외목록·NMS는 안 쓴다. 사람마다 결과가 갈리게 하는 게 핵심 목표였고, 순서대로 적용됨.
     1. **humanMean 차감**: 임베딩의 ~86%는 "일반적인 사람 얼굴" 성분이라 개인차를 덮어씀 → `uniqueEmb = normalize(embedding − humanMean)`로 개인 고유 편차 벡터를 뽑는다(`gallery.json`의 `humanMean`).
     2. **이중 z-score 혼합**: `score = 0.60·z_unique + 0.40·z_raw + shapeBoost`. `z_unique`는 종별 `muUnique/sdUnique`(σ floor 0.035), `z_raw`는 `mu/sd`(σ floor 0.055) 기준. `CHAR_SHAPE_BOOST`로 캐릭터성 형태에 가점, 세로로 긴 얼굴(`faceAspect > 1.15`)이면 `humanoid/upright`에 +0.02.
     3. **오탐 제외**: `NON_HUMAN_EXCLUDE_SHAPES`(fish·bug-wings·tentacles·armor·squiggle·ball·blob·quadruped·wings) + `HUB_EXCLUDE_SLUGS`(muk·jigglypuff 계열·electrode·chi_yu·goldeen·mankey 계열 등 30여 종) 완전 배제. 추가로 **`mu[s] < 0.25`(저기준선 몬스터 아웃라이어)** 도 배제 — 얼굴 집단과 원래 안 닮는 종은 σ가 작아 z만 폭발하는 문제.
@@ -137,6 +145,7 @@
 - **Production URL**: https://skillprac.vercel.app
 - Vercel 프로젝트: `ga-maius-projects/skill_prac` (GitHub 연동 완료, **production branch = `visionlab`**로 명시적으로 설정해둠 — `master` 푸시는 프로덕션에 영향 없음)
 - 환경변수(B2 자격증명 5개: `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`)는 Vercel Production/Preview에 sensitive로 이미 등록됨. 로컬 `.env.local`에도 실값 있음(gitignore됨).
+- **`GROQ_API_KEY`**: PokéMatch 판정용(2026-08-09 추가). **사용자가 직접 Vercel에 등록**하기로 함 — 로컬 `.env.local`에는 없다(그래서 로컬 개발에서는 PokéMatch가 항상 로컬 z-score 폴백으로 뜬다). 선택적으로 `GROQ_MODEL`로 모델 교체 가능(기본 `openai/gpt-oss-120b`).
 
 ## 항상 유지해야 하는 요구사항 (사용자 명시)
 
@@ -188,6 +197,7 @@
 
 ## 남은 일
 
+- **PokéMatch LLM 판정 실사용 확인 (2026-08-09)**: Vercel에 `GROQ_API_KEY`를 넣은 뒤 ① 결과 5마리가 사람마다 갈리는지 ② 이유 문장이 실제 얼굴 특징을 인용하는지(뭉뚱그린 소리만 하면 `faceFeatures.ts`에 측정을 더 넣을 것) ③ 판정 대기시간이 체감상 견딜 만한지(길면 라우트의 `reasoning_effort`는 이미 `low`, 다음 손잡이는 후보 40→25로 줄이기) ④ "AI 판정을 불러오지 못해…" 안내가 뜨지는 않는지. `?debug`로 보낸 측정문·후보·엔진을 그대로 볼 수 있다.
 - **HeartPulse 심박 정확도**: TS-CAN으로 전면 교체 완료(위 3번). **남은 건 실기기 검증** — 맥박계 대비 오차가 실제로 줄었는지. 여전히 틀리면 다음 후보: 노출/화이트밸런스 고정(AE/AWB가 재조정되면 광대역 노이즈가 들어온다), 창을 60초로, `computeFaceCropBox` 여유값 조정.
 - **VrmMotion — 실기기 확인된 것 / 남은 것** (2026-08-06 여러 라운드):
   - 확인됨: 좌우 거울 방향, 손가락 커브 방향, 표정(ARKit)·손 인식 동작, 팔이 손을 따라오는 것.

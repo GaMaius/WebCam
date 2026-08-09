@@ -133,7 +133,7 @@ export default function PokematchPage() {
 
   return (
     <ModuleShell
-      eyebrow="AI · 이미지 임베딩"
+      eyebrow="AI · GPT-OSS 120B 판정"
       title="PokéMatch"
       accent={ACCENT}
       steps={STEPS}
@@ -159,12 +159,14 @@ export default function PokematchPage() {
         onPrimary={!started ? begin : undefined}
       >
         <p>
-          카메라로 얼굴을 찍거나 사진을 업로드하면, AI가 얼굴의 시각적 특징을 벡터로 뽑아 포켓몬 1000여 종의 특징과
-          비교해 가장 닮은 순으로 5마리를 보여줘요.
+          카메라로 얼굴을 찍거나 사진을 업로드하면, 브라우저에서 얼굴형·눈매·피부톤 같은 특징을 측정하고 포켓몬 1000여
+          종과 비교해 후보를 추려요. 그다음 <b>GPT-OSS 120B</b> 언어모델이 그 측정값을 읽고 가장 닮은 5마리를 직접
+          고르고 이유까지 설명해줘요.
         </p>
         <ul className={styles.modalTips}>
           <li>재미로 보는 결과예요 — 정밀한 얼굴 분석이 아니라 전체 인상 기반이에요.</li>
           <li>밝은 곳에서 정면이 잘 보이는 사진이나 위치를 권장해요.</li>
+          <li>판정에는 사진이 아니라 측정된 수치(얼굴 비율·색상 값)만 전달돼요.</li>
         </ul>
       </InfoModal>
 
@@ -223,7 +225,7 @@ export default function PokematchPage() {
         <Card className={styles.statusCard}>
           {uploadPreview && <img src={uploadPreview} className={styles.previewThumb} alt="선택한 얼굴 사진" />}
           <span className={styles.spinner} />
-          닮은 포켓몬을 찾는 중이에요…
+          AI가 닮은 포켓몬을 고르는 중이에요…
         </Card>
       )}
 
@@ -235,6 +237,12 @@ export default function PokematchPage() {
               <MatchRow key={m.slug} match={m} top={i === 0} />
             ))}
           </div>
+          {scan.engine === "local" && (
+            <p className={styles.engineNote}>
+              AI 판정을 불러오지 못해 기본 유사도 순위로 보여주고 있어요. 잠시 후 다시 시도하면 판정 결과를 볼 수
+              있어요.
+            </p>
+          )}
           <ResultActions
             render={renderCard}
             filename={`visionlab-pokematch-${Date.now()}.png`}
@@ -308,6 +316,7 @@ function MatchRow({ match, top }: { match: PokematchMatch; top: boolean }) {
         <span className={styles.matchPct}>
           닮은 정도: <b>{match.percent}%</b>
         </span>
+        {match.reason && <span className={styles.matchReason}>{match.reason}</span>}
         <div className={styles.badges}>
           {types.map((t) => {
             const c = typeColor(t);

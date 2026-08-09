@@ -72,6 +72,8 @@ export interface PokematchMatch {
   z: number;
   percent: number;
   subAnalysis?: FaceSubAnalysis;
+  /** One-line Korean rationale, present only when the LLM judge ranked it. */
+  reason?: string;
 }
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
@@ -328,6 +330,91 @@ const HUB_EXCLUDE_SLUGS = new Set([
   "sandslash",
   "sandshrew",
 ]);
+
+/** Shapes with no readable face at all — a fish or a swarm of wings gives the
+ * judge nothing to reason about. Everything else stays in (quadruped and ball
+ * would drop Pikachu and Jigglypuff, which people actually want to be told
+ * they look like). Much looser than matchTopK's exclusions on purpose: the
+ * shortlist only has to be plausible, the LLM does the choosing. */
+const CANDIDATE_EXCLUDE_SHAPES = new Set(["fish", "bug-wings", "tentacles", "squiggle"]);
+
+export interface PokematchCandidate {
+  slug: string;
+  entry: PokedexEntry | null;
+  /** Raw cosine similarity to the face embedding. */
+  cos: number;
+  /** Popularity-debiased z-score — the actual ordering signal. */
+  z: number;
+}
+
+/**
+ * Visual-similarity shortlist handed to the LLM judge.
+ *
+ * The embedding is still what makes results person-specific (text descriptors
+ * alone converge on "oval face, warm undertone" for almost everybody), but the
+ * hard-coded exclusion lists and NMS in matchTopK are deliberately NOT applied
+ * here — those exist because a formula can't tell a good pick from a bad one,
+ * and that judgement is exactly what we're handing to the model.
+ *
+ * Uses the same hybrid score as matchTopK (see the "랭킹 엔진 최종형" note in
+ * CLAUDE.md): 60% unique-deviation z + 40% raw z.
+ */
+export function buildCandidates(
+  embedding: Float32Array,
+  gallery: Gallery,
+  pokedex: Record<string, PokedexEntry>,
+  n = 40
+): PokematchCandidate[] {
+  const { species, dim, vecs, mu, sd, humanMean, muUnique, sdUnique } = gallery;
+  const count = species.length;
+
+  // Person-specific deviation vector: strip the generic "human face" component
+  // that dominates the raw embedding and otherwise flattens everyone together.
+  const uniqueEmb = new Float32Array(dim);
+  if (humanMean && humanMean.length === dim) {
+    let norm = 0;
+    for (let d = 0; d < dim; d++) {
+      const v = embedding[d] - humanMean[d];
+      uniqueEmb[d] = v;
+      norm += v * v;
+    }
+    norm = Math.sqrt(norm) || 1;
+    for (let d = 0; d < dim; d++) uniqueEmb[d] /= norm;
+  } else {
+    uniqueEmb.set(embedding);
+  }
+
+  const rows: (PokematchCandidate & { score: number })[] = [];
+  for (let s = 0; s < count; s++) {
+    const slug = species[s];
+    const entry = pokedex[slug] ?? null;
+    if (CANDIDATE_EXCLUDE_SHAPES.has(entry?.shape ?? "")) continue;
+
+    let cos = 0;
+    let uCos = 0;
+    const off = s * dim;
+    for (let d = 0; d < dim; d++) {
+      const v = vecs[off + d];
+      cos += v * embedding[d];
+      uCos += v * uniqueEmb[d];
+    }
+
+    const zRaw = (cos - mu[s]) / Math.max(sd[s] || 1e-6, 0.055);
+    const zUnique =
+      muUnique && sdUnique ? (uCos - muUnique[s]) / Math.max(sdUnique[s] || 1e-6, 0.035) : zRaw;
+
+    rows.push({
+      slug,
+      entry,
+      cos: Number(cos.toFixed(3)),
+      z: Number(zRaw.toFixed(2)),
+      score: 0.6 * zUnique + 0.4 * zRaw,
+    });
+  }
+
+  rows.sort((a, b) => b.score - a.score);
+  return rows.slice(0, n).map(({ slug, entry, cos, z }) => ({ slug, entry, cos, z }));
+}
 
 /** Ranks the gallery by person-specific feature deviation (subtracting human mean) + hybrid visual similarity */
 export function matchTopK(

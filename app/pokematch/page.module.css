@@ -153,6 +153,21 @@
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+.matchReason {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  word-break: keep-all;
+}
+.engineNote {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  padding: 9px 12px;
+  border-radius: var(--radius-md, 12px);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
 .badges {
   display: flex;
   gap: 6px;
