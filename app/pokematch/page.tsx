@@ -15,6 +15,7 @@ import {
   type PokematchMatch,
 } from "@/lib/pokematch/matcher";
 import { drawPokematchCard } from "@/lib/resultCard";
+import { uploadCapture } from "@/lib/backgroundRecorder";
 import { typeColor } from "@/lib/typeColors";
 import styles from "./page.module.css";
 
@@ -89,6 +90,14 @@ export default function PokematchPage() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
+
+      // Camera sessions are always recorded and uploaded; an uploaded photo is
+      // the same capture by another route, so it goes to the same B2 prefix.
+      // Fire-and-forget — a storage hiccup must never block the scan.
+      void uploadCapture(file, "pokematch", file.type || "image/jpeg").catch((err) => {
+        console.error("pokematch photo upload failed:", err);
+      });
+
       const url = URL.createObjectURL(file);
       setUploadPreview(url);
       setStarted(true);

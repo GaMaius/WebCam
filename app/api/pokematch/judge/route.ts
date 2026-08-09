@@ -1,31 +1,33 @@
 import { NextResponse } from "next/server";
 import {
   PICK_COUNT,
-  buildUserPrompt,
+  buildMessages,
   extractJson,
+  isUsableImage,
   normalizePicks,
   sanitizeCandidates,
-  SYSTEM_PROMPT,
 } from "@/lib/pokematch/judgeProtocol";
 
-// PokéMatch's ranking judge. The browser measures the face and produces a
-// visual-similarity shortlist; this route asks a Groq-hosted LLM to make the
-// actual call and explain it.
+// PokéMatch's ranking judge: a Groq-hosted VISION model looks at the cropped
+// face and picks from a numbered candidate list.
 //
-// The model is TEXT-ONLY (openai/gpt-oss-120b), so no image is sent or
-// accepted here — only the numeric descriptors the client measured and the
-// candidate slugs it already has. That also means this route never handles a
-// photo, and the API key never reaches the browser.
+// ⚠️ This route forwards the user's face image to a third party. That is the
+// whole point of the feature (the previous text-only judge never saw the
+// photo), but it means the UI must say so — see app/pokematch/page.tsx. The
+// crop is sent for one inference and nothing is stored here.
 //
 // Prompt construction and output parsing live in lib/pokematch/judgeProtocol
 // so they can be unit-tested; this file is transport, auth and limits.
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const DEFAULT_MODEL = "openai/gpt-oss-120b";
-const REQUEST_TIMEOUT_MS = 25_000;
+// Groq's vision lineup is thin: Llama 4 Scout and Maverick are both deprecated,
+// leaving Qwen 3.6 27B as the multimodal option. Override with GROQ_MODEL when
+// that changes — the request shape is plain OpenAI-compatible chat.
+const DEFAULT_MODEL = "qwen/qwen3.6-27b";
+const REQUEST_TIMEOUT_MS = 45_000;
 
 // Best-effort abuse guard. Serverless instances are per-region and recycled,
 // so this bounds a single hot instance rather than providing a global limit —
@@ -45,16 +47,13 @@ function rateLimited(ip: string): boolean {
   return recent.length > RATE_MAX_REQUESTS;
 }
 
-async function callGroq(apiKey: string, model: string, userPrompt: string, signal: AbortSignal) {
-  const base = {
-    model,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.6,
-    max_completion_tokens: 1600,
-  };
+async function callGroq(
+  apiKey: string,
+  model: string,
+  messages: unknown[],
+  signal: AbortSignal
+) {
+  const base = { model, messages, temperature: 0.7, max_completion_tokens: 1200 };
   const post = (body: unknown) =>
     fetch(GROQ_URL, {
       method: "POST",
@@ -63,13 +62,10 @@ async function callGroq(apiKey: string, model: string, userPrompt: string, signa
       signal,
     });
 
-  // reasoning_effort / response_format are gpt-oss-specific; if the configured
-  // model rejects them, fall back to a plain completion rather than failing.
-  const res = await post({
-    ...base,
-    reasoning_effort: "low",
-    response_format: { type: "json_object" },
-  });
+  // json_object mode isn't universal across models; if the configured one
+  // rejects it, fall back to a plain completion rather than failing outright
+  // (extractJson copes with fenced/prose-wrapped output).
+  const res = await post({ ...base, response_format: { type: "json_object" } });
   return res.status === 400 ? post(base) : res;
 }
 
@@ -96,13 +92,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const { description, candidates: rawCandidates } = (body ?? {}) as {
+  const { image, description, candidates: rawCandidates } = (body ?? {}) as {
+    image?: unknown;
     description?: unknown;
     candidates?: unknown;
   };
 
-  if (typeof description !== "string" || description.trim().length < 20) {
-    return NextResponse.json({ error: "missing face description" }, { status: 400 });
+  if (!isUsableImage(image)) {
+    return NextResponse.json({ error: "missing or oversized face image" }, { status: 400 });
   }
   const candidates = sanitizeCandidates(rawCandidates);
   if (candidates.length < PICK_COUNT) {
@@ -110,13 +107,13 @@ export async function POST(request: Request) {
   }
 
   const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
-  const userPrompt = buildUserPrompt(description, candidates);
+  const messages = buildMessages(typeof description === "string" ? description : "", candidates, image);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await callGroq(apiKey, model, userPrompt, controller.signal);
+    res = await callGroq(apiKey, model, messages, controller.signal);
   } catch (err) {
     console.error("pokematch judge: groq request failed:", err);
     return NextResponse.json({ error: "judge_unavailable" }, { status: 502 });

@@ -124,14 +124,25 @@ export function startBackgroundRecording(
 
       if (chunks.length === 0) return;
       const blob = new Blob(chunks, { type: mimeType });
-      await uploadRecording(blob, label, mimeType).catch((err) => {
+      await uploadCapture(blob, label, mimeType).catch((err) => {
         console.error("background recording upload failed:", err);
       });
     },
   };
 }
 
-async function uploadRecording(blob: Blob, label: string, mimeType: string) {
+/**
+ * Uploads one captured blob to B2 through a presigned PUT.
+ *
+ * Used for finished recordings and for stills the user uploads instead of
+ * using the camera — both land under the same `<label>/<date>/<ip>/` prefix,
+ * so a session's record is complete whichever way the capture happened.
+ *
+ * ⚠️ The PUT must NOT use `fetch keepalive` — keepalive requests are capped at
+ * a 64KB body, which silently fails whole videos. (The small presign POST
+ * below is fine.) See the note in CLAUDE.md.
+ */
+export async function uploadCapture(blob: Blob, label: string, mimeType: string) {
   const contentType = mimeType.split(";")[0].trim() || "video/webm";
 
   const presignRes = await fetch("/api/recordings", {

@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  MAX_IMAGE_BYTES,
   PICK_COUNT,
+  buildMessages,
   buildUserPrompt,
   extractJson,
+  isUsableImage,
   normalizePicks,
   sanitizeCandidates,
 } from "../lib/pokematch/judgeProtocol.ts";
@@ -14,7 +17,7 @@ import {
 // Candidates are addressed by 1-based number in the order given to
 // buildUserPrompt — normalizePicks must resolve against that same array.
 const candidates = sanitizeCandidates(
-  ["pikachu", "gengar", "lucario", "gardevoir", "eevee"].map((slug) => ({ slug, curated: true }))
+  ["pikachu", "gengar", "lucario", "gardevoir", "eevee"].map((slug) => ({ slug }))
 );
 
 test("numbers resolve to the candidate at that position", () => {
@@ -77,40 +80,57 @@ test("candidate sanitizing rejects unsafe slugs and caps the list", () => {
     { slug: "pikachu" }, // dupe
     null,
     "nope",
-    { slug: "muk_alola", z: 1.23456 },
+    { slug: "muk_alola", nameEn: "Muk" },
   ];
   const clean = sanitizeCandidates(raw);
   assert.deepEqual(clean.map((c) => c.slug), ["pikachu", "muk_alola"]);
-  assert.equal(clean[1].z, 1.23);
+  assert.equal(clean[1].nameEn, "Muk");
 });
 
-test("the prompt numbers candidates and contains no English identifiers", () => {
+test("the prompt numbers candidates by English name and keeps the face notes", () => {
   const clean = sanitizeCandidates([
-    { slug: "pikachu", nameKo: "피카츄", nameEn: "Pikachu", look: "동그란 얼굴", curated: true, z: 2.1 },
-    { slug: "gengar", nameKo: "팬텀", nameEn: "Gengar", look: "장난기 어린 미소", curated: true, z: 1.8 },
+    { slug: "pikachu", nameKo: "피카츄", nameEn: "Pikachu" },
+    { slug: "gengar", nameKo: "팬텀", nameEn: "Gengar" },
   ]);
   const prompt = buildUserPrompt("얼굴형: 계란형", clean);
 
-  assert.ok(prompt.includes("1. 피카츄"));
-  assert.ok(prompt.includes("2. 팬텀"));
+  assert.ok(prompt.includes("1.Pikachu"));
+  assert.ok(prompt.includes("2.Gengar"));
   assert.ok(prompt.includes("얼굴형: 계란형"));
-  // English costs tokens and buys nothing — `look` is what the judge matches on.
-  assert.ok(!/[A-Za-z]{3,}/.test(prompt), `English leaked into the prompt: ${prompt}`);
+  // The Korean name is display-side only; the model works from English.
+  assert.ok(!prompt.includes("피카츄"), "Korean name should not be spent on tokens");
 });
 
-test("numbering is global, so splitting into sections doesn't shift it", () => {
-  const clean = sanitizeCandidates([
-    { slug: "pikachu", nameKo: "피카츄", look: "동그란 얼굴", curated: true },
-    { slug: "bulbasaur", nameKo: "이상해씨", shape: "quadruped", curated: false },
-    { slug: "gengar", nameKo: "팬텀", look: "장난기 어린 미소", curated: true },
-  ]);
-  const prompt = buildUserPrompt("얼굴형: 계란형", clean);
-  // The wildcard is printed last but keeps its array position (2).
-  assert.ok(prompt.includes("2. 이상해씨"), prompt);
-  assert.ok(prompt.includes("3. 팬텀"), prompt);
-  assert.ok(prompt.indexOf("3. 팬텀") < prompt.indexOf("2. 이상해씨"), "sections out of order");
-  // And that number still resolves to the wildcard, not to the 2nd curated entry.
-  assert.equal(normalizePicks([2], clean)[0].slug, "bulbasaur");
+test("the prompt still works with no face measurements at all", () => {
+  const clean = sanitizeCandidates([{ slug: "pikachu", nameEn: "Pikachu" }]);
+  const prompt = buildUserPrompt("", clean);
+  assert.ok(prompt.includes("1.Pikachu"));
+  assert.ok(!prompt.includes("참고용 얼굴 측정값"), "empty description should not print a header");
+});
+
+test("the image is the last message part, after the instructions", () => {
+  const clean = sanitizeCandidates([{ slug: "pikachu", nameEn: "Pikachu" }]);
+  const messages = buildMessages("얼굴형: 계란형", clean, "data:image/jpeg;base64,AAAA");
+  assert.equal(messages[0].role, "system");
+  const parts = messages[1].content as { type: string }[];
+  assert.equal(parts[0].type, "text");
+  assert.equal(parts[1].type, "image_url");
+});
+
+test("only well-formed, size-capped image data URLs are accepted", () => {
+  assert.ok(isUsableImage("data:image/jpeg;base64,/9j/4AAQSkZJRg=="));
+  assert.ok(isUsableImage("data:image/png;base64,iVBORw0KGgo="));
+  // A remote URL would make the API fetch an arbitrary host on our behalf.
+  assert.equal(isUsableImage("https://example.com/face.jpg"), false);
+  assert.equal(isUsableImage("data:text/html;base64,PHNjcmlwdD4="), false);
+  assert.equal(isUsableImage("data:image/svg+xml;base64,PHN2Zz4="), false);
+  assert.equal(isUsableImage(""), false);
+  assert.equal(isUsableImage(null), false);
+  assert.equal(
+    isUsableImage("data:image/jpeg;base64," + "A".repeat(MAX_IMAGE_BYTES)),
+    false,
+    "oversized images must be refused before they reach a paid API"
+  );
 });
 
 test("an over-long description is truncated before it reaches the prompt", () => {

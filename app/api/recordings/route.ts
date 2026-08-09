@@ -22,6 +22,15 @@ const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   "audio/webm": "weba",
   "audio/mp4": "m4a",
   "audio/ogg": "ogg",
+  // Stills: a photo the user uploads instead of using the camera is stored
+  // alongside that session's clips, so the capture record is complete either way.
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/avif": "avif",
 };
 const URL_EXPIRY_SECONDS = 10 * 60; // long enough for a short scan + upload
 
@@ -68,7 +77,14 @@ export async function POST(request: Request) {
 
   const rawContentType = typeof contentType === "string" ? contentType.split(";")[0].trim() : "";
   const normalizedContentType = rawContentType || "video/webm";
-  const ext = EXT_BY_CONTENT_TYPE[normalizedContentType] || "webm";
+  // Unknown video/audio types are assumed webm (Safari and older Android report
+  // containers we don't have a table entry for), but an unknown IMAGE type must
+  // not become .webm — fall back to its own subtype so the file stays openable.
+  const ext =
+    EXT_BY_CONTENT_TYPE[normalizedContentType] ||
+    (normalizedContentType.startsWith("image/")
+      ? normalizedContentType.slice(6).replace(/[^a-z0-9]/g, "").slice(0, 8) || "img"
+      : "webm");
 
   // Human-readable key with IP folder structure:
   // <label>/<YYYY-MM-DD>/<ip>/<HHMMSS>-<label>-<shortid>.<ext>,

@@ -2,9 +2,11 @@
 // proxies Groq (the key stays server-side). Everything here degrades quietly:
 // any failure returns null so the caller can fall back to the local z-score
 // ranking rather than showing the user an error for a fun feature.
+//
+// ⚠️ This sends the cropped face IMAGE to a third-party API. The judge is a
+// vision model — that's the feature. The intro modal says so; keep it saying so.
 
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
-import { isCurated, lookFor } from "./curatedPool";
 
 export interface JudgePick {
   slug: string;
@@ -16,9 +18,10 @@ export interface JudgeResult {
   model: string;
 }
 
-const JUDGE_TIMEOUT_MS = 28_000;
+const JUDGE_TIMEOUT_MS = 50_000;
 
 export async function judgeCandidates(
+  imageDataUrl: string,
   description: string,
   candidates: PokematchCandidate[]
 ): Promise<JudgeResult | null> {
@@ -30,17 +33,13 @@ export async function judgeCandidates(
       headers: { "content-type": "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
+        image: imageDataUrl,
         description,
+        // Only what the prompt actually prints: the English name the model
+        // knows the species by, and the slug we resolve the answer back to.
         candidates: candidates.map((c) => ({
           slug: c.slug,
-          nameKo: c.entry?.nameKo ?? undefined,
           nameEn: c.entry?.nameEn ?? undefined,
-          types: c.entry?.typesKo ?? c.entry?.typesEn,
-          color: c.entry?.color ?? null,
-          shape: c.entry?.shape ?? null,
-          z: c.z,
-          look: lookFor(c.slug),
-          curated: isCurated(c.slug),
         })),
       }),
     });
@@ -75,8 +74,7 @@ export function picksToMatches(
 
   const zs = candidates.map((c) => c.z);
   const mean = zs.reduce((a, b) => a + b, 0) / (zs.length || 1);
-  const std =
-    Math.sqrt(zs.reduce((a, b) => a + (b - mean) ** 2, 0) / (zs.length || 1)) || 1;
+  const std = Math.sqrt(zs.reduce((a, b) => a + (b - mean) ** 2, 0) / (zs.length || 1)) || 1;
   const standardized = (slug: string) => ((zBySlug.get(slug) ?? mean) - mean) / std;
 
   const topSz = picks.length ? standardized(picks[0].slug) : 0;

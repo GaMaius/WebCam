@@ -2,25 +2,31 @@
 // route handler so it can be tested with `node --test` (the route imports
 // next/server, which isn't loadable there) — and because parsing an LLM's
 // output is the part most likely to be wrong in a way a build won't catch.
+//
+// The judge is a VISION model: it receives the cropped face image and picks
+// from a numbered list of species. Two consequences that shape everything here:
+//   - Candidates are just numbers + English names. No appearance descriptions,
+//     because the model already knows what these species look like, and no
+//     Korean, because the model's knowledge is anchored to the English names
+//     (which also tokenize cheaper — measured, see CLAUDE.md).
+//   - The measured face descriptors are supporting detail, not the input. They
+//     stay because they're precise where a glance is vague (exact ratios,
+//     ITA skin tone), but the image is what's actually being judged.
 
 export const PICK_COUNT = 5;
-export const MAX_CANDIDATES = 60;
+export const MAX_CANDIDATES = 400;
 export const MAX_DESCRIPTION_CHARS = 4000;
+
+/** Base64 payload cap for the face crop. A 448x448 JPEG lands around 40KB;
+ * this leaves generous headroom while keeping the request far below both
+ * Vercel's 4.5MB body limit and Groq's 20MB image limit. */
+export const MAX_IMAGE_BYTES = 1_500_000;
+const IMAGE_DATA_URL_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
 
 export interface CandidateInput {
   slug: string;
-  nameKo?: string;
   nameEn?: string;
-  types?: string[];
-  color?: string | null;
-  shape?: string | null;
-  z?: number;
-  /** Short Korean description of the species' face/impression. Only the
-   * curated pool carries this — the judge can't see sprites, so for anything
-   * else it has to fall back on whatever it remembers. */
-  look?: string;
-  /** True for the curated "good to show" pool; false for embedding wildcards. */
-  curated?: boolean;
+  nameKo?: string;
 }
 
 export interface Pick {
@@ -44,88 +50,88 @@ export function sanitizeCandidates(raw: unknown): CandidateInput[] {
     seen.add(slug);
     out.push({
       slug,
-      nameKo: typeof c.nameKo === "string" ? c.nameKo.slice(0, 40) : undefined,
       nameEn: typeof c.nameEn === "string" ? c.nameEn.slice(0, 40) : undefined,
-      types: Array.isArray(c.types)
-        ? c.types.filter((t): t is string => typeof t === "string").slice(0, 3).map((t) => t.slice(0, 16))
-        : undefined,
-      color: typeof c.color === "string" ? c.color.slice(0, 16) : null,
-      shape: typeof c.shape === "string" ? c.shape.slice(0, 16) : null,
-      z: typeof c.z === "number" && Number.isFinite(c.z) ? Number(c.z.toFixed(2)) : undefined,
-      look: typeof c.look === "string" ? c.look.slice(0, 80) : undefined,
-      curated: c.curated === true,
+      nameKo: typeof c.nameKo === "string" ? c.nameKo.slice(0, 40) : undefined,
     });
     if (out.length >= MAX_CANDIDATES) break;
   }
   return out;
 }
 
-export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 심사위원입니다.
-사용자의 얼굴을 실제로 측정한 수치 설명과, 후보 포켓몬 목록을 받습니다.
-당신은 사진을 볼 수 없습니다. 오직 주어진 수치 설명과 후보의 생김새 설명만으로 판단하세요.
+/** True only for a well-formed, size-capped image data URL. Anything else is
+ * refused rather than forwarded — this string goes straight to a paid API. */
+export function isUsableImage(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= MAX_IMAGE_BYTES &&
+    IMAGE_DATA_URL_RE.test(value)
+  );
+}
 
-후보는 두 그룹입니다:
-- [추천 목록] 결과로 보여주기 좋은 포켓몬들입니다. 각 항목에 생김새·인상 설명이 붙어 있습니다. **되도록 여기서 고르세요.**
-- [그 외 후보] 이미지 유사도만 높게 나온 종입니다. 추천 목록에 정말 맞는 게 없을 때만, 그리고 명백히 더 닮았을 때만 쓰세요. 최대 1마리까지만 허용합니다.
+export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 심사위원입니다.
+사용자의 얼굴 사진을 직접 보고, 주어진 후보 목록에서 가장 닮은 포켓몬을 고릅니다.
 
 판정 규칙:
-1. 후보는 **번호**로 지목하세요. 목록에 있는 번호만 쓰고, 없는 번호는 절대 쓰지 마세요.
-2. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요. 첫 번째가 가장 닮은 것입니다.
-3. 판단의 중심은 **얼굴 수치 설명 ↔ 후보의 생김새 설명**의 일치입니다. 얼굴형·눈매·눈 크기·턱선·인상을 맞춰보세요. 후보에 붙은 유사도(z) 점수는 "이미지가 비슷해 보인다"는 약한 참고값일 뿐이니, z가 높아도 생김새가 어긋나면 과감히 버리세요.
-4. 5마리가 서로 거의 똑같은 인상이면 안 됩니다. 날카로운/우아한/귀여운/듬직한/개성 있는 인상이 섞이도록 고르되, 1위는 가장 잘 맞는 하나여야 합니다.
-5. reason은 한국어 한 문장(공백 포함 45자 이내)이고, 반드시 주어진 얼굴 수치 중 구체적인 근거 하나 이상을 언급해야 합니다. (예: "턱각이 크고 눈매가 올라가 있어 잘 맞습니다")
-6. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 절대 쓰지 마세요. 읽는 사람이 기분 좋을 문장으로 쓰세요.
+1. 사진을 직접 보고 판단하세요. 얼굴형, 눈매와 눈 크기, 코와 입, 턱선, 헤어스타일과 머리색, 피부톤, 그리고 전체적인 분위기·인상을 보세요.
+2. 후보는 **번호**로 지목하세요. 목록에 있는 번호만 쓰고, 없는 번호는 절대 쓰지 마세요.
+3. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요. 첫 번째가 가장 닮은 것입니다.
+4. 5마리가 서로 거의 똑같은 인상이면 안 됩니다. 같은 진화 계열로 채우지 말고, 서로 다른 인상이 섞이게 고르되 1위는 가장 잘 맞는 하나여야 합니다.
+5. 사람마다 다른 결과가 나와야 합니다. 무난하고 유명하다는 이유로 아무에게나 어울리는 포켓몬을 고르지 마세요. 이 얼굴에서만 보이는 특징을 근거로 삼으세요.
+6. reason은 한국어 한 문장(공백 포함 45자 이내)이고, 사진에서 실제로 보이는 근거를 하나 이상 말해야 합니다. (예: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다")
+7. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 절대 쓰지 마세요. 읽는 사람이 기분 좋을 문장으로 쓰세요.
+8. 사진 속 인물의 신원을 추측하거나 실존 인물의 이름을 말하지 마세요.
 
-출력은 오직 아래 형태의 JSON 하나입니다. 이름·영문·점수는 쓰지 마세요.
+출력은 오직 아래 형태의 JSON 하나입니다. 이름·점수는 쓰지 마세요.
 {"picks":[{"n":7,"reason":"..."},{"n":21,"reason":"..."}]}`;
 
 /**
- * One candidate, addressed by NUMBER rather than by slug.
+ * The numbered candidate list.
  *
- * The number is the cheapest possible identifier (1-2 tokens against ~6 for an
- * English slug, over ~46 candidates) and it also removes a whole failure mode:
- * the model can't misspell or invent a number that isn't on the list. English
- * text is kept out entirely — the judge never needs the English name, because
- * `look` (not the model's memory of the species) is what it matches against.
+ * English names, because that's where the model's knowledge of these species
+ * lives — the Korean name is resolved back on our side for display. Numbering
+ * follows the array order and is what normalizePicks resolves against, so the
+ * array must not be reordered between building the prompt and reading the
+ * reply.
  */
-function candidateLine(c: CandidateInput, number: number): string {
-  const name = c.nameKo ?? c.nameEn ?? c.slug;
-  // Curated entries carry a look description, which is the thing worth reading.
-  // Wildcards have none, so they fall back to the coarse type/shape hints.
-  const detail = c.look
-    ? c.look
-    : [c.types?.length ? c.types.join("/") : null, c.shape].filter(Boolean).join(" ");
-  return `${number}. ${name}${detail ? ` · ${detail}` : ""}${c.z !== undefined ? ` · z=${c.z}` : ""}`;
+export function buildCandidateList(candidates: CandidateInput[]): string {
+  return candidates.map((c, i) => `${i + 1}.${c.nameEn ?? c.slug}`).join(" ");
 }
 
 export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  // Numbering is global and follows the array order, so the sections below can
-  // split the list without the numbers shifting — normalizePicks maps a
-  // returned number straight back through this same array.
-  const numbered = candidates.map((c, i) => ({ c, n: i + 1 }));
-  const curated = numbered.filter(({ c }) => c.curated);
-  const wildcards = numbered.filter(({ c }) => !c.curated);
-
-  const sections = [`[사용자 얼굴 측정값]\n${description.slice(0, MAX_DESCRIPTION_CHARS)}`];
-  if (curated.length) {
+  const sections = [`이 얼굴과 가장 닮은 포켓몬 ${PICK_COUNT}마리를 아래 후보에서 골라주세요.`];
+  if (description.trim()) {
     sections.push(
-      `[추천 목록 ${curated.length}종 — 되도록 여기서 고르세요]\n${curated
-        .map(({ c, n }) => candidateLine(c, n))
-        .join("\n")}`
+      `[참고용 얼굴 측정값 — 사진이 우선이고, 이건 보조 자료입니다]\n${description.slice(
+        0,
+        MAX_DESCRIPTION_CHARS
+      )}`
     );
   }
-  if (wildcards.length) {
-    sections.push(
-      `[그 외 후보 ${wildcards.length}종 — 정말 더 닮았을 때만, 최대 1마리]\n${wildcards
-        .map(({ c, n }) => candidateLine(c, n))
-        .join("\n")}`
-    );
-  }
+  sections.push(`[후보 ${candidates.length}종]\n${buildCandidateList(candidates)}`);
   return sections.join("\n\n");
 }
 
-/** gpt-oss emits reasoning, and json_object mode isn't guaranteed if the
- * model config rejects it, so accept fenced, prefixed and prose-wrapped JSON. */
+/** Chat messages for the vision call. The image goes last so the instructions
+ * and candidate list are already in context when the model looks at it. */
+export function buildMessages(
+  description: string,
+  candidates: CandidateInput[],
+  imageDataUrl: string
+) {
+  return [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: buildUserPrompt(description, candidates) },
+        { type: "image_url", image_url: { url: imageDataUrl } },
+      ],
+    },
+  ];
+}
+
+/** Models emit reasoning, and json_object mode isn't guaranteed if the model
+ * config rejects it, so accept fenced, prefixed and prose-wrapped JSON. */
 export function extractJson(content: string): unknown {
   const trimmed = content
     .replace(/<think>[\s\S]*?<\/think>/g, "")

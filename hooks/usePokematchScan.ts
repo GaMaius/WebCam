@@ -18,7 +18,7 @@ import {
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
-import { CURATED_SLUGS, isCurated } from "@/lib/pokematch/curatedPool";
+import { buildCuratedPool } from "@/lib/pokematch/curatedPool";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
 
@@ -30,11 +30,15 @@ export type PokematchEngine = "llm" | "local";
 const FRAMES_TO_AVERAGE = 8; // averaging several frames stabilizes the match (consistency)
 const CROP_COEF = 1.15; // tight face-only crop margin
 const ALIGN_TIMEOUT_MS = 15_000;
-// The judge sees the curated pool (40 recognizable species, always) plus a few
-// embedding wildcards, so a face that genuinely matches something outside the
-// pool can still surface — but the prompt tells it to prefer the pool.
-const WILDCARD_COUNT = 6;
 const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
+
+// The judge is a vision model, so it needs an actual picture. This crop is
+// deliberately wider than the embedding's (CROP_COEF) — hair, ears and the
+// jawline all inform "who does this person look like", and the tight 1.15 box
+// cuts them off. 448px at q0.85 lands around 40KB of base64.
+const JUDGE_IMAGE_SIZE = 448;
+const JUDGE_CROP_COEF = 1.55;
+const JUDGE_IMAGE_QUALITY = 0.85;
 
 interface FaceBox {
   x: number;
@@ -82,6 +86,47 @@ function drawMaskedFaceCrop(
   // Clear canvas & draw natural face crop preserving hair, face shape, and color tone
   ctx.clearRect(0, 0, size, size);
   ctx.drawImage(source, sx, sy, sSide, sSide, 0, 0, size, size);
+}
+
+/**
+ * JPEG data URL of the face for the vision judge, re-cropped from the source
+ * at JUDGE_CROP_COEF so hair and jawline are included. Returns null if the
+ * canvas is tainted (a cross-origin upload) — the caller then falls back to
+ * the local ranker rather than sending nothing and getting a bad judgement.
+ */
+function captureJudgeImage(
+  source: PixelSource,
+  landmarks: Landmark[],
+  vw: number,
+  vh: number
+): string | null {
+  let minX = 1, maxX = 0, minY = 1, maxY = 0;
+  for (const lm of landmarks) {
+    if (lm.x < minX) minX = lm.x;
+    if (lm.x > maxX) maxX = lm.x;
+    if (lm.y < minY) minY = lm.y;
+    if (lm.y > maxY) maxY = lm.y;
+  }
+  const cx = ((minX + maxX) / 2) * vw;
+  const cy = ((minY + maxY) / 2) * vh;
+  const side = Math.max((maxX - minX) * vw, (maxY - minY) * vh) * JUDGE_CROP_COEF;
+
+  // Clamp into frame, keeping the box square so the face isn't stretched.
+  const clamped = Math.min(side, vw, vh);
+  const sx = Math.max(0, Math.min(cx - clamped / 2, vw - clamped));
+  const sy = Math.max(0, Math.min(cy - clamped / 2, vh - clamped));
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = JUDGE_IMAGE_SIZE;
+    canvas.height = JUDGE_IMAGE_SIZE;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(source, sx, sy, clamped, clamped, 0, 0, JUDGE_IMAGE_SIZE, JUDGE_IMAGE_SIZE);
+    return canvas.toDataURL("image/jpeg", JUDGE_IMAGE_QUALITY);
+  } catch {
+    return null;
+  }
 }
 
 /** Computes face aspect ratio (height / width) from MediaPipe landmarks. */
@@ -189,27 +234,31 @@ export function usePokematchScan() {
     []
   );
 
-  /** Shared tail of both entry points: shortlist → LLM judge → fallback. */
+  /** Shared tail of both entry points: candidates → vision judge → fallback. */
   const rank = useCallback(
     async (
       embedding: Float32Array,
       gallery: Gallery,
       pokedex: Record<string, PokedexEntry>,
-      features: FaceFeatures | null
+      features: FaceFeatures | null,
+      image: string | null
     ) => {
-      // Curated pool scored against THIS face (so a fixed pool still gives
-      // different people different answers), plus wildcards it doesn't cover.
-      const curated = scoreSlugs(embedding, gallery, pokedex, CURATED_SLUGS);
-      const wildcards = buildCandidates(embedding, gallery, pokedex, WILDCARD_COUNT, {
-        exclude: new Set(CURATED_SLUGS),
-      });
-      const candidates = [...curated, ...wildcards];
+      // The curated pool, scored against THIS face. The z-scores no longer go
+      // to the model (it looks at the photo instead) but they still drive the
+      // displayed percentage and the local fallback ranking.
+      const candidates = scoreSlugs(
+        embedding,
+        gallery,
+        pokedex,
+        buildCuratedPool(pokedex, gallery.species)
+      );
       const description = features ? describeFaceFeatures(features) : "";
 
       let result: PokematchMatch[] | null = null;
       let judgeModel = "";
-      if (description) {
-        const judged = await judgeCandidates(description, candidates);
+      // No image means no vision judgement — fall straight through to local.
+      if (image) {
+        const judged = await judgeCandidates(image, description, candidates);
         if (judged && judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates);
           judgeModel = judged.model;
@@ -227,17 +276,12 @@ export function usePokematchScan() {
 
       if (isDebug()) {
         setDebugText(
-          `ENGINE: ${usedLlm ? `llm (${judgeModel})` : "local z-score fallback"}\n\n` +
-            `FACE FEATURES SENT TO JUDGE:\n${description || "(측정 실패 — 판정에 전달되지 않음)"}\n\n` +
-            `CANDIDATES (추천 ${curated.length} + 그 외 ${wildcards.length}):\n` +
-            [...candidates]
-              .sort((a, b) => b.z - a.z)
-              .map(
-                (c) =>
-                  `${isCurated(c.slug) ? "추천" : "그외"} ${c.slug.padEnd(14)} z=${c.z
-                    .toFixed(2)
-                    .padStart(6)} cos=${c.cos.toFixed(3)}`
-              )
+          `ENGINE: ${usedLlm ? `vision llm (${judgeModel})` : "local z-score fallback"}\n` +
+            `IMAGE: ${image ? `${Math.round(image.length / 1024)}KB base64` : "(없음 — 판정 생략)"}\n\n` +
+            `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
+            `CANDIDATES (${candidates.length}종, 프롬프트 순서 = 번호):\n` +
+            candidates
+              .map((c, i) => `${String(i + 1).padStart(3)}. ${c.slug.padEnd(16)} z=${c.z.toFixed(2).padStart(6)}`)
               .join("\n") +
             `\n\n` +
             debugDump(embedding, gallery)
@@ -335,7 +379,8 @@ export function usePokematchScan() {
         // Measure before awaiting the judge so the descriptors come from the
         // same moment as the embedding, not from a later (moved) frame.
         const features = last.landmarks ? measureFace(video, last.landmarks, last.w, last.h) : null;
-        await rank(meanEmbedding(embeddings), gallery, pokedex, features);
+        const image = last.landmarks ? captureJudgeImage(video, last.landmarks, last.w, last.h) : null;
+        await rank(meanEmbedding(embeddings), gallery, pokedex, features, image);
         runningRef.current = false;
       } catch (err) {
         runningRef.current = false;
@@ -406,7 +451,8 @@ export function usePokematchScan() {
 
         setPhase("analyzing");
         const features = landmarks ? measureFace(image, landmarks, iw, ih) : null;
-        await rank(embedding, gallery, pokedex, features);
+        const judgeImage = landmarks ? captureJudgeImage(image, landmarks, iw, ih) : null;
+        await rank(embedding, gallery, pokedex, features, judgeImage);
         runningRef.current = false;
       } catch (err) {
         runningRef.current = false;

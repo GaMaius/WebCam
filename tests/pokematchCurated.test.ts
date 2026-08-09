@@ -2,84 +2,89 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CURATED_POOL, CURATED_SLUGS, isCurated, lookFor } from "../lib/pokematch/curatedPool.ts";
-import { buildUserPrompt, sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
+import { BANNED_SLUGS, EXTRA_FAMOUS, buildCuratedPool } from "../lib/pokematch/curatedPool.ts";
+import { buildCandidateList, sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
 
-// The curated pool is the set of answers this app is willing to give. A slug
-// that isn't in the shipped gallery would be picked by the judge and then
-// render as a broken row with no sprite, so that's checked against the real
-// asset files rather than assumed.
+// The curated pool is the set of answers this app is willing to give. It's
+// computed from the shipped pokedex, so these tests run against the real asset
+// files — a slug that isn't actually there would be picked by the judge and
+// then render as a broken row with no sprite.
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+import type { PokedexEntry } from "../lib/pokematch/matcher.ts";
 const pokedex = JSON.parse(readFileSync(root + "public/pokemon/pokedex.json", "utf8")) as Record<
   string,
-  { nameKo: string | null; shape: string | null }
+  PokedexEntry
 >;
-const gallery = JSON.parse(readFileSync(root + "public/pokemon/gallery.json", "utf8")) as {
-  species: string[];
-};
+const gallery = JSON.parse(readFileSync(root + "public/pokemon/gallery.json", "utf8")) as { species: string[] };
+const available = new Set(gallery.species);
+const pool = buildCuratedPool(pokedex, available);
 
-test("every curated slug exists in both the pokedex and the shipped gallery", () => {
-  const inGallery = new Set(gallery.species);
-  for (const { slug } of CURATED_POOL) {
+test("the pool is large enough to be worth judging over", () => {
+  // The ask was "at least ~200". Below that we're back to a shortlist that
+  // decides the answer before the judge sees it.
+  assert.ok(pool.length >= 200, `pool is only ${pool.length} species`);
+});
+
+test("every pooled slug exists in both the pokedex and the shipped gallery", () => {
+  for (const slug of pool) {
     assert.ok(pokedex[slug], `${slug} is not in pokedex.json`);
-    assert.ok(inGallery.has(slug), `${slug} has no embedding in gallery.json`);
+    assert.ok(available.has(slug), `${slug} has no embedding in gallery.json`);
   }
 });
 
-test("the pool has no duplicates and is the size the token budget assumes", () => {
-  assert.equal(new Set(CURATED_SLUGS).size, CURATED_SLUGS.length, "duplicate slug in the pool");
-  assert.equal(CURATED_POOL.length, 40);
+test("every EXTRA_FAMOUS slug is real — a typo would silently vanish", () => {
+  // buildCuratedPool filters unknown slugs, so a misspelling costs a species
+  // with no error anywhere. This is the only thing that catches it.
+  const bogus = [...new Set(EXTRA_FAMOUS)].filter((s) => !pokedex[s] || !available.has(s));
+  assert.deepEqual(bogus, [], `unknown slugs in EXTRA_FAMOUS: ${bogus.join(", ")}`);
 });
 
-test("every entry carries a look description — the judge cannot see sprites", () => {
-  for (const { slug, look } of CURATED_POOL) {
-    assert.ok(look && look.length >= 10, `${slug} has no usable look description`);
-    assert.ok(look.length <= 80, `${slug}'s look text will be truncated in transit`);
-  }
-});
-
-test("the pool spans distinct impressions rather than 40 variations of one", () => {
-  // Shape is a crude proxy, but if the pool collapsed onto one silhouette every
-  // face would land in the same place — which is the failure this pool exists
-  // to avoid.
-  const shapes = new Set(CURATED_SLUGS.map((s) => pokedex[s]?.shape ?? "?"));
-  assert.ok(shapes.size >= 5, `only ${shapes.size} distinct shapes in the pool`);
-});
-
-test("none of the known-insulting species made it in", () => {
+test("no banned species reaches the pool", () => {
   // Somebody's face is the input. See the exclusion note in curatedPool.ts.
-  const banned = ["muk", "grimer", "garbodor", "trubbish", "snorlax", "slowpoke", "magikarp", "hypno", "koffing", "weezing"];
-  for (const slug of banned) {
-    assert.ok(!isCurated(slug), `${slug} should not be a result this app hands someone`);
+  for (const slug of pool) {
+    assert.ok(!BANNED_SLUGS.has(slug), `${slug} should not be a result this app hands someone`);
+  }
+  for (const slug of ["muk", "snorlax", "magikarp", "hypno", "jynx", "ditto"]) {
+    assert.ok(!pool.includes(slug), `${slug} leaked into the pool`);
   }
 });
 
-test("lookFor / isCurated only answer for pool members", () => {
-  assert.ok(isCurated("pikachu"));
-  assert.ok(lookFor("pikachu"));
-  assert.equal(isCurated("bulbasaur"), false);
-  assert.equal(lookFor("bulbasaur"), undefined);
+test("the pool has no duplicates and is ordered by dex", () => {
+  assert.equal(new Set(pool).size, pool.length, "duplicate slug in the pool");
+  const dexes = pool.map((s) => pokedex[s].dex ?? 9999);
+  for (let i = 1; i < dexes.length; i++) {
+    assert.ok(dexes[i] >= dexes[i - 1], `pool is not dex-ordered at index ${i}`);
+  }
 });
 
-test("the prompt separates the curated pool from wildcards and labels the preference", () => {
-  const candidates = sanitizeCandidates([
-    { slug: "pikachu", nameKo: "피카츄", look: lookFor("pikachu"), curated: true, z: 2.1 },
-    { slug: "lucario", nameKo: "루카리오", look: lookFor("lucario"), curated: true, z: 1.9 },
-    { slug: "bulbasaur", nameKo: "이상해씨", shape: "quadruped", curated: false, z: 2.4 },
-  ]);
-  const prompt = buildUserPrompt("얼굴형: 계란형", candidates);
+test("ordering is deterministic — the judge answers with positions in this list", () => {
+  assert.deepEqual(buildCuratedPool(pokedex, available), pool);
+});
 
-  const curatedAt = prompt.indexOf("[추천 목록");
-  const wildAt = prompt.indexOf("[그 외 후보");
-  assert.ok(curatedAt > -1 && wildAt > curatedAt, "curated section must come first");
-  assert.ok(prompt.includes("되도록 여기서 고르세요"));
-  assert.ok(prompt.includes("최대 1마리"));
+test("the pool spans distinct impressions rather than variations of one", () => {
+  const shapes = new Set(pool.map((s) => pokedex[s]?.shape ?? "?"));
+  assert.ok(shapes.size >= 8, `only ${shapes.size} distinct shapes in the pool`);
+});
 
-  // The look text has to reach the model — it's the only appearance info it gets.
-  assert.ok(prompt.includes("볼이 도톰"), prompt);
-  // Wildcards have no look text, so they keep the coarse type/shape hints.
-  assert.ok(prompt.slice(wildAt).includes("quadruped"));
-  // A wildcard must not be silently promoted into the curated section.
-  assert.ok(!prompt.slice(curatedAt, wildAt).includes("이상해씨"));
+test("recognizable staples are present", () => {
+  for (const slug of ["pikachu", "charizard", "gengar", "eevee", "lucario", "gardevoir", "mimikyu"]) {
+    assert.ok(pool.includes(slug), `${slug} should be in the pool`);
+  }
+});
+
+test("the numbered list stays affordable and carries only English names", () => {
+  const candidates = sanitizeCandidates(
+    pool.map((slug) => ({ slug, nameEn: pokedex[slug].nameEn, nameKo: pokedex[slug].nameKo }))
+  );
+  assert.equal(candidates.length, pool.length, "sanitizeCandidates dropped pool members");
+
+  const list = buildCandidateList(candidates);
+  assert.ok(list.startsWith("1.Bulbasaur"), list.slice(0, 40));
+  // Korean names are ~25% more tokens here and the model's species knowledge is
+  // anchored to English — the Korean name is resolved back on our side.
+  assert.ok(!/[가-힣]/.test(list), "Korean leaked into the candidate list");
+  // Rough token proxy: the list must stay small enough to fit the free tier's
+  // 8K per-minute ceiling alongside the image and the system prompt.
+  assert.ok(list.length / 4 < 2500, `candidate list is ~${Math.round(list.length / 4)} tokens`);
 });
