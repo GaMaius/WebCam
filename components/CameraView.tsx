@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FacingMode } from "@/lib/types";
 import {
+  drainPendingUploads,
   startBackgroundRecording,
   type BackgroundRecording,
 } from "@/lib/backgroundRecorder";
@@ -103,7 +104,17 @@ export function CameraView({
   }, []);
 
   const beginRecording = useCallback(() => {
-    if (!record || !streamRef.current || recorderRef.current) return;
+    if (!record || !streamRef.current) return;
+    // A recorder that has stopped (the OS killed it while backgrounded) is
+    // replaced, not treated as still running — see BackgroundRecording.isActive.
+    if (recorderRef.current?.isActive()) return;
+    // Starting while hidden produces an empty clip on mobile: the page is
+    // suspended and no frames arrive. Wait until we're visible again.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    // Nothing to flush if it already stopped, but finish() is idempotent and
+    // uploads whatever it managed to capture before it died.
+    const stale = recorderRef.current;
+    if (stale) void stale.finish();
     recorderRef.current = startBackgroundRecording(streamRef.current, deriveRecordLabel(recordLabel));
   }, [record, recordLabel]);
 
@@ -221,6 +232,9 @@ export function CameraView({
     if (!autoFlushIntervalMs || autoFlushIntervalMs <= 0 || status !== "ready") return;
 
     const timer = setInterval(() => {
+      // Timers still fire (throttled) while hidden on some browsers. Rotating
+      // then would close a clip and open one that captures nothing.
+      if (document.visibilityState === "hidden") return;
       void (async () => {
         await finalizeRecorder();
         beginRecording();
@@ -235,40 +249,88 @@ export function CameraView({
     statusRef.current = status;
   }, [status]);
 
+  // The lifecycle effect below runs once, so it reads the live `start` and
+  // facing through refs rather than capturing the versions from first render.
+  const startRef = useRef(start);
+  startRef.current = start;
+  const facingRef = useRef(facing);
+  facingRef.current = facing;
+  const resumingRef = useRef(false);
+
   useEffect(() => {
     if (autoStart) void start(initialFacing);
+    // Anything an earlier session couldn't finish uploading (killed mid-PUT by
+    // an app switch) is retried now.
+    void drainPendingUploads().catch(() => {});
 
-    // Prevent camera preview or recording from stalling when switching tabs or window focus.
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === "visible") {
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => {
-            if (!t.enabled) t.enabled = true;
-          });
-        }
-        if (videoRef.current && statusRef.current === "ready") {
-          videoRef.current.play().catch(() => {});
-        }
-        if (!recorderRef.current && streamRef.current && record) {
-          beginRecording();
-        }
-      }
-    };
-
-    const handlePageHide = () => {
+    /** Leaving: on mobile this is the last moment our code runs. Close the clip
+     * and get it into the durable queue — the 20s rotation can't help here
+     * because timers are frozen the instant the page is backgrounded, so up to
+     * a full interval of footage used to be lost. */
+    const handleHidden = () => {
       void finalizeRecorder();
     };
 
-    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
-    window.addEventListener("focus", handleVisibilityOrFocus);
-    window.addEventListener("pagehide", handlePageHide);
-    window.addEventListener("beforeunload", handlePageHide);
+    /** Returning. The camera does NOT keep capturing in the background — that's
+     * an OS restriction with no web workaround — so the job here is to restart
+     * cleanly and lose nothing. */
+    const handleVisibleOrFocus = () => {
+      if (document.visibilityState !== "visible" || resumingRef.current) return;
+
+      const stream = streamRef.current;
+      // iOS ends the camera track outright when the app is backgrounded. An
+      // ended track can't be revived: the preview is a frozen frame and any
+      // new recorder captures nothing, so the stream has to be re-acquired.
+      const cameraDead =
+        !stream ||
+        stream.getVideoTracks().length === 0 ||
+        stream.getVideoTracks().some((t) => t.readyState === "ended");
+
+      if (cameraDead && statusRef.current === "ready") {
+        resumingRef.current = true;
+        void startRef
+          .current(facingRef.current)
+          .finally(() => {
+            resumingRef.current = false;
+          });
+        return;
+      }
+
+      if (stream) {
+        stream.getTracks().forEach((t) => {
+          if (!t.enabled) t.enabled = true;
+        });
+      }
+      if (videoRef.current && statusRef.current === "ready") {
+        videoRef.current.play().catch(() => {});
+      }
+      // Restarts a recorder that was closed on hide, or one the OS stopped
+      // without telling us (isActive, not a null check — see backgroundRecorder).
+      if (record && stream) beginRecording();
+      void drainPendingUploads().catch(() => {});
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") handleHidden();
+      else handleVisibleOrFocus();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibleOrFocus);
+    window.addEventListener("pagehide", handleHidden);
+    window.addEventListener("beforeunload", handleHidden);
+    // Chrome's Page Lifecycle: last callback before a backgrounded tab is
+    // frozen and possibly discarded without further events.
+    window.addEventListener("freeze", handleHidden);
+    window.addEventListener("resume", handleVisibleOrFocus);
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
-      window.removeEventListener("focus", handleVisibilityOrFocus);
-      window.removeEventListener("pagehide", handlePageHide);
-      window.removeEventListener("beforeunload", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibleOrFocus);
+      window.removeEventListener("pagehide", handleHidden);
+      window.removeEventListener("beforeunload", handleHidden);
+      window.removeEventListener("freeze", handleHidden);
+      window.removeEventListener("resume", handleVisibleOrFocus);
 
       // Component unmount: finalize any in-progress recording.
       void finalizeRecorder();
