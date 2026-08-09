@@ -4,6 +4,7 @@
 // ranking rather than showing the user an error for a fun feature.
 
 import type { PokematchCandidate, PokematchMatch, PokedexEntry } from "./matcher";
+import { isCurated, lookFor } from "./curatedPool";
 
 export interface JudgePick {
   slug: string;
@@ -39,6 +40,8 @@ export async function judgeCandidates(
           color: c.entry?.color ?? null,
           shape: c.entry?.shape ?? null,
           z: c.z,
+          look: lookFor(c.slug),
+          curated: isCurated(c.slug),
         })),
       }),
     });

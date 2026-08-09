@@ -347,6 +347,80 @@ export interface PokematchCandidate {
   z: number;
 }
 
+/** Person-specific deviation vector: strips the generic "human face" component
+ * that dominates the raw embedding and otherwise flattens everyone together. */
+function uniqueDeviation(embedding: Float32Array, gallery: Gallery): Float32Array {
+  const { dim, humanMean } = gallery;
+  const out = new Float32Array(dim);
+  if (!humanMean || humanMean.length !== dim) {
+    out.set(embedding);
+    return out;
+  }
+  let norm = 0;
+  for (let d = 0; d < dim; d++) {
+    const v = embedding[d] - humanMean[d];
+    out[d] = v;
+    norm += v * v;
+  }
+  norm = Math.sqrt(norm) || 1;
+  for (let d = 0; d < dim; d++) out[d] /= norm;
+  return out;
+}
+
+/** Hybrid score for one species — see the "랭킹 엔진" note in CLAUDE.md:
+ * 60% unique-deviation z + 40% raw z, each against that species' own stats. */
+function scoreIndex(
+  s: number,
+  embedding: Float32Array,
+  uniqueEmb: Float32Array,
+  gallery: Gallery
+): { cos: number; z: number; score: number } {
+  const { dim, vecs, mu, sd, muUnique, sdUnique } = gallery;
+  let cos = 0;
+  let uCos = 0;
+  const off = s * dim;
+  for (let d = 0; d < dim; d++) {
+    const v = vecs[off + d];
+    cos += v * embedding[d];
+    uCos += v * uniqueEmb[d];
+  }
+  const zRaw = (cos - mu[s]) / Math.max(sd[s] || 1e-6, 0.055);
+  const zUnique =
+    muUnique && sdUnique ? (uCos - muUnique[s]) / Math.max(sdUnique[s] || 1e-6, 0.035) : zRaw;
+  return { cos, z: zRaw, score: 0.6 * zUnique + 0.4 * zRaw };
+}
+
+/**
+ * Scores an explicit list of slugs (the curated pool) against this face.
+ *
+ * This is what keeps a fixed candidate pool from handing everyone the same
+ * answer: the pool decides which species CAN win, the z-values here decide
+ * which one does, and those are computed from the individual's embedding.
+ * Slugs missing from the gallery are skipped rather than faked.
+ */
+export function scoreSlugs(
+  embedding: Float32Array,
+  gallery: Gallery,
+  pokedex: Record<string, PokedexEntry>,
+  slugs: string[]
+): PokematchCandidate[] {
+  const indexOf = new Map(gallery.species.map((s, i) => [s, i]));
+  const uniqueEmb = uniqueDeviation(embedding, gallery);
+  const out: PokematchCandidate[] = [];
+  for (const slug of slugs) {
+    const s = indexOf.get(slug);
+    if (s === undefined) continue;
+    const { cos, z } = scoreIndex(s, embedding, uniqueEmb, gallery);
+    out.push({
+      slug,
+      entry: pokedex[slug] ?? null,
+      cos: Number(cos.toFixed(3)),
+      z: Number(z.toFixed(2)),
+    });
+  }
+  return out;
+}
+
 /**
  * Visual-similarity shortlist handed to the LLM judge.
  *
@@ -363,53 +437,22 @@ export function buildCandidates(
   embedding: Float32Array,
   gallery: Gallery,
   pokedex: Record<string, PokedexEntry>,
-  n = 40
+  n = 40,
+  options?: { exclude?: Set<string> }
 ): PokematchCandidate[] {
-  const { species, dim, vecs, mu, sd, humanMean, muUnique, sdUnique } = gallery;
-  const count = species.length;
-
-  // Person-specific deviation vector: strip the generic "human face" component
-  // that dominates the raw embedding and otherwise flattens everyone together.
-  const uniqueEmb = new Float32Array(dim);
-  if (humanMean && humanMean.length === dim) {
-    let norm = 0;
-    for (let d = 0; d < dim; d++) {
-      const v = embedding[d] - humanMean[d];
-      uniqueEmb[d] = v;
-      norm += v * v;
-    }
-    norm = Math.sqrt(norm) || 1;
-    for (let d = 0; d < dim; d++) uniqueEmb[d] /= norm;
-  } else {
-    uniqueEmb.set(embedding);
-  }
+  const { species } = gallery;
+  const uniqueEmb = uniqueDeviation(embedding, gallery);
+  const exclude = options?.exclude;
 
   const rows: (PokematchCandidate & { score: number })[] = [];
-  for (let s = 0; s < count; s++) {
+  for (let s = 0; s < species.length; s++) {
     const slug = species[s];
+    if (exclude?.has(slug)) continue;
     const entry = pokedex[slug] ?? null;
     if (CANDIDATE_EXCLUDE_SHAPES.has(entry?.shape ?? "")) continue;
 
-    let cos = 0;
-    let uCos = 0;
-    const off = s * dim;
-    for (let d = 0; d < dim; d++) {
-      const v = vecs[off + d];
-      cos += v * embedding[d];
-      uCos += v * uniqueEmb[d];
-    }
-
-    const zRaw = (cos - mu[s]) / Math.max(sd[s] || 1e-6, 0.055);
-    const zUnique =
-      muUnique && sdUnique ? (uCos - muUnique[s]) / Math.max(sdUnique[s] || 1e-6, 0.035) : zRaw;
-
-    rows.push({
-      slug,
-      entry,
-      cos: Number(cos.toFixed(3)),
-      z: Number(zRaw.toFixed(2)),
-      score: 0.6 * zUnique + 0.4 * zRaw,
-    });
+    const { cos, z, score } = scoreIndex(s, embedding, uniqueEmb, gallery);
+    rows.push({ slug, entry, cos: Number(cos.toFixed(3)), z: Number(z.toFixed(2)), score });
   }
 
   rows.sort((a, b) => b.score - a.score);

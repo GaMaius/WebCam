@@ -9,6 +9,7 @@ import {
   embedFace,
   matchTopK,
   buildCandidates,
+  scoreSlugs,
   debugRank,
   POKEMATCH_IMG_SIZE,
   type Gallery,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
+import { CURATED_SLUGS, isCurated } from "@/lib/pokematch/curatedPool";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
 
@@ -28,7 +30,10 @@ export type PokematchEngine = "llm" | "local";
 const FRAMES_TO_AVERAGE = 8; // averaging several frames stabilizes the match (consistency)
 const CROP_COEF = 1.15; // tight face-only crop margin
 const ALIGN_TIMEOUT_MS = 15_000;
-const CANDIDATE_COUNT = 40; // shortlist size handed to the judge
+// The judge sees the curated pool (40 recognizable species, always) plus a few
+// embedding wildcards, so a face that genuinely matches something outside the
+// pool can still surface — but the prompt tells it to prefer the pool.
+const WILDCARD_COUNT = 6;
 const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 
 interface FaceBox {
@@ -192,7 +197,13 @@ export function usePokematchScan() {
       pokedex: Record<string, PokedexEntry>,
       features: FaceFeatures | null
     ) => {
-      const candidates = buildCandidates(embedding, gallery, pokedex, CANDIDATE_COUNT);
+      // Curated pool scored against THIS face (so a fixed pool still gives
+      // different people different answers), plus wildcards it doesn't cover.
+      const curated = scoreSlugs(embedding, gallery, pokedex, CURATED_SLUGS);
+      const wildcards = buildCandidates(embedding, gallery, pokedex, WILDCARD_COUNT, {
+        exclude: new Set(CURATED_SLUGS),
+      });
+      const candidates = [...curated, ...wildcards];
       const description = features ? describeFaceFeatures(features) : "";
 
       let result: PokematchMatch[] | null = null;
@@ -218,8 +229,16 @@ export function usePokematchScan() {
         setDebugText(
           `ENGINE: ${usedLlm ? `llm (${judgeModel})` : "local z-score fallback"}\n\n` +
             `FACE FEATURES SENT TO JUDGE:\n${description || "(측정 실패 — 판정에 전달되지 않음)"}\n\n` +
-            `CANDIDATES (${candidates.length}):\n` +
-            candidates.map((c) => `${c.slug.padEnd(16)} z=${c.z.toFixed(2).padStart(6)} cos=${c.cos.toFixed(3)}`).join("\n") +
+            `CANDIDATES (추천 ${curated.length} + 그 외 ${wildcards.length}):\n` +
+            [...candidates]
+              .sort((a, b) => b.z - a.z)
+              .map(
+                (c) =>
+                  `${isCurated(c.slug) ? "추천" : "그외"} ${c.slug.padEnd(14)} z=${c.z
+                    .toFixed(2)
+                    .padStart(6)} cos=${c.cos.toFixed(3)}`
+              )
+              .join("\n") +
             `\n\n` +
             debugDump(embedding, gallery)
         );

@@ -15,6 +15,12 @@ export interface CandidateInput {
   color?: string | null;
   shape?: string | null;
   z?: number;
+  /** Short Korean description of the species' face/impression. Only the
+   * curated pool carries this — the judge can't see sprites, so for anything
+   * else it has to fall back on whatever it remembers. */
+  look?: string;
+  /** True for the curated "good to show" pool; false for embedding wildcards. */
+  curated?: boolean;
 }
 
 export interface Pick {
@@ -47,6 +53,8 @@ export function sanitizeCandidates(raw: unknown): CandidateInput[] {
       color: typeof c.color === "string" ? c.color.slice(0, 16) : null,
       shape: typeof c.shape === "string" ? c.shape.slice(0, 16) : null,
       z: typeof c.z === "number" && Number.isFinite(c.z) ? Number(c.z.toFixed(2)) : undefined,
+      look: typeof c.look === "string" ? c.look.slice(0, 80) : undefined,
+      curated: c.curated === true,
     });
     if (out.length >= MAX_CANDIDATES) break;
   }
@@ -54,40 +62,60 @@ export function sanitizeCandidates(raw: unknown): CandidateInput[] {
 }
 
 export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 심사위원입니다.
-사용자의 얼굴을 실제로 측정한 수치 설명과, 이미지 임베딩이 뽑아준 후보 포켓몬 목록을 받습니다.
-당신은 사진을 볼 수 없습니다. 오직 주어진 수치 설명만으로 판단하세요.
+사용자의 얼굴을 실제로 측정한 수치 설명과, 후보 포켓몬 목록을 받습니다.
+당신은 사진을 볼 수 없습니다. 오직 주어진 수치 설명과 후보의 생김새 설명만으로 판단하세요.
+
+후보는 두 그룹입니다:
+- [추천 목록] 결과로 보여주기 좋은 포켓몬들입니다. 각 항목에 생김새·인상 설명이 붙어 있습니다. **되도록 여기서 고르세요.**
+- [그 외 후보] 이미지 유사도만 높게 나온 종입니다. 추천 목록에 정말 맞는 게 없을 때만, 그리고 명백히 더 닮았을 때만 쓰세요. 최대 1마리까지만 허용합니다.
 
 판정 규칙:
 1. 반드시 주어진 후보 목록 안에서만 고르세요. 목록에 없는 slug는 절대 만들어내지 마세요.
 2. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요.
-3. 후보에 붙은 유사도(z) 점수는 "이미지가 비슷해 보인다"는 약한 참고값일 뿐입니다. 얼굴 수치 설명과 실제 포켓몬의 생김새(얼굴형, 눈매, 색, 실루엣, 분위기)가 맞는지를 우선하세요. z가 높아도 얼굴 특징과 어긋나면 과감히 버리세요.
-4. 5마리가 같은 진화 계열이거나 서로 거의 똑같이 생기면 안 됩니다. 서로 다른 인상의 포켓몬으로 채우세요.
+3. 판단의 중심은 **얼굴 수치 설명 ↔ 후보의 생김새 설명**의 일치입니다. 얼굴형·눈매·눈 크기·턱선·인상을 맞춰보세요. 후보에 붙은 유사도(z) 점수는 "이미지가 비슷해 보인다"는 약한 참고값일 뿐이니, z가 높아도 생김새가 어긋나면 과감히 버리세요.
+4. 5마리가 서로 거의 똑같은 인상이면 안 됩니다. 날카로운/우아한/귀여운/듬직한/개성 있는 인상이 섞이도록 고르되, 1위는 가장 잘 맞는 하나여야 합니다.
 5. percent는 55~97 사이 정수이며, 1위부터 5위까지 반드시 내림차순이고 서로 다른 값이어야 합니다.
 6. reason은 한국어 한 문장(공백 포함 60자 이내)이고, 반드시 주어진 얼굴 수치 중 구체적인 근거 하나 이상을 언급해야 합니다. (예: "턱각이 크고 눈매가 올라가 있어 ~와 겹칩니다")
-7. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 쓰지 마세요.
+7. 재미로 보는 서비스입니다. 외모를 비하하거나 평가절하하는 표현은 절대 쓰지 마세요. 읽는 사람이 기분 좋을 문장으로 쓰세요.
 
 출력은 오직 아래 형태의 JSON 하나입니다. 다른 텍스트를 덧붙이지 마세요.
 {"picks":[{"slug":"pikachu","percent":93,"reason":"..."}]}`;
 
+function candidateLine(c: CandidateInput): string {
+  const name = c.nameKo ?? c.nameEn ?? c.slug;
+  // The curated entries lead with their look description because that's what
+  // the judge actually matches against; type/color/shape are secondary hints
+  // and only carry weight for wildcards, which have no look text at all.
+  const bits = [
+    `slug=${c.slug}`,
+    `이름=${name}`,
+    c.look ? `생김새=${c.look}` : null,
+    c.look ? null : c.types?.length ? `타입=${c.types.join("/")}` : null,
+    c.look ? null : c.color ? `대표색=${c.color}` : null,
+    c.look ? null : c.shape ? `형태=${c.shape}` : null,
+    c.z !== undefined ? `z=${c.z}` : null,
+  ].filter(Boolean);
+  return `- ${bits.join(", ")}`;
+}
+
 export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  const lines = candidates.map((c) => {
-    const name = c.nameKo ?? c.nameEn ?? c.slug;
-    const bits = [
-      `slug=${c.slug}`,
-      `이름=${name}${c.nameEn && c.nameKo ? `(${c.nameEn})` : ""}`,
-      c.types?.length ? `타입=${c.types.join("/")}` : null,
-      c.color ? `대표색=${c.color}` : null,
-      c.shape ? `형태=${c.shape}` : null,
-      c.z !== undefined ? `z=${c.z}` : null,
-    ].filter(Boolean);
-    return `- ${bits.join(", ")}`;
-  });
+  const curated = candidates.filter((c) => c.curated);
+  const wildcards = candidates.filter((c) => !c.curated);
 
-  return `[사용자 얼굴 측정값]
-${description.slice(0, MAX_DESCRIPTION_CHARS)}
-
-[후보 포켓몬 ${candidates.length}종 — 이 중에서만 고르세요]
-${lines.join("\n")}`;
+  const sections = [`[사용자 얼굴 측정값]\n${description.slice(0, MAX_DESCRIPTION_CHARS)}`];
+  if (curated.length) {
+    sections.push(
+      `[추천 목록 ${curated.length}종 — 되도록 여기서 고르세요]\n${curated.map(candidateLine).join("\n")}`
+    );
+  }
+  if (wildcards.length) {
+    sections.push(
+      `[그 외 후보 ${wildcards.length}종 — 정말 더 닮았을 때만, 최대 1마리]\n${wildcards
+        .map(candidateLine)
+        .join("\n")}`
+    );
+  }
+  return sections.join("\n\n");
 }
 
 /** gpt-oss emits reasoning, and json_object mode isn't guaranteed if the
