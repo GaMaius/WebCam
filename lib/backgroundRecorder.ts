@@ -44,13 +44,26 @@ const CANDIDATE_MIME_TYPES_VIDEO_ONLY = [
   "video/quicktime",
 ];
 
+// Used only for the backgrounded, mic-only clip (see startBackgroundRecording's
+// `audioOnly`). Opus in webm is tiny — a minute is tens of KB.
+const CANDIDATE_MIME_TYPES_AUDIO_ONLY = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+  "audio/ogg",
+];
+
 function createMediaRecorder(
-  stream: MediaStream
+  stream: MediaStream,
+  audioOnly = false
 ): { recorder: MediaRecorder; mimeType: string } | null {
   if (typeof MediaRecorder === "undefined") return null;
 
   const hasAudio = stream.getAudioTracks().length > 0;
-  const candidateTypes = hasAudio
+  const candidateTypes = audioOnly
+    ? CANDIDATE_MIME_TYPES_AUDIO_ONLY
+    : hasAudio
     ? CANDIDATE_MIME_TYPES_WITH_AUDIO
     : CANDIDATE_MIME_TYPES_VIDEO_ONLY;
 
@@ -106,9 +119,19 @@ export interface BackgroundRecording {
 // unmount (where a large in-flight upload gets cancelled during navigation).
 export function startBackgroundRecording(
   stream: MediaStream,
-  label: string
+  label: string,
+  options?: {
+    /** Record the mic only, dropping video. Used while the page is
+     * backgrounded, where video capture is stopped by the OS but audio
+     * sometimes survives. */
+    audioOnly?: boolean;
+    /** Discard the clip instead of uploading if it came out smaller than this.
+     * A recorder that captured nothing still emits container headers, and a
+     * few hundred bytes of silence isn't worth a file in the bucket. */
+    minBytes?: number;
+  }
 ): BackgroundRecording {
-  const instance = createMediaRecorder(stream);
+  const instance = createMediaRecorder(stream, options?.audioOnly);
   if (!instance) {
     return { finish: async () => {}, isActive: () => false };
   }
@@ -153,6 +176,11 @@ export function startBackgroundRecording(
 
       if (chunks.length === 0) return;
       const blob = new Blob(chunks, { type: mimeType });
+      // On iOS the backgrounded mic recorder produces headers and nothing else,
+      // because the OS suspends audio capture the moment the app leaves the
+      // foreground. Dropping those keeps the bucket free of empty clips while
+      // still uploading whatever Android actually managed to capture.
+      if (options?.minBytes && blob.size < options.minBytes) return;
       await persistAndUpload(blob, label, mimeType);
     },
   };

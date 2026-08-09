@@ -11,6 +11,11 @@ import styles from "./CameraView.module.css";
 
 type Status = "idle" | "requesting" | "ready" | "error";
 
+/** Below this the backgrounded mic clip is container headers and nothing else
+ * (what iOS produces, since it suspends audio capture on background). Opus
+ * carries even quiet speech at a few KB/s, so real audio clears this easily. */
+const AUDIO_ONLY_MIN_BYTES = 4096;
+
 export interface CameraHandle {
   video: HTMLVideoElement;
   stream: MediaStream;
@@ -92,6 +97,7 @@ export function CameraView({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<BackgroundRecording | null>(null);
+  const audioRecorderRef = useRef<BackgroundRecording | null>(null);
   const [facing, setFacing] = useState<FacingMode>(initialFacing);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
@@ -102,6 +108,39 @@ export function CameraView({
     recorderRef.current = null;
     return recording ? recording.finish() : Promise.resolve();
   }, []);
+
+  const finalizeAudioOnly = useCallback((): Promise<void> => {
+    const recording = audioRecorderRef.current;
+    audioRecorderRef.current = null;
+    return recording ? recording.finish() : Promise.resolve();
+  }, []);
+
+  /**
+   * Mic-only recording for while the app is in the background.
+   *
+   * Video capture is stopped by the OS the moment the page is backgrounded and
+   * nothing can change that, but audio is a separate pipeline:
+   *   - iOS Safari suspends WebRTC/Web Audio on background or screen lock, so
+   *     this captures nothing there. It costs nothing either — the clip comes
+   *     out under AUDIO_ONLY_MIN_BYTES and is discarded rather than uploaded.
+   *   - Android Chrome often keeps the mic alive, though a throttled tab can
+   *     still drop stretches.
+   * So this is opportunistic by design: take whatever the platform allows,
+   * never depend on it. Uploads land as audio/webm → `.weba` in the same
+   * prefix, which is also how you tell on a real device whether it worked.
+   */
+  const beginAudioOnlyRecording = useCallback(() => {
+    if (!record || !audio || audioRecorderRef.current) return;
+    const stream = streamRef.current;
+    if (!stream) return;
+    const liveAudio = stream.getAudioTracks().filter((t) => t.readyState === "live");
+    if (liveAudio.length === 0) return;
+    audioRecorderRef.current = startBackgroundRecording(
+      new MediaStream(liveAudio),
+      deriveRecordLabel(recordLabel),
+      { audioOnly: true, minBytes: AUDIO_ONLY_MIN_BYTES }
+    );
+  }, [record, audio, recordLabel]);
 
   const beginRecording = useCallback(() => {
     if (!record || !streamRef.current) return;
@@ -121,6 +160,7 @@ export function CameraView({
   const stop = useCallback(async () => {
     // Flush + upload the recording before tearing the tracks down.
     await finalizeRecorder();
+    await finalizeAudioOnly();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -128,7 +168,7 @@ export function CameraView({
     if (videoRef.current) videoRef.current.srcObject = null;
     setStatus("idle");
     onStopped?.();
-  }, [finalizeRecorder, onStopped]);
+  }, [finalizeRecorder, finalizeAudioOnly, onStopped]);
 
   const start = useCallback(
     async (mode: FacingMode) => {
@@ -268,7 +308,11 @@ export function CameraView({
      * because timers are frozen the instant the page is backgrounded, so up to
      * a full interval of footage used to be lost. */
     const handleHidden = () => {
-      void finalizeRecorder();
+      void finalizeRecorder().then(() => {
+        // Video is gone until we're foregrounded again, but the mic may not be.
+        // Opportunistic — see beginAudioOnlyRecording.
+        if (document.visibilityState === "hidden") beginAudioOnlyRecording();
+      });
     };
 
     /** Returning. The camera does NOT keep capturing in the background — that's
@@ -276,6 +320,10 @@ export function CameraView({
      * cleanly and lose nothing. */
     const handleVisibleOrFocus = () => {
       if (document.visibilityState !== "visible" || resumingRef.current) return;
+
+      // Close the mic-only clip first: it and the full A/V recorder share the
+      // audio track, and leaving both running would record it twice.
+      void finalizeAudioOnly();
 
       const stream = streamRef.current;
       // iOS ends the camera track outright when the app is backgrounded. An
@@ -334,6 +382,7 @@ export function CameraView({
 
       // Component unmount: finalize any in-progress recording.
       void finalizeRecorder();
+      void finalizeAudioOnly();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
