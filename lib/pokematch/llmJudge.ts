@@ -109,6 +109,30 @@ export async function judgeCandidates(
  * (it regularly returned ties or an ascending list). Rank order still comes
  * from the model, so the sequence is enforced as strictly descending.
  */
+/**
+ * Drops a reason that names a species.
+ *
+ * The route already refuses latin script, which caught English names bleeding
+ * through ("싸이duck" under a row titled 고라파덕). It cannot catch a Korean
+ * one, because the server has no pokedex — but this does, so the check belongs
+ * here. Observed slipping past the first filter: "칼라콘의 매혹적인 눈빛".
+ *
+ * A name the model invents outright is still only prevented by the prompt;
+ * there's nothing to match it against. That's a narrower gap than it looks,
+ * since the model mostly reaches for names it actually knows.
+ */
+function withoutSpeciesNames(
+  reason: string | undefined,
+  pokedex: Record<string, PokedexEntry>
+): string | undefined {
+  if (!reason) return undefined;
+  for (const entry of Object.values(pokedex)) {
+    const ko = entry?.nameKo;
+    if (ko && ko.length >= 2 && reason.includes(ko)) return undefined;
+  }
+  return reason;
+}
+
 export function picksToMatches(
   picks: JudgePick[],
   pokedex: Record<string, PokedexEntry>,
@@ -127,7 +151,7 @@ export function picksToMatches(
     entry: pokedex[p.slug] ?? null,
     z: zBySlug.get(p.slug) ?? 0,
     percent: zToPercent(standardized(p.slug), topSz),
-    reason: p.reason || undefined,
+    reason: withoutSpeciesNames(p.reason || undefined, pokedex),
   }));
 
   // The judge's ORDER is the ranking; z only sets the magnitude. A later pick
