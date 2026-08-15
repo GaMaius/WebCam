@@ -107,10 +107,23 @@ async function callProvider(
   messages: unknown[],
   signal: AbortSignal
 ) {
-  // reasoning_effort "none" turns off Qwen's thinking pass. Picking five
-  // lookalikes from a photo is perceptual, not deductive, so the reasoning
-  // tokens bought little — and they were 300-900 of the ~3,000 tokens each
-  // request costs, which matters a lot against an 8K tokens-per-minute cap.
+  // ⚠️ Reasoning is ON again, and the reason it was ever off no longer holds.
+  //
+  // It was disabled to save 300-900 tokens when a request cost ~5,800 against
+  // an 8K per-minute cap. The English prompt cut that to ~3,500 and a second
+  // key doubled the ceiling to 16K, so the constraint that forced the decision
+  // is gone.
+  //
+  // What put it back: measured over three consecutive scans of one face, the
+  // judge returned 15 species with ZERO repeats. If it were sampling from even
+  // a 20-species preference, that happens 0.3% of the time; it implies the
+  // model rates 40-60 species as equally good and is effectively indifferent
+  // among them. Its perception is stable — every run cited dark hair, sharp
+  // eyes, a defined jaw — but the mapping from that to a species is a fresh
+  // roll each time, which is what free association looks like when a model
+  // answers without deliberating. Temperature cannot fix that: there is no
+  // concentrated preference to sharpen, which is why 0.15 collapsed onto safe
+  // mascots instead of onto good answers.
   const base = {
     model: provider.model,
     messages,
@@ -126,11 +139,12 @@ async function callProvider(
     // for-fun app, occasionally excellent beats reliably bland, and re-rolling
     // is cheap now that requests no longer blow the per-minute cap.
     temperature: 0.7,
-    // Counted against the per-minute budget as if fully used, so it's kept
-    // just above what five picks and their one-line reasons actually need
-    // (~114 tokens measured) rather than left at a comfortable ceiling.
-    max_completion_tokens: 300,
-    reasoning_effort: "none",
+    // Has to cover the thinking pass as well as the answer now. Counted
+    // against the per-minute budget as if fully used, so it is sized to the
+    // job rather than left at a comfortable ceiling: ~900 for reasoning plus
+    // ~150 for eight picks and their one-line reasons.
+    max_completion_tokens: 1100,
+    reasoning_effort: "default",
   };
   const post = (body: unknown) =>
     fetch(provider.url, {

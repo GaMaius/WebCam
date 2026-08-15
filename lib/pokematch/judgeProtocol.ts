@@ -154,6 +154,7 @@ Rules:
 5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") over and over — that is making one pick repeatedly, not several. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
 6. The list order is meaningless (it is shuffled). Do not favour low numbers; consider the whole list.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
+7c. Commit to the answer. Before choosing, decide which two or three features of this face are the most distinctive, then pick the species that match THOSE. Shown the same photo again you should reach the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
 8. Write each reason as ONE Korean sentence, at most 45 characters, citing at least one thing actually visible in the photo. Example: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다"
