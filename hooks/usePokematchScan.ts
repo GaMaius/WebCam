@@ -45,15 +45,16 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 // jawline all inform "who does this person look like", and the tight 1.15 box
 // cuts them off.
 //
-// ⚠️ SIZE IS A TOKEN DECISION, NOT A QUALITY ONE. Groq bills the image by
-// patch count, which scales with AREA. This was 448px on the estimate that it
-// cost ~256 tokens; a measured 429 (requested=5616 against an 8K per-minute
-// cap) put the real figure near 3,500 — more than the entire text prompt, and
-// enough that a single scan barely fit in a minute's budget. At 256px the
-// image costs about a third of that. Raising this back up will silently
-// reintroduce constant 429s; check the `requested=` number in a ?debug
-// rate-limit line before changing it.
-const JUDGE_IMAGE_SIZE = 256;
+// 448 again. It was cut to 256 while the image was believed to cost ~3,500
+// tokens; that figure came from underestimating Korean text tenfold, and the
+// image is really about 270 tokens at 256px and 830 at 448px. With the prompt
+// now in English a request sits near 2,900, so the extra detail is affordable
+// (~3,500, still two scans inside the 8K per-minute cap).
+//
+// Detail matters here beyond sharpness: at 256px the judge kept falling back
+// on famous mascots, which is what a model does when it cannot resolve what
+// makes one face different from another.
+const JUDGE_IMAGE_SIZE = 448;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
 
@@ -296,7 +297,10 @@ export function usePokematchScan() {
         embedding,
         gallery,
         pokedex,
-        buildCuratedPool(pokedex, gallery.species)
+        // excludeJudgeDefaults: the famous mascots the model returns for every
+        // face. The prompt asks it not to and it does anyway — see
+        // JUDGE_DEFAULT_SLUGS. The local fallback keeps its own exclusions.
+        buildCuratedPool(pokedex, gallery.species, { excludeJudgeDefaults: true })
       );
       const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";

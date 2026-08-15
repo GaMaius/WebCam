@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BANNED_SLUGS, EXTRA_FAMOUS, buildCuratedPool } from "../lib/pokematch/curatedPool.ts";
+import {
+  BANNED_SLUGS,
+  EXTRA_FAMOUS,
+  JUDGE_DEFAULT_SLUGS,
+  buildCuratedPool,
+} from "../lib/pokematch/curatedPool.ts";
 import { buildCandidateList, sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
 
 // The curated pool is the set of answers this app is willing to give. It's
@@ -87,4 +92,21 @@ test("the numbered list stays affordable and carries only English names", () => 
   // Rough token proxy: the list must stay small enough to fit the free tier's
   // 8K per-minute ceiling alongside the image and the system prompt.
   assert.ok(list.length / 4 < 2500, `candidate list is ~${Math.round(list.length / 4)} tokens`);
+});
+
+// The judge returns famous mascots for every face and ignores being told not
+// to, so the pool it sees must simply not contain them. See
+// JUDGE_DEFAULT_SLUGS for the evidence and the trade-off.
+test("the judge's pool drops the mascots the model defaults to", () => {
+  const withDefaults = buildCuratedPool(pokedex, available);
+  const forJudge = buildCuratedPool(pokedex, available, { excludeJudgeDefaults: true });
+
+  assert.ok(withDefaults.includes("pikachu"), "fixture sanity: pikachu is normally in the pool");
+  for (const slug of JUDGE_DEFAULT_SLUGS) {
+    assert.ok(!forJudge.includes(slug), `${slug} must not reach the judge`);
+  }
+  assert.ok(
+    forJudge.length > withDefaults.length - JUDGE_DEFAULT_SLUGS.size - 1,
+    "only the listed defaults may be removed"
+  );
 });

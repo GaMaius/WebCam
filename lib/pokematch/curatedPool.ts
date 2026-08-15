@@ -87,6 +87,35 @@ export const EXTRA_FAMOUS = [
   "lokix", "maushold", "pawmot", "baxcalibur", "koraidon", "miraidon",
 ];
 
+/**
+ * Species the vision judge reaches for regardless of whose face it is.
+ *
+ * This is the LLM's version of the embedding's hub problem, and it needs the
+ * same treatment. The embedding collapses onto round shapes; the model
+ * collapses onto fame. Across repeated scans of one face it returned Psyduck
+ * and Pikachu in nearly every run, with reasons generic enough to fit anyone
+ * ("부드러운 피부톤이 전체적인 분위기를 살립니다"), while the sharp-featured species
+ * the user recognised as actually resembling them never appeared.
+ *
+ * Instructing the model not to do this DOES NOT WORK — the system prompt names
+ * these very species as defaults to avoid, and they still came back first and
+ * second. A pool that doesn't contain them is the enforcement.
+ *
+ * The cost is real: this is a Pokemon lookalike app and Pikachu is not in it.
+ * That is the trade being made, and it is one line to undo. When the model
+ * skips the mascots it produces the specific, feature-grounded picks the app
+ * is for — one run gave Growlithe for "검은 머리와 날카로운 눈매", which is the
+ * kind of answer this list is trying to make room for.
+ *
+ * ⚠️ Evidence so far is repeated runs of ONE face. Widen or narrow it once
+ * more people have tried it; a species that genuinely suits somebody should
+ * not stay excluded forever.
+ */
+export const JUDGE_DEFAULT_SLUGS = new Set([
+  "pikachu", "psyduck", "golduck", "clefairy", "clefable",
+  "togepi", "togetic", "chansey", "mew", "mewtwo",
+]);
+
 const LAST_GEN1_DEX = 151;
 
 /**
@@ -100,7 +129,8 @@ const LAST_GEN1_DEX = 151;
  */
 export function buildCuratedPool(
   pokedex: Record<string, PokedexEntry>,
-  availableSlugs: Iterable<string>
+  availableSlugs: Iterable<string>,
+  options?: { excludeJudgeDefaults?: boolean }
 ): string[] {
   const available = availableSlugs instanceof Set ? availableSlugs : new Set(availableSlugs);
   const chosen = new Set<string>();
@@ -110,7 +140,14 @@ export function buildCuratedPool(
   }
   for (const slug of EXTRA_FAMOUS) chosen.add(slug);
 
+  const dropDefaults = options?.excludeJudgeDefaults === true;
   return [...chosen]
-    .filter((slug) => !BANNED_SLUGS.has(slug) && available.has(slug) && pokedex[slug])
+    .filter(
+      (slug) =>
+        !BANNED_SLUGS.has(slug) &&
+        !(dropDefaults && JUDGE_DEFAULT_SLUGS.has(slug)) &&
+        available.has(slug) &&
+        pokedex[slug]
+    )
     .sort((a, b) => (pokedex[a].dex ?? 9999) - (pokedex[b].dex ?? 9999) || a.localeCompare(b));
 }
