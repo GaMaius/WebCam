@@ -312,9 +312,15 @@ export function usePokematchScan() {
       let judgeFailReason = "";
       let retryAfter = 0;
       let rateLimited = false;
+      // The model's picks BEFORE pickGuards trims them. Without this the debug
+      // panel can't tell an unstable MODEL from a guard that reshuffled a
+      // stable one — the displayed five are chosen from a larger list, so both
+      // look the same from the outside.
+      let rawPicks: { slug: string; reason: string }[] = [];
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
+        rawPicks = judged.picks;
         if (judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates, features);
           judgeModel = judged.provider ? `${judged.model} · ${judged.provider}` : judged.model;
