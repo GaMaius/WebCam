@@ -23,6 +23,9 @@ export interface JudgeResult {
    * ?debug so a silent failover to the backup is visible rather than looking
    * like the primary simply behaved differently. */
   provider?: string;
+  /** The provider's own token accounting for this call ("prompt=… completion=…").
+   * Measured, unlike every character-count estimate that preceded it. */
+  usage?: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
    * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
@@ -118,6 +121,7 @@ export async function judgeCandidates(
       picks: data.picks,
       model: typeof data.model === "string" ? data.model : "",
       provider: typeof data.provider === "string" ? data.provider : undefined,
+      usage: typeof data.usage === "string" ? data.usage : undefined,
     };
   } catch (err) {
     const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";

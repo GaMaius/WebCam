@@ -187,7 +187,7 @@ async function attempt(
   messages: unknown[],
   candidates: ReturnType<typeof sanitizeCandidates>
 ): Promise<
-  | { ok: true; picks: ReturnType<typeof normalizePicks>; model: string }
+  | { ok: true; picks: ReturnType<typeof normalizePicks>; model: string; usage?: string }
   | { ok: false; status: number; error: string; detail?: string }
 > {
   const controller = new AbortController();
@@ -223,6 +223,7 @@ async function attempt(
 
   const payload = (await res.json().catch(() => null)) as {
     choices?: { message?: { content?: string } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   } | null;
   const content = payload?.choices?.[0]?.message?.content ?? "";
   // Picks come back as numbers into `candidates`, so the same array that built
@@ -238,7 +239,14 @@ async function attempt(
     // answered unusably is exactly what a second provider is for.
     return { ok: false, status: 502, error: "judge_unusable" };
   }
-  return { ok: true, picks, model: provider.model };
+  // ⚠️ MEASURED, NOT ESTIMATED. Every token figure in this feature was
+  // guessed from character counts until a 429 body showed requested=6074
+  // against an estimate of 3650 — a 66% miss that had been driving real
+  // decisions about image size and prompt language. The provider reports the
+  // exact number on every successful call; use that.
+  const u = payload?.usage;
+  const usage = u ? `prompt=${u.prompt_tokens} completion=${u.completion_tokens}` : undefined;
+  return { ok: true, picks, model: provider.model, usage };
 }
 
 export async function POST(request: Request) {
@@ -316,6 +324,7 @@ export async function POST(request: Request) {
         model: result.model,
         // Which key answered, so ?debug can show a silent failover.
         provider: provider.label,
+        usage: result.usage,
         // Present only when an earlier key had to be given up on.
         ...(failures.length ? { failedFirst: summarizeFailures(failures) } : {}),
       });

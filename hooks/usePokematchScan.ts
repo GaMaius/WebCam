@@ -46,16 +46,22 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 // jawline all inform "who does this person look like", and the tight 1.15 box
 // cuts them off.
 //
-// 448 again. It was cut to 256 while the image was believed to cost ~3,500
-// tokens; that figure came from underestimating Korean text tenfold, and the
-// image is really about 270 tokens at 256px and 830 at 448px. With the prompt
-// now in English a request sits near 2,900, so the extra detail is affordable
-// (~3,500, still two scans inside the 8K per-minute cap).
+// ⚠️ 256, and the number matters far more than it looks.
 //
-// Detail matters here beyond sharpness: at 256px the judge kept falling back
-// on famous mascots, which is what a model does when it cannot resolve what
-// makes one face different from another.
-const JUDGE_IMAGE_SIZE = 448;
+// This was raised to 448 on an estimate that the image cost ~830 tokens. A
+// measured 429 body then reported requested=6074 where the estimate said
+// 3650: subtracting the text leaves the 448px image costing roughly 3,400
+// tokens BY ITSELF — more than the system prompt, face notes and all 291
+// candidate names combined. Tokens scale with area, so 256px costs about a
+// third of that, which is the single largest saving available in this request.
+//
+// The reason for raising it does not survive either: it was raised because low
+// resolution was suspected of causing the judge to fall back on famous
+// mascots, and that turned out to be the temperature instead.
+//
+// Don't raise it again from an estimate. ?debug now prints the provider's own
+// prompt_tokens on every successful call — change the size, read the number.
+const JUDGE_IMAGE_SIZE = 256;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
 
@@ -325,7 +331,9 @@ export function usePokematchScan() {
         rawPicks = judged.picks;
         if (judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates, features);
-          judgeModel = judged.provider ? `${judged.model} · ${judged.provider}` : judged.model;
+          judgeModel =
+            (judged.provider ? `${judged.model} · ${judged.provider}` : judged.model) +
+            (judged.usage ? ` · ${judged.usage}` : "");
         } else {
           judgeFailReason = judged.reason ?? "unknown";
           retryAfter = judged.retryAfterSec ?? 0;
