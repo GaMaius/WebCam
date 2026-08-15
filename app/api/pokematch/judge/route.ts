@@ -23,23 +23,56 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// TWO PROVIDERS, TRIED IN ORDER.
+//
 // Any OpenAI-compatible chat-completions endpoint works — the request is a
 // plain `messages` array with an `image_url` part, which OpenAI, OpenRouter,
-// Together and Groq all accept unchanged.
+// Together and Groq all accept unchanged. So the secondary is not a clone of
+// the primary: it is there to be a DIFFERENT provider, which is what makes it
+// useful. A rate limit, an outage or a model deprecation on one is exactly the
+// situation where the other still answers, and those have each happened here.
 //
-// ⚠️ Configurable because the MODEL is now the known ceiling on result
-// quality, not this code. Measured over ~10 judged scans of one face,
-// qwen3.6-27b (Groq's only vision model) either collapses onto famous mascots
-// at low temperature or, at high temperature, returns obscure species with
-// invented reasons — it described "날카로운 눈매" on Zubat, which has no eyes.
-// Point JUDGE_API_URL/JUDGE_API_KEY/GROQ_MODEL at a stronger vision model to
-// test whether that ceiling lifts, with no code change.
+// Environment variables (secondary is entirely optional):
+//   JUDGE_API_KEY    / JUDGE_API_URL    / JUDGE_MODEL      <- primary
+//   JUDGE_API_KEY_2  / JUDGE_API_URL_2  / JUDGE_MODEL_2    <- fallback
+// GROQ_API_KEY and GROQ_MODEL still work as the primary, so existing
+// deployments keep running untouched.
 const DEFAULT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_URL = process.env.JUDGE_API_URL || DEFAULT_API_URL;
 // Groq's vision lineup is thin: Llama 4 Scout and Maverick are both deprecated,
-// leaving Qwen 3.6 27B as the multimodal option. Override with GROQ_MODEL when
-// that changes — the request shape is plain OpenAI-compatible chat.
+// leaving Qwen 3.6 27B as the multimodal option.
 const DEFAULT_MODEL = "qwen/qwen3.6-27b";
+
+interface Provider {
+  label: string;
+  url: string;
+  key: string;
+  model: string;
+}
+
+/** Configured providers in priority order. Missing keys are skipped rather
+ * than erroring, so adding a second one is purely additive. */
+function providers(): Provider[] {
+  const out: Provider[] = [];
+  const primaryKey = process.env.JUDGE_API_KEY || process.env.GROQ_API_KEY;
+  if (primaryKey) {
+    out.push({
+      label: "primary",
+      url: process.env.JUDGE_API_URL || DEFAULT_API_URL,
+      key: primaryKey,
+      model: process.env.JUDGE_MODEL || process.env.GROQ_MODEL || DEFAULT_MODEL,
+    });
+  }
+  if (process.env.JUDGE_API_KEY_2) {
+    out.push({
+      label: "secondary",
+      url: process.env.JUDGE_API_URL_2 || DEFAULT_API_URL,
+      key: process.env.JUDGE_API_KEY_2,
+      model: process.env.JUDGE_MODEL_2 || DEFAULT_MODEL,
+    });
+  }
+  return out;
+}
+
 const REQUEST_TIMEOUT_MS = 45_000;
 
 // Best-effort abuse guard. Serverless instances are per-region and recycled,
@@ -60,9 +93,8 @@ function rateLimited(ip: string): boolean {
   return recent.length > RATE_MAX_REQUESTS;
 }
 
-async function callGroq(
-  apiKey: string,
-  model: string,
+async function callProvider(
+  provider: Provider,
   messages: unknown[],
   signal: AbortSignal
 ) {
@@ -71,7 +103,7 @@ async function callGroq(
   // tokens bought little — and they were 300-900 of the ~3,000 tokens each
   // request costs, which matters a lot against an 8K tokens-per-minute cap.
   const base = {
-    model,
+    model: provider.model,
     messages,
     // ⚠️ HIGH ON PURPOSE. 0.15 was tried, to stop the answer changing between
     // scans, and it made the app worse: the model collapsed onto its argmax,
@@ -92,9 +124,9 @@ async function callGroq(
     reasoning_effort: "none",
   };
   const post = (body: unknown) =>
-    fetch(GROQ_URL, {
+    fetch(provider.url, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${provider.key}` },
       body: JSON.stringify(body),
       signal,
     });
@@ -113,9 +145,70 @@ async function callGroq(
 }
 
 
+/** One provider's full attempt: call, parse, validate. Returns picks on
+ * success, or a reason the caller can fall back on. */
+async function attempt(
+  provider: Provider,
+  messages: unknown[],
+  candidates: ReturnType<typeof sanitizeCandidates>
+): Promise<
+  | { ok: true; picks: ReturnType<typeof normalizePicks>; model: string }
+  | { ok: false; status: number; error: string; detail?: string }
+> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await callProvider(provider, messages, controller.signal);
+  } catch (err) {
+    console.error(`pokematch judge: ${provider.label} request failed:`, err);
+    return { ok: false, status: 502, error: "judge_unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    // The full body goes to the server log only — it names the organization
+    // and echoes request details that don't belong in a public response.
+    console.error(`pokematch judge: ${provider.label} responded`, res.status, raw);
+    if (res.status === 429) {
+      return {
+        ok: false,
+        status: 429,
+        error: "rate_limited_upstream",
+        // Sanitized: which limit tripped and how long to wait. Without this a
+        // 429 can't be told apart from an exhausted daily budget, and the two
+        // need opposite fixes.
+        detail: summarizeRateLimit(raw, res.headers.get("retry-after")),
+      };
+    }
+    return { ok: false, status: 502, error: "judge_unavailable" };
+  }
+
+  const payload = (await res.json().catch(() => null)) as {
+    choices?: { message?: { content?: string } }[];
+  } | null;
+  const content = payload?.choices?.[0]?.message?.content ?? "";
+  // Picks come back as numbers into `candidates`, so the same array that built
+  // the prompt has to resolve them — order matters, don't sort in between.
+  const picks = normalizePicks(extractJson(content), candidates);
+
+  if (picks.length === 0) {
+    console.error(
+      `pokematch judge: ${provider.label} unusable output:`,
+      content.slice(0, 500)
+    );
+    // Counts as a failure worth failing over on: a model that answered but
+    // answered unusably is exactly what a second provider is for.
+    return { ok: false, status: 502, error: "judge_unusable" };
+  }
+  return { ok: true, picks, model: provider.model };
+}
+
 export async function POST(request: Request) {
-  const apiKey = process.env.JUDGE_API_KEY || process.env.GROQ_API_KEY;
-  if (!apiKey) {
+  const configured = providers();
+  if (configured.length === 0) {
     // Not something the user can act on — the client falls back to the local
     // ranking, so answer cheaply and let it get on with it.
     return NextResponse.json({ error: "judge_unconfigured" }, { status: 503 });
@@ -127,8 +220,8 @@ export async function POST(request: Request) {
     "unknown";
   if (rateLimited(ip)) {
     // Distinct from the upstream "rate_limited" below: this one never reached
-    // Groq at all, so it means the same browser/IP hit our own per-minute cap,
-    // not the provider's daily token budget.
+    // a provider at all, so it means the same browser/IP hit our own
+    // per-minute cap, not a provider's token budget.
     return NextResponse.json({ error: "rate_limited_local" }, { status: 429 });
   }
 
@@ -153,53 +246,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "not enough candidates" }, { status: 400 });
   }
 
-  const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
-  const messages = buildMessages(typeof description === "string" ? description : "", candidates, image);
+  const messages = buildMessages(
+    typeof description === "string" ? description : "",
+    candidates,
+    image
+  );
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await callGroq(apiKey, model, messages, controller.signal);
-  } catch (err) {
-    console.error("pokematch judge: groq request failed:", err);
-    return NextResponse.json({ error: "judge_unavailable" }, { status: 502 });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    const raw = await res.text().catch(() => "");
-    // The full body goes to the server log only — it names the organization
-    // and echoes request details that don't belong in a public response.
-    console.error("pokematch judge: groq responded", res.status, raw);
-    if (res.status === 429) {
-      return NextResponse.json(
-        {
-          error: "rate_limited_upstream",
-          // Sanitized: which limit tripped and how long to wait. Without this a
-          // 429 can't be told apart from an exhausted daily budget, and the two
-          // need opposite fixes.
-          detail: summarizeRateLimit(raw, res.headers.get("retry-after")),
-        },
-        { status: 429 }
+  // Try each configured provider in turn. Only the LAST failure is reported,
+  // because that is the state the user is actually in — if the primary was
+  // rate limited but the secondary answered, nothing went wrong from here.
+  let last: { status: number; error: string; detail?: string } | null = null;
+  for (const provider of configured) {
+    const result = await attempt(provider, messages, candidates);
+    if (result.ok) {
+      return NextResponse.json({
+        picks: result.picks,
+        model: result.model,
+        // Which provider answered, so ?debug can show a silent failover.
+        provider: provider.label,
+      });
+    }
+    last = { status: result.status, error: result.error, detail: result.detail };
+    if (configured.length > 1) {
+      console.warn(
+        `pokematch judge: ${provider.label} failed (${result.error}), trying next`
       );
     }
-    return NextResponse.json({ error: "judge_unavailable" }, { status: 502 });
   }
 
-  const payload = (await res.json().catch(() => null)) as {
-    choices?: { message?: { content?: string } }[];
-  } | null;
-  const content = payload?.choices?.[0]?.message?.content ?? "";
-  // Picks come back as numbers into `candidates`, so the same array that built
-  // the prompt has to resolve them — order matters, don't sort in between.
-  const picks = normalizePicks(extractJson(content), candidates);
-
-  if (picks.length === 0) {
-    console.error("pokematch judge: unusable model output:", content.slice(0, 500));
-    return NextResponse.json({ error: "judge_unusable" }, { status: 502 });
-  }
-
-  return NextResponse.json({ picks, model });
+  return NextResponse.json(
+    { error: last?.error ?? "judge_unavailable", detail: last?.detail },
+    { status: last?.status ?? 502 }
+  );
 }

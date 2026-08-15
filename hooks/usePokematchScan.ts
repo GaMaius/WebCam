@@ -317,7 +317,7 @@ export function usePokematchScan() {
         const judged = await judgeCandidates(image, description, candidates);
         if (judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates, features);
-          judgeModel = judged.model;
+          judgeModel = judged.provider ? `${judged.model} · ${judged.provider}` : judged.model;
         } else {
           judgeFailReason = judged.reason ?? "unknown";
           retryAfter = judged.retryAfterSec ?? 0;

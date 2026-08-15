@@ -159,14 +159,61 @@
   color: var(--text-dim);
   word-break: keep-all;
 }
-.engineNote {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  padding: 9px 12px;
+/* The old note for this was 12px dim grey and people read straight past it,
+   so a result produced WITHOUT the AI looked identical to one produced with
+   it. It sits above the matches now, in warning amber, because the difference
+   between the two engines is large enough that hiding it misleads. */
+.engineBanner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
   border-radius: var(--radius-md, 12px);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(240, 173, 78, 0.13);
+  border: 1px solid rgba(240, 173, 78, 0.42);
+  color: var(--text, #f4f5f7);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.engineBannerIcon {
+  font-size: 17px;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
+.engineBannerTitle {
+  display: block;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 2px;
+  color: #f0ad4e;
+}
+.engineBannerBody {
+  color: var(--text-dim);
+}
+.engineRetry {
+  margin-top: 9px;
+  padding: 7px 13px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #1b1b1f;
+  background: #f0ad4e;
+  border: none;
+}
+/* The reassuring counterpart: shown only when the AI really did decide. */
+.engineOk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7fe0a8;
+  background: rgba(127, 224, 168, 0.12);
+  border: 1px solid rgba(127, 224, 168, 0.32);
 }
 .badges {
   display: flex;

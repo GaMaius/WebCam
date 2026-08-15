@@ -240,30 +240,36 @@ export default function PokematchPage() {
 
       {started && scan.phase === "done" && scan.matches && (
         <Card className={styles.resultCard}>
+          {/* Above the matches, not below: which engine produced them changes
+              how much they're worth trusting, so it has to be read first. */}
+          {scan.engine === "local" ? (
+            <div className={styles.engineBanner}>
+              <span className={styles.engineBannerIcon} aria-hidden="true">
+                ⚠️
+              </span>
+              <div>
+                <strong className={styles.engineBannerTitle}>AI가 고른 결과가 아니에요</strong>
+                <span className={styles.engineBannerBody}>
+                  {scan.fallbackCause === "busy"
+                    ? "지금 사용량이 많아서 AI 판정을 받지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."
+                    : "AI 판정을 불러오지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."}
+                </span>
+                <button className={styles.engineRetry} onClick={handleRetry}>
+                  {scan.retryAfterSec > 0
+                    ? `${scan.retryAfterSec}초 뒤 AI로 다시 찾기`
+                    : "AI로 다시 찾기"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <span className={styles.engineOk}>✨ AI가 사진을 보고 골랐어요</span>
+          )}
           <h3 className={styles.resultTitle}>가장 닮은 포켓몬</h3>
           <div className={styles.matchList}>
             {scan.matches.map((m, i) => (
               <MatchRow key={m.slug} match={m} top={i === 0} />
             ))}
           </div>
-          {scan.engine === "local" && (
-            <p className={styles.engineNote}>
-              {scan.fallbackCause === "busy" ? (
-                <>
-                  지금 <b>사용량이 많아</b> AI 판정 대신 <b>기본 유사도(z-score) 방식</b>으로 찾은 결과예요. 이
-                  방식은 얼굴 특징보다 전체적인 형태에 반응해서 결과가 덜 정확할 수 있어요.
-                  {scan.retryAfterSec > 0
-                    ? ` ${scan.retryAfterSec}초 뒤에 다시 찾으면 AI가 고른 결과를 볼 수 있어요.`
-                    : " 잠시 후 다시 찾으면 AI가 고른 결과를 볼 수 있어요."}
-                </>
-              ) : (
-                <>
-                  AI 판정을 불러오지 못해 <b>기본 유사도(z-score) 방식</b>으로 찾은 결과예요. 잠시 후 다시 시도하면
-                  판정 결과를 볼 수 있어요.
-                </>
-              )}
-            </p>
-          )}
           <ResultActions
             render={renderCard}
             filename={`visionlab-pokematch-${Date.now()}.png`}

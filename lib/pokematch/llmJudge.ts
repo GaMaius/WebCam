@@ -19,6 +19,10 @@ export interface JudgePick {
 export interface JudgeResult {
   picks: JudgePick[];
   model: string;
+  /** Which configured provider answered ("primary"/"secondary"). Surfaced in
+   * ?debug so a silent failover to the backup is visible rather than looking
+   * like the primary simply behaved differently. */
+  provider?: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
    * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
@@ -92,7 +96,11 @@ export async function judgeCandidates(
     if (!Array.isArray(data.picks) || data.picks.length === 0) {
       return { picks: [], model: "", reason: "empty_picks" };
     }
-    return { picks: data.picks, model: typeof data.model === "string" ? data.model : "" };
+    return {
+      picks: data.picks,
+      model: typeof data.model === "string" ? data.model : "",
+      provider: typeof data.provider === "string" ? data.provider : undefined,
+    };
   } catch (err) {
     const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";
     return { picks: [], model: "", reason };
