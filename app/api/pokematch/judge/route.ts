@@ -23,7 +23,19 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Any OpenAI-compatible chat-completions endpoint works — the request is a
+// plain `messages` array with an `image_url` part, which OpenAI, OpenRouter,
+// Together and Groq all accept unchanged.
+//
+// ⚠️ Configurable because the MODEL is now the known ceiling on result
+// quality, not this code. Measured over ~10 judged scans of one face,
+// qwen3.6-27b (Groq's only vision model) either collapses onto famous mascots
+// at low temperature or, at high temperature, returns obscure species with
+// invented reasons — it described "날카로운 눈매" on Zubat, which has no eyes.
+// Point JUDGE_API_URL/JUDGE_API_KEY/GROQ_MODEL at a stronger vision model to
+// test whether that ceiling lifts, with no code change.
+const DEFAULT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_URL = process.env.JUDGE_API_URL || DEFAULT_API_URL;
 // Groq's vision lineup is thin: Llama 4 Scout and Maverick are both deprecated,
 // leaving Qwen 3.6 27B as the multimodal option. Override with GROQ_MODEL when
 // that changes — the request shape is plain OpenAI-compatible chat.
@@ -102,7 +114,7 @@ async function callGroq(
 
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.JUDGE_API_KEY || process.env.GROQ_API_KEY;
   if (!apiKey) {
     // Not something the user can act on — the client falls back to the local
     // ranking, so answer cheaply and let it get on with it.

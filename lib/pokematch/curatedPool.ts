@@ -108,6 +108,21 @@ export const JUDGE_DEFAULT_SLUGS = new Set([
   "togepi", "togetic", "chansey", "mew", "mewtwo",
 ]);
 
+// ⚠️ Filtering the pool by pokedex `shape` was tried here and reverted.
+//
+// The judge described "두툼한 윗입술" on Omastar and "날카로운 눈매" on Zubat,
+// which has no eyes, so dropping faceless species looked like the fix. It
+// isn't: `shape` is the Pokedex's BODY-shape taxonomy, not a statement about
+// whether a species has a face. Mimikyu is "squiggle" and plainly has one;
+// birds are "wings" and have faces; Omastar is "tentacles" and has a face too.
+// A test on the recognizable staples caught it immediately.
+//
+// This was the same mistake as the embedding shortlist: filtering on a proxy
+// that does not measure the thing being filtered for. The invented anatomy is
+// the MODEL's knowledge failing, and no metadata in this repo can correct it —
+// the per-species appearance text that could have (the old `look` field) was
+// removed to afford a 291-species pool.
+
 const LAST_GEN1_DEX = 151;
 
 /**

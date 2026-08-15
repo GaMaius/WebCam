@@ -111,3 +111,16 @@ test("buildCuratedPool can drop the judge's default mascots when asked", () => {
     "only the listed defaults may be removed"
   );
 });
+
+// ⚠️ Records why the pool is NOT filtered by pokedex `shape`. The judge
+// invented anatomy (a lip on Omastar, sharp eyes on the eyeless Zubat) and
+// dropping "faceless" shapes looked like the answer — but `shape` is body-shape
+// taxonomy, not a face indicator, and it takes Mimikyu with it.
+test("shape is not a face indicator, so the pool keeps every silhouette", () => {
+  assert.ok(pool.includes("mimikyu"), "mimikyu is `squiggle` and unmistakably has a face");
+  assert.ok(pool.includes("omastar"), "omastar is `tentacles` and has a face");
+  assert.ok(
+    pool.some((slug) => pokedex[slug]?.shape === "wings"),
+    "birds are `wings` and have faces"
+  );
+});
