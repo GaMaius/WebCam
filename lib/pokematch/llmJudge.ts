@@ -51,8 +51,16 @@ export async function judgeCandidates(
       }),
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      return { picks: [], model: "", reason: `http_${res.status}${body?.error ? `:${body.error}` : ""}` };
+      const body = (await res.json().catch(() => null)) as
+        | { error?: string; detail?: string }
+        | null;
+      const reason =
+        `http_${res.status}` +
+        (body?.error ? `:${body.error}` : "") +
+        // Present on upstream 429s: names the limit that tripped, so a burst
+        // against the per-minute cap is distinguishable from a spent daily one.
+        (body?.detail ? ` (${body.detail})` : "");
+      return { picks: [], model: "", reason };
     }
     const data = (await res.json()) as Partial<JudgeResult>;
     if (!Array.isArray(data.picks) || data.picks.length === 0) {

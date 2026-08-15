@@ -68,6 +68,28 @@ export function isUsableImage(value: unknown): value is string {
   );
 }
 
+/**
+ * Pulls the useful facts out of Groq's 429 body without echoing it wholesale —
+ * the raw message names the organization, which doesn't belong in a public
+ * response. What we keep is which limit tripped (tokens/requests per
+ * minute/day), the limit/used/requested numbers, and how long to wait.
+ *
+ * This exists because a bare 429 is ambiguous in the way that matters most: a
+ * per-minute burst cap and a spent daily budget look identical but need
+ * opposite fixes, and guessing between them cost a round of debugging.
+ */
+export function summarizeRateLimit(body: string, retryAfter: string | null): string {
+  const kind = /\b(?:tokens|requests) per (?:minute|day)\b/i.exec(body)?.[0];
+  const numbers = /Limit (\d+), Used (\d+), Requested (\d+)/i.exec(body);
+  const wait = retryAfter ?? /try again in ([\d.]+m?[\d.]*s?)/i.exec(body)?.[1];
+
+  const parts: string[] = [];
+  if (kind) parts.push(kind.toLowerCase().replace(/\s+/g, "_"));
+  if (numbers) parts.push(`limit=${numbers[1]},used=${numbers[2]},requested=${numbers[3]}`);
+  if (wait) parts.push(`retry_after=${wait}`);
+  return parts.join(" ") || "unspecified";
+}
+
 export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 심사위원입니다.
 사용자의 얼굴 사진을 직접 보고, 주어진 후보 목록에서 가장 닮은 포켓몬을 고릅니다.
 

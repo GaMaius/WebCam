@@ -9,6 +9,7 @@ import {
   isUsableImage,
   normalizePicks,
   sanitizeCandidates,
+  summarizeRateLimit,
 } from "../lib/pokematch/judgeProtocol.ts";
 
 // The judge is an LLM, so its output is untrusted input. Everything the prompt
@@ -136,4 +137,35 @@ test("only well-formed, size-capped image data URLs are accepted", () => {
 test("an over-long description is truncated before it reaches the prompt", () => {
   const prompt = buildUserPrompt("가".repeat(9000), sanitizeCandidates([{ slug: "pikachu" }]));
   assert.ok(prompt.length < 6000, `prompt was ${prompt.length} chars`);
+});
+
+// A bare 429 can mean a per-minute burst (wait a moment) or a spent daily
+// budget (done until tomorrow). These use Groq's actual message wording.
+test("a per-minute rate limit is distinguishable from a daily one", () => {
+  const perMinute = summarizeRateLimit(
+    '{"error":{"message":"Rate limit reached for model `qwen/qwen3.6-27b` in organization `org_01abc` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 7600, Requested 3100. Please try again in 5.2s."}}',
+    null
+  );
+  assert.match(perMinute, /tokens_per_minute/);
+  assert.match(perMinute, /limit=8000,used=7600,requested=3100/);
+  assert.match(perMinute, /retry_after=5\.2s/);
+
+  const perDay = summarizeRateLimit(
+    '{"error":{"message":"Rate limit reached for model `qwen/qwen3.6-27b` in organization `org_01abc` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 200000, Requested 3100."}}',
+    null
+  );
+  assert.match(perDay, /tokens_per_day/);
+});
+
+test("the organization id never leaks into the summary", () => {
+  const summary = summarizeRateLimit(
+    "Rate limit reached for model `x` in organization `org_01secret` on tokens per day (TPD): Limit 1, Used 1, Requested 1.",
+    null
+  );
+  assert.ok(!summary.includes("org_01secret"), `leaked: ${summary}`);
+});
+
+test("an explicit retry-after header wins over the prose, and odd bodies still summarize", () => {
+  assert.match(summarizeRateLimit("on requests per day (RPD): ... try again in 9s", "60"), /retry_after=60/);
+  assert.equal(summarizeRateLimit("something unparseable", null), "unspecified");
 });

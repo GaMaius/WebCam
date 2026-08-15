@@ -6,6 +6,7 @@ import {
   isUsableImage,
   normalizePicks,
   sanitizeCandidates,
+  summarizeRateLimit,
 } from "@/lib/pokematch/judgeProtocol";
 
 // PokéMatch's ranking judge: a Groq-hosted VISION model looks at the cropped
@@ -53,7 +54,17 @@ async function callGroq(
   messages: unknown[],
   signal: AbortSignal
 ) {
-  const base = { model, messages, temperature: 0.7, max_completion_tokens: 1200 };
+  // reasoning_effort "none" turns off Qwen's thinking pass. Picking five
+  // lookalikes from a photo is perceptual, not deductive, so the reasoning
+  // tokens bought little — and they were 300-900 of the ~3,000 tokens each
+  // request costs, which matters a lot against an 8K tokens-per-minute cap.
+  const base = {
+    model,
+    messages,
+    temperature: 0.7,
+    max_completion_tokens: 400,
+    reasoning_effort: "none",
+  };
   const post = (body: unknown) =>
     fetch(GROQ_URL, {
       method: "POST",
@@ -62,12 +73,19 @@ async function callGroq(
       signal,
     });
 
-  // json_object mode isn't universal across models; if the configured one
-  // rejects it, fall back to a plain completion rather than failing outright
-  // (extractJson copes with fenced/prose-wrapped output).
-  const res = await post({ ...base, response_format: { type: "json_object" } });
-  return res.status === 400 ? post(base) : res;
+  // Neither json_object mode nor reasoning_effort is universal across models;
+  // a 400 here usually means the configured model rejected one of them, so
+  // retry progressively barer rather than failing outright (extractJson copes
+  // with fenced/prose-wrapped output).
+  let res = await post({ ...base, response_format: { type: "json_object" } });
+  if (res.status === 400) res = await post(base);
+  if (res.status === 400) {
+    const { reasoning_effort: _dropped, ...noReasoning } = base;
+    res = await post(noReasoning);
+  }
+  return res;
 }
+
 
 export async function POST(request: Request) {
   const apiKey = process.env.GROQ_API_KEY;
@@ -125,14 +143,23 @@ export async function POST(request: Request) {
   }
 
   if (!res.ok) {
-    // Log the provider's message server-side only — it can echo request
-    // details that don't belong in a public response.
-    console.error("pokematch judge: groq responded", res.status, await res.text().catch(() => ""));
-    const limited = res.status === 429;
-    return NextResponse.json(
-      { error: limited ? "rate_limited_upstream" : "judge_unavailable" },
-      { status: limited ? 429 : 502 }
-    );
+    const raw = await res.text().catch(() => "");
+    // The full body goes to the server log only — it names the organization
+    // and echoes request details that don't belong in a public response.
+    console.error("pokematch judge: groq responded", res.status, raw);
+    if (res.status === 429) {
+      return NextResponse.json(
+        {
+          error: "rate_limited_upstream",
+          // Sanitized: which limit tripped and how long to wait. Without this a
+          // 429 can't be told apart from an exhausted daily budget, and the two
+          // need opposite fixes.
+          detail: summarizeRateLimit(raw, res.headers.get("retry-after")),
+        },
+        { status: 429 }
+      );
+    }
+    return NextResponse.json({ error: "judge_unavailable" }, { status: 502 });
   }
 
   const payload = (await res.json().catch(() => null)) as {
