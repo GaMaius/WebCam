@@ -27,6 +27,13 @@ export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "ana
  * ran instead — surfaced in the UI so a degraded result isn't silent. */
 export type PokematchEngine = "llm" | "local";
 
+/** Why the local ranker ran instead of the judge. "busy" means a rate limit —
+ * capacity, not breakage, and worth retrying shortly; "unavailable" covers
+ * everything else. null when the judge produced the result. The distinction is
+ * surfaced to the user, who otherwise can't tell a degraded result from a
+ * normal one. */
+export type PokematchFallbackCause = "busy" | "unavailable" | null;
+
 const FRAMES_TO_AVERAGE = 8; // averaging several frames stabilizes the match (consistency)
 const CROP_COEF = 1.15; // tight face-only crop margin
 const ALIGN_TIMEOUT_MS = 15_000;
@@ -203,6 +210,7 @@ export function usePokematchScan() {
   // Non-zero only when the fallback was caused by a rate limit that lifts on
   // its own, so the UI can say "try again in Ns" instead of implying defeat.
   const [retryAfterSec, setRetryAfterSec] = useState(0);
+  const [fallbackCause, setFallbackCause] = useState<PokematchFallbackCause>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [debugText, setDebugText] = useState<string | null>(null);
   const runningRef = useRef(false);
@@ -217,6 +225,7 @@ export function usePokematchScan() {
     setMatches(null);
     setEngine("llm");
     setRetryAfterSec(0);
+    setFallbackCause(null);
     setErrorMessage("");
     setDebugText(null);
     faceAspectRef.current = 1.15;
@@ -271,6 +280,7 @@ export function usePokematchScan() {
       let judgeModel = "";
       let judgeFailReason = "";
       let retryAfter = 0;
+      let rateLimited = false;
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
@@ -280,6 +290,7 @@ export function usePokematchScan() {
         } else {
           judgeFailReason = judged.reason ?? "unknown";
           retryAfter = judged.retryAfterSec ?? 0;
+          rateLimited = judged.rateLimited === true;
         }
       } else {
         judgeFailReason = "no_image";
@@ -300,6 +311,22 @@ export function usePokematchScan() {
             usedLlm ? `vision llm (${judgeModel})` : `local z-score fallback (reason: ${judgeFailReason})`
           }\n` +
             `IMAGE: ${image ? `${Math.round(image.length / 1024)}KB base64` : "(없음 — 판정 생략)"}\n\n` +
+            // The picks are the one thing worth reading here: everything else
+            // is the input to a judgement whose OUTPUT used to be missing from
+            // this dump entirely, which made the result impossible to review.
+            `RESULT (표시된 5마리):\n` +
+            finalMatches
+              .map((m, i) => {
+                const name = m.entry?.nameKo ?? m.entry?.nameEn ?? m.slug;
+                const n = candidates.findIndex((c) => c.slug === m.slug) + 1;
+                return (
+                  `${i + 1}. ${name} (${m.slug}${n > 0 ? `, 후보#${n}` : ""}) ` +
+                  `${m.percent}% z=${m.z.toFixed(2)}` +
+                  (m.reason ? `\n   이유: ${m.reason}` : "")
+                );
+              })
+              .join("\n") +
+            `\n\n` +
             `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
             `CANDIDATES (${candidates.length}종, 프롬프트 순서 = 번호):\n` +
             candidates
@@ -312,6 +339,7 @@ export function usePokematchScan() {
 
       setEngine(usedLlm ? "llm" : "local");
       setRetryAfterSec(usedLlm ? 0 : retryAfter);
+      setFallbackCause(usedLlm ? null : rateLimited ? "busy" : "unavailable");
       setMatches(finalMatches);
       setPhase("done");
     },
@@ -492,6 +520,7 @@ export function usePokematchScan() {
     matches,
     engine,
     retryAfterSec,
+    fallbackCause,
     errorMessage,
     debugText,
     start,

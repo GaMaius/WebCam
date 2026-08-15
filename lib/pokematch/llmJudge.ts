@@ -28,6 +28,10 @@ export interface JudgeResult {
    * is visibly worse, so telling the user it's temporary beats letting them
    * conclude the feature is broken. */
   retryAfterSec?: number;
+  /** True when the judge was refused for capacity rather than broken. The UI
+   * says so plainly, because a rate-limited result and a failed one look
+   * identical on screen but only one is worth retrying. */
+  rateLimited?: boolean;
 }
 
 /** The wait Groq asked for, when it's short enough to be worth offering as a
@@ -73,7 +77,13 @@ export async function judgeCandidates(
         // Present on upstream 429s: names the limit that tripped, so a burst
         // against the per-minute cap is distinguishable from a spent daily one.
         (body?.detail ? ` (${body.detail})` : "");
-      return { picks: [], model: "", reason, retryAfterSec: parseRetryAfter(body?.detail) };
+      return {
+        picks: [],
+        model: "",
+        reason,
+        retryAfterSec: parseRetryAfter(body?.detail),
+        rateLimited: res.status === 429,
+      };
     }
     const data = (await res.json()) as Partial<JudgeResult>;
     if (!Array.isArray(data.picks) || data.picks.length === 0) {

@@ -248,9 +248,20 @@ export default function PokematchPage() {
           </div>
           {scan.engine === "local" && (
             <p className={styles.engineNote}>
-              {scan.retryAfterSec > 0
-                ? `AI 판정 요청이 잠시 몰려서 기본 유사도 순위로 보여주고 있어요. ${scan.retryAfterSec}초 뒤에 다시 찾으면 AI가 고른 결과를 볼 수 있어요.`
-                : "AI 판정을 불러오지 못해 기본 유사도 순위로 보여주고 있어요. 잠시 후 다시 시도하면 판정 결과를 볼 수 있어요."}
+              {scan.fallbackCause === "busy" ? (
+                <>
+                  지금 <b>사용량이 많아</b> AI 판정 대신 <b>기본 유사도(z-score) 방식</b>으로 찾은 결과예요. 이
+                  방식은 얼굴 특징보다 전체적인 형태에 반응해서 결과가 덜 정확할 수 있어요.
+                  {scan.retryAfterSec > 0
+                    ? ` ${scan.retryAfterSec}초 뒤에 다시 찾으면 AI가 고른 결과를 볼 수 있어요.`
+                    : " 잠시 후 다시 찾으면 AI가 고른 결과를 볼 수 있어요."}
+                </>
+              ) : (
+                <>
+                  AI 판정을 불러오지 못해 <b>기본 유사도(z-score) 방식</b>으로 찾은 결과예요. 잠시 후 다시 시도하면
+                  판정 결과를 볼 수 있어요.
+                </>
+              )}
             </p>
           )}
           <ResultActions
