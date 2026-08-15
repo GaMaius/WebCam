@@ -188,6 +188,7 @@
 - **Production URL**: https://skillprac.vercel.app
 - Vercel 프로젝트: `ga-maius-projects/skill_prac` (GitHub 연동 완료, **production branch = `visionlab`**로 명시적으로 설정해둠 — `master` 푸시는 프로덕션에 영향 없음)
 - 환경변수(B2 자격증명 5개: `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`)는 Vercel Production/Preview에 sensitive로 이미 등록됨. 로컬 `.env.local`에도 실값 있음(gitignore됨).
+- **`GROQ_API_KEY_2` (선택)**: PokéMatch 판정용 **두 번째 Groq 키**. 이것만 넣으면 되고 URL·모델은 안 넣어도 된다(기본값이 Groq). 라우트가 **매 요청 시작 키를 무작위로 골라** 두 계정에 부하를 나누고, 한쪽이 실패하면 다른 쪽으로 넘어간다. **둘 다 실패해야** 사용자에게 "AI가 고른 결과가 아니에요" 배너가 뜬다. Groq 한도는 **계정별**이라 키 2개 = 8K TPM 버킷 2개이고, 429가 비-AI 결과의 압도적 1위 원인이었으므로 효과가 크다. `?debug`에 어느 키가 답했는지(primary/secondary) 찍힌다. 다른 제공자를 2번으로 쓰려면 `JUDGE_API_URL_2`·`JUDGE_MODEL_2`로 덮어쓸 수 있다(OpenAI 호환이면 코드 수정 불필요, **비전 모델이어야 함**).
 - **`GROQ_API_KEY`**: PokéMatch 판정용(2026-08-09 추가). **사용자가 직접 Vercel에 등록**하기로 함 — 로컬 `.env.local`에는 없다(그래서 로컬 개발에서는 PokéMatch가 항상 로컬 z-score 폴백으로 뜬다). 선택적으로 `GROQ_MODEL`로 모델 교체 가능(기본 `openai/gpt-oss-120b`).
 
 ## 항상 유지해야 하는 요구사항 (사용자 명시)

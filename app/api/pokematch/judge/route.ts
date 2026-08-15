@@ -23,20 +23,27 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// TWO PROVIDERS, TRIED IN ORDER.
+// TWO KEYS, TRIED IN ORDER.
 //
-// Any OpenAI-compatible chat-completions endpoint works — the request is a
-// plain `messages` array with an `image_url` part, which OpenAI, OpenRouter,
-// Together and Groq all accept unchanged. So the secondary is not a clone of
-// the primary: it is there to be a DIFFERENT provider, which is what makes it
-// useful. A rate limit, an outage or a model deprecation on one is exactly the
-// situation where the other still answers, and those have each happened here.
+// ===================================================================
+//  ADDING A SECOND KEY IS ONE ENVIRONMENT VARIABLE:
+//      GROQ_API_KEY     <- already set
+//      GROQ_API_KEY_2   <- add this, nothing else
+// ===================================================================
 //
-// Environment variables (secondary is entirely optional):
-//   JUDGE_API_KEY    / JUDGE_API_URL    / JUDGE_MODEL      <- primary
-//   JUDGE_API_KEY_2  / JUDGE_API_URL_2  / JUDGE_MODEL_2    <- fallback
-// GROQ_API_KEY and GROQ_MODEL still work as the primary, so existing
-// deployments keep running untouched.
+// Both default to Groq, so a second Groq account needs only its key. That is
+// the intended setup and it genuinely helps: rate limits are per-account, so
+// two keys are two separate 8K-tokens-per-minute buckets, and hitting the cap
+// on one is exactly when the other still answers. 429s were the single most
+// common reason people saw a non-AI result.
+//
+// The URL and model are overridable per key for the case where the second one
+// is a different provider — any OpenAI-compatible chat-completions endpoint
+// works unchanged, since the request is a plain `messages` array with an
+// `image_url` part. Leave them unset for Groq.
+//
+//   GROQ_API_KEY   / JUDGE_API_URL   / GROQ_MODEL     primary
+//   GROQ_API_KEY_2 / JUDGE_API_URL_2 / JUDGE_MODEL_2  fallback
 const DEFAULT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 // Groq's vision lineup is thin: Llama 4 Scout and Maverick are both deprecated,
 // leaving Qwen 3.6 27B as the multimodal option.
@@ -49,25 +56,27 @@ interface Provider {
   model: string;
 }
 
-/** Configured providers in priority order. Missing keys are skipped rather
- * than erroring, so adding a second one is purely additive. */
+/** Configured keys in priority order. A missing key is skipped rather than
+ * erroring, so adding the second one is purely additive and removing it later
+ * degrades to single-key behaviour on its own. */
 function providers(): Provider[] {
   const out: Provider[] = [];
-  const primaryKey = process.env.JUDGE_API_KEY || process.env.GROQ_API_KEY;
+  const primaryKey = process.env.GROQ_API_KEY || process.env.JUDGE_API_KEY;
   if (primaryKey) {
     out.push({
       label: "primary",
       url: process.env.JUDGE_API_URL || DEFAULT_API_URL,
       key: primaryKey,
-      model: process.env.JUDGE_MODEL || process.env.GROQ_MODEL || DEFAULT_MODEL,
+      model: process.env.GROQ_MODEL || process.env.JUDGE_MODEL || DEFAULT_MODEL,
     });
   }
-  if (process.env.JUDGE_API_KEY_2) {
+  const secondKey = process.env.GROQ_API_KEY_2 || process.env.JUDGE_API_KEY_2;
+  if (secondKey) {
     out.push({
       label: "secondary",
       url: process.env.JUDGE_API_URL_2 || DEFAULT_API_URL,
-      key: process.env.JUDGE_API_KEY_2,
-      model: process.env.JUDGE_MODEL_2 || DEFAULT_MODEL,
+      key: secondKey,
+      model: process.env.JUDGE_MODEL_2 || process.env.GROQ_MODEL || DEFAULT_MODEL,
     });
   }
   return out;
@@ -252,11 +261,23 @@ export async function POST(request: Request) {
     image
   );
 
-  // Try each configured provider in turn. Only the LAST failure is reported,
-  // because that is the state the user is actually in — if the primary was
-  // rate limited but the secondary answered, nothing went wrong from here.
+  // Start at a random key rather than always the first.
+  //
+  // Rate limits are per-account, so with two keys the goal is to SPREAD load
+  // across two buckets, not to drain one and spill into the other. Always
+  // starting at the primary would exhaust it, then pay a wasted 429 round-trip
+  // on every later request before reaching the key that works. Choosing the
+  // start at random keeps both buckets roughly level, which means fewer 429s
+  // in total — and it needs no shared state, which a recycled serverless
+  // instance could not keep anyway.
+  const start = Math.floor(Math.random() * configured.length);
+  const order = configured.map((_, i) => configured[(start + i) % configured.length]);
+
+  // Only the LAST failure is reported, because that is the state the user is
+  // actually in — if one key was rate limited but the other answered, nothing
+  // went wrong from here.
   let last: { status: number; error: string; detail?: string } | null = null;
-  for (const provider of configured) {
+  for (const provider of order) {
     const result = await attempt(provider, messages, candidates);
     if (result.ok) {
       return NextResponse.json({
@@ -267,10 +288,8 @@ export async function POST(request: Request) {
       });
     }
     last = { status: result.status, error: result.error, detail: result.detail };
-    if (configured.length > 1) {
-      console.warn(
-        `pokematch judge: ${provider.label} failed (${result.error}), trying next`
-      );
+    if (order.length > 1) {
+      console.warn(`pokematch judge: ${provider.label} failed (${result.error}), trying next`);
     }
   }
 
