@@ -256,13 +256,18 @@ export function usePokematchScan() {
 
       let result: PokematchMatch[] | null = null;
       let judgeModel = "";
+      let judgeFailReason = "";
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
-        if (judged && judged.picks.length > 0) {
+        if (judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates);
           judgeModel = judged.model;
+        } else {
+          judgeFailReason = judged.reason ?? "unknown";
         }
+      } else {
+        judgeFailReason = "no_image";
       }
 
       const usedLlm = result !== null && result.length > 0;
@@ -276,7 +281,9 @@ export function usePokematchScan() {
 
       if (isDebug()) {
         setDebugText(
-          `ENGINE: ${usedLlm ? `vision llm (${judgeModel})` : "local z-score fallback"}\n` +
+          `ENGINE: ${
+            usedLlm ? `vision llm (${judgeModel})` : `local z-score fallback (reason: ${judgeFailReason})`
+          }\n` +
             `IMAGE: ${image ? `${Math.round(image.length / 1024)}KB base64` : "(없음 — 판정 생략)"}\n\n` +
             `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
             `CANDIDATES (${candidates.length}종, 프롬프트 순서 = 번호):\n` +

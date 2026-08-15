@@ -16,6 +16,12 @@ export interface JudgePick {
 export interface JudgeResult {
   picks: JudgePick[];
   model: string;
+  /** Set only when picks is empty — why the judge didn't run, for the
+   * ?debug panel. The route already categorizes its own failures
+   * (judge_unconfigured/rate_limited/judge_unavailable/judge_unusable); this
+   * just carries that (or an http/network reason) back so a silent fallback
+   * to local ranking isn't a dead end to diagnose. */
+  reason?: string;
 }
 
 const JUDGE_TIMEOUT_MS = 50_000;
@@ -24,7 +30,7 @@ export async function judgeCandidates(
   imageDataUrl: string,
   description: string,
   candidates: PokematchCandidate[]
-): Promise<JudgeResult | null> {
+): Promise<JudgeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), JUDGE_TIMEOUT_MS);
   try {
@@ -43,12 +49,18 @@ export async function judgeCandidates(
         })),
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      return { picks: [], model: "", reason: `http_${res.status}${body?.error ? `:${body.error}` : ""}` };
+    }
     const data = (await res.json()) as Partial<JudgeResult>;
-    if (!Array.isArray(data.picks) || data.picks.length === 0) return null;
+    if (!Array.isArray(data.picks) || data.picks.length === 0) {
+      return { picks: [], model: "", reason: "empty_picks" };
+    }
     return { picks: data.picks, model: typeof data.model === "string" ? data.model : "" };
-  } catch {
-    return null;
+  } catch (err) {
+    const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";
+    return { picks: [], model: "", reason };
   } finally {
     clearTimeout(timer);
   }
