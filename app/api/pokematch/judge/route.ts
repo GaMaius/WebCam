@@ -139,11 +139,14 @@ async function callProvider(
     // for-fun app, occasionally excellent beats reliably bland, and re-rolling
     // is cheap now that requests no longer blow the per-minute cap.
     temperature: 0.7,
-    // Has to cover the thinking pass as well as the answer now. Counted
-    // against the per-minute budget as if fully used, so it is sized to the
-    // job rather than left at a comfortable ceiling: ~900 for reasoning plus
-    // ~150 for eight picks and their one-line reasons.
-    max_completion_tokens: 1100,
+    // ⚠️ RESERVED, NOT MEASURED. Groq counts this against the per-minute
+    // budget in full whether or not the model uses it, so it is a capacity
+    // decision rather than a safety margin. Raising it to 1100 for the
+    // thinking pass silently cut a key from two scans a minute to one, and
+    // the second scan in a row started failing with nobody else using the
+    // app. Sized now to what the job needs: ~550 to think plus ~150 for
+    // eight picks and their one-line reasons.
+    max_completion_tokens: 700,
     reasoning_effort: "default",
   };
   const post = (body: unknown) =>

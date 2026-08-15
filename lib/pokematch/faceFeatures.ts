@@ -278,23 +278,36 @@ const ITA_KO: Record<ItaCategory, string> = {
 /** Renders the measurements as the Korean prose block the judge reads.
  * Each line pairs the raw number with a plain-language reading, because the
  * model reasons much better about "눈이 큰 편" than about "0.42". */
+/**
+ * Compact English descriptor sent alongside the photo.
+ *
+ * ⚠️ ENGLISH ON PURPOSE, like the prompt — this model's tokenizer falls back
+ * to bytes for Hangul at roughly 2.7 tokens per character against 0.25 for
+ * English. The Korean version of this cost ~490 tokens; this costs under 100,
+ * and that difference decides whether two scans fit inside the 8K per-minute
+ * cap or only one does.
+ *
+ * Terse by design. The photo is what's being judged; these are the things a
+ * glance gets wrong — exact ratios and a measured skin tone.
+ */
 export function describeFaceFeatures(f: FaceFeatures): string {
   const cmp = (v: number, lo: number, hi: number, low: string, mid: string, high: string) =>
     v < lo ? low : v > hi ? high : mid;
 
   return [
-    `얼굴형: ${SHAPE_KO[f.shape]} (세로/가로 ${f.lengthToWidth}, 턱각 ${f.jawAngle}°)`,
-    `턱 너비/광대 ${f.jawToCheek} → ${cmp(f.jawToCheek, 0.78, 0.88, "턱이 좁고 갸름함", "보통", "턱이 넓고 각짐")}`,
-    `이마 너비/광대 ${f.foreheadToCheek} → ${cmp(f.foreheadToCheek, 0.86, 0.94, "이마가 좁음", "보통", "이마가 넓음")}`,
-    `얼굴 삼등분 비율 상:중:하 = ${f.thirds.join(" : ")} (1.0이 균형)`,
-    `눈 크기(가로/얼굴폭) ${f.eyeWidthRatio}, 눈 개방도 ${f.eyeOpenness} → ${cmp(f.eyeOpenness, 0.3, 0.4, "가늘고 긴 눈", "보통 크기의 눈", "크고 동그란 눈")}`,
-    `눈 간격 ${f.eyeSpacing} (0에 가까울수록 눈 하나 간격) → ${cmp(f.eyeSpacing, -0.1, 0.15, "눈이 몰린 편", "표준", "눈이 넓게 떨어진 편")}`,
-    `눈꼬리 각도 ${f.eyeSlant}° → ${cmp(f.eyeSlant, -1, 3, "처진 눈매(순한 인상)", "평행한 눈매", "올라간 눈매(날카로운 인상)")}`,
-    `눈썹 높이 ${f.browHeight}, 눈썹 각도 ${f.browAngle}° → ${cmp(f.browAngle, 2, 8, "일자 눈썹", "약간 아치", "아치형 눈썹")}`,
-    `코 너비/얼굴폭 ${f.noseWidthRatio} → ${cmp(f.noseWidthRatio, 0.24, 0.3, "좁은 코", "보통", "넓은 코")}`,
-    `입 너비/얼굴폭 ${f.mouthWidthRatio}, 입술 두께 ${f.lipFullness} → ${cmp(f.lipFullness, 0.25, 0.36, "얇은 입술", "보통", "도톰한 입술")}`,
-    `피부톤: ${f.skin.hex} (밝기 ${ITA_KO[f.skin.itaCategory]}, ITA ${f.skin.ita}°, 언더톤 ${UNDERTONE_KO[f.skin.undertone]})`,
-    `머리카락 색: ${f.hairHex} (밝기 ${f.hairBrightness} — 0에 가까우면 검정, 1에 가까우면 금발/밝은 염색)`,
-    `입술 색: ${f.lipHex}`,
+    `face ${f.shape}, length/width ${f.lengthToWidth}, jaw angle ${f.jawAngle}deg`,
+    `jaw/cheek ${f.jawToCheek} (${cmp(f.jawToCheek, 0.78, 0.88, "narrow", "average", "wide/square")})`,
+    `forehead/cheek ${f.foreheadToCheek} (${cmp(f.foreheadToCheek, 0.86, 0.94, "narrow", "average", "broad")})`,
+    `thirds upper:mid:lower ${f.thirds.join(":")} (1.0 = balanced)`,
+    `eye width ${f.eyeWidthRatio}, openness ${f.eyeOpenness} (${cmp(f.eyeOpenness, 0.3, 0.4, "narrow", "average", "large round")})`,
+    `eye spacing ${f.eyeSpacing} (${cmp(f.eyeSpacing, -0.1, 0.15, "close-set", "average", "wide-set")})`,
+    `eye tilt ${f.eyeSlant}deg (${cmp(f.eyeSlant, -1, 3, "downturned/soft", "level", "upturned/sharp")})`,
+    `brow height ${f.browHeight}, angle ${f.browAngle}deg (${cmp(f.browAngle, 2, 8, "straight", "slight arch", "arched")})`,
+    `nose width ${f.noseWidthRatio} (${cmp(f.noseWidthRatio, 0.24, 0.3, "narrow", "average", "broad")})`,
+    `mouth width ${f.mouthWidthRatio}, lips ${f.lipFullness} (${cmp(f.lipFullness, 0.25, 0.36, "thin", "average", "full")})`,
+    `skin ${f.skin.hex} ITA ${f.skin.ita}deg, undertone ${f.skin.undertone}`,
+    `hair ${f.hairHex} brightness ${f.hairBrightness} (0 = black, 1 = blond)`,
+    `lips ${f.lipHex}`,
   ].join("\n");
 }
+

@@ -154,9 +154,14 @@ test("the description names every measurement the judge is asked to cite", () =>
     480
   )!;
   const text = describeFaceFeatures(f);
-  for (const label of ["얼굴형", "눈 크기", "눈꼬리", "눈썹", "코 너비", "입술", "피부톤", "머리카락"]) {
+  // English labels: the descriptor is sent to a model whose tokenizer costs
+  // ~2.7 tokens per Hangul character, so the Korean version cost 488 tokens
+  // against 117 for this one — the difference between two scans fitting in a
+  // minute's budget and one. See describeFaceFeatures.
+  for (const label of ["face", "eye width", "eye tilt", "brow", "nose width", "lips", "skin", "hair"]) {
     assert.ok(text.includes(label), `description is missing "${label}"`);
   }
+  assert.ok(!/[가-힣]/.test(text), "Korean leaked back into the descriptor");
   assert.ok(text.length > 200, "description is too thin to reason from");
 });
 
