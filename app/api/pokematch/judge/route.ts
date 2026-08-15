@@ -171,6 +171,15 @@ async function callProvider(
 }
 
 
+/** Compact per-key failure list for ?debug. Already-sanitized parts only. */
+function summarizeFailures(
+  failures: { label: string; error: string; detail?: string }[]
+): string {
+  return failures
+    .map((f) => `${f.label}=${f.error}${f.detail ? `[${f.detail}]` : ""}`)
+    .join(" ");
+}
+
 /** One provider's full attempt: call, parse, validate. Returns picks on
  * success, or a reason the caller can fall back on. */
 async function attempt(
@@ -290,9 +299,14 @@ export async function POST(request: Request) {
   const start = Math.floor(Math.random() * configured.length);
   const order = configured.map((_, i) => configured[(start + i) % configured.length]);
 
-  // Only the LAST failure is reported, because that is the state the user is
-  // actually in — if one key was rate limited but the other answered, nothing
-  // went wrong from here.
+  // EVERY key's failure is reported, not just the last one.
+  //
+  // A single scan has to fit inside ONE key's per-minute budget — the two
+  // buckets can't be pooled for one request — so with two keys configured a
+  // failure means BOTH refused, and which limit each of them hit is the whole
+  // diagnosis. Reporting only the last one hid whether the second key was
+  // even being reached.
+  const failures: { label: string; error: string; detail?: string }[] = [];
   let last: { status: number; error: string; detail?: string } | null = null;
   for (const provider of order) {
     const result = await attempt(provider, messages, candidates);
@@ -300,10 +314,13 @@ export async function POST(request: Request) {
       return NextResponse.json({
         picks: result.picks,
         model: result.model,
-        // Which provider answered, so ?debug can show a silent failover.
+        // Which key answered, so ?debug can show a silent failover.
         provider: provider.label,
+        // Present only when an earlier key had to be given up on.
+        ...(failures.length ? { failedFirst: summarizeFailures(failures) } : {}),
       });
     }
+    failures.push({ label: provider.label, error: result.error, detail: result.detail });
     last = { status: result.status, error: result.error, detail: result.detail };
     if (order.length > 1) {
       console.warn(`pokematch judge: ${provider.label} failed (${result.error}), trying next`);
@@ -311,7 +328,14 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(
-    { error: last?.error ?? "judge_unavailable", detail: last?.detail },
+    {
+      error: last?.error ?? "judge_unavailable",
+      detail: last?.detail,
+      // "primary=... secondary=..." — shows how many keys were configured and
+      // what each one said, which is what distinguishes "both budgets spent"
+      // from "the second key was never picked up".
+      keys: summarizeFailures(failures),
+    },
     { status: last?.status ?? 502 }
   );
 }

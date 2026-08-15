@@ -88,14 +88,19 @@ export async function judgeCandidates(
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as
-        | { error?: string; detail?: string }
+        | { error?: string; detail?: string; keys?: string }
         | null;
       const reason =
         `http_${res.status}` +
         (body?.error ? `:${body.error}` : "") +
         // Present on upstream 429s: names the limit that tripped, so a burst
         // against the per-minute cap is distinguishable from a spent daily one.
-        (body?.detail ? ` (${body.detail})` : "");
+        (body?.detail ? ` (${body.detail})` : "") +
+        // Per-key outcome. A single scan must fit inside ONE key's budget, so
+        // a failure with two keys configured means both refused — and this
+        // shows whether the second was even reached.
+        (body?.keys ? `
+  keys: ${body.keys}` : "");
       return {
         picks: [],
         model: "",
