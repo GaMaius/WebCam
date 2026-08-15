@@ -159,6 +159,17 @@ function computeFaceAspect(landmarks?: Landmark[]): number {
   return faceW > 0 ? faceH / faceW : 1.15;
 }
 
+/** Fisher-Yates copy. Used to break the correlation between a candidate's
+ * position in the prompt and how likely the judge is to pick it. */
+function shuffled<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 /** Normalized L2 mean of the per-frame embeddings. */
 function meanEmbedding(embeddings: Float32Array[]): Float32Array {
   const dim = embeddings[0].length;
@@ -268,11 +279,21 @@ export function usePokematchScan() {
       // The curated pool, scored against THIS face. The z-scores no longer go
       // to the model (it looks at the photo instead) but they still drive the
       // displayed percentage and the local fallback ranking.
-      const candidates = scoreSlugs(
-        embedding,
-        gallery,
-        pokedex,
-        buildCuratedPool(pokedex, gallery.species)
+      //
+      // ⚠️ SHUFFLED, and that is deliberate. buildCuratedPool returns dex
+      // order, which puts gen 1 at the top — and the judge kept answering from
+      // there: one measured run picked candidates 23, 36, 51, 53 and 57 out of
+      // 291, which random choice would produce about 4 times in 10,000. Dex
+      // order also correlates position with fame and with round early-gen
+      // designs, so "the top of the list" and "the obvious answer" were the
+      // same thing and the bias was invisible.
+      //
+      // Shuffling per scan is safe because THIS array is what numbers the
+      // prompt and what the reply resolves against — the ordering just has to
+      // be one array used for both, not a stable one across runs. ?debug
+      // prints it in the order actually sent.
+      const candidates = shuffled(
+        scoreSlugs(embedding, gallery, pokedex, buildCuratedPool(pokedex, gallery.species))
       );
       const description = features ? describeFaceFeatures(features) : "";
 
