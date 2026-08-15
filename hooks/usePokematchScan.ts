@@ -46,22 +46,19 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 // jawline all inform "who does this person look like", and the tight 1.15 box
 // cuts them off.
 //
-// ⚠️ 256, and the number matters far more than it looks.
+// ⚠️ IMAGE SIZE DOES NOT AFFECT COST HERE. Measured, twice.
 //
-// This was raised to 448 on an estimate that the image cost ~830 tokens. A
-// measured 429 body then reported requested=6074 where the estimate said
-// 3650: subtracting the text leaves the 448px image costing roughly 3,400
-// tokens BY ITSELF — more than the system prompt, face notes and all 291
-// candidate names combined. Tokens scale with area, so 256px costs about a
-// third of that, which is the single largest saving available in this request.
+// The same request was sent at 448px (31KB) and at 256px (16KB) and the
+// provider reported requested=6074 BOTH times — not close, identical. This
+// endpoint charges a flat rate for an image regardless of its pixel count,
+// so shrinking it buys nothing and only costs detail.
 //
-// The reason for raising it does not survive either: it was raised because low
-// resolution was suspected of causing the judge to fall back on famous
-// mascots, and that turned out to be the temperature instead.
-//
-// Don't raise it again from an estimate. ?debug now prints the provider's own
-// prompt_tokens on every successful call — change the size, read the number.
-const JUDGE_IMAGE_SIZE = 256;
+// Two of my earlier estimates about this were wrong in opposite directions
+// (~256 tokens, then ~3,400 scaling with area). Both were derived from
+// character counts and arithmetic rather than read from the API. Don't
+// re-litigate this from a calculation: ?debug prints the provider's own
+// prompt_tokens on any successful call, so change the value and read it.
+const JUDGE_IMAGE_SIZE = 448;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
 
