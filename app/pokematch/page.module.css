@@ -162,16 +162,22 @@
 /* The old note for this was 12px dim grey and people read straight past it,
    so a result produced WITHOUT the AI looked identical to one produced with
    it. It sits above the matches now, in warning amber, because the difference
-   between the two engines is large enough that hiding it misleads. */
+   between the two engines is large enough that hiding it misleads.
+
+   ⚠️ Colours are for this app's LIGHT cream theme (--bg-page #f5efe0). A first
+   pass used the bright amber/mint that suits a dark UI and measured 1.76:1 and
+   1.49:1 against the card — the most important line was the least readable
+   one. Anything changed here needs re-checking against the cream, not against
+   an assumption about the theme. */
 .engineBanner {
   display: flex;
   gap: 10px;
   align-items: flex-start;
   padding: 12px 14px;
   border-radius: var(--radius-md, 12px);
-  background: rgba(240, 173, 78, 0.13);
-  border: 1px solid rgba(240, 173, 78, 0.42);
-  color: var(--text, #f4f5f7);
+  background: rgba(150, 82, 0, 0.09);
+  border: 1px solid rgba(150, 82, 0, 0.34);
+  color: var(--text);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -185,23 +191,36 @@
   font-weight: 700;
   font-size: 14px;
   margin-bottom: 2px;
-  color: #f0ad4e;
+  color: #8a4b00;
 }
 .engineBannerBody {
   color: var(--text-dim);
 }
+/* block, so it sits on its own line under the explanation rather than running
+   on from the end of the sentence. */
 .engineRetry {
-  margin-top: 9px;
-  padding: 7px 13px;
+  display: block;
+  margin-top: 11px;
+  padding: 8px 15px;
   font-size: 13px;
   font-weight: 600;
   border-radius: 999px;
   cursor: pointer;
-  color: #1b1b1f;
-  background: #f0ad4e;
+  color: var(--surface, #fffdf7);
+  background: #8a4b00;
   border: none;
 }
-/* The reassuring counterpart: shown only when the AI really did decide. */
+/* While the countdown runs the button stays visible but plainly unusable —
+   hiding it would make the wait look like nothing is coming. */
+.engineRetry:disabled {
+  cursor: not-allowed;
+  color: var(--text-dim);
+  background: rgba(150, 82, 0, 0.12);
+  border: 1px solid rgba(150, 82, 0, 0.3);
+  font-variant-numeric: tabular-nums; /* stops the label jiggling each second */
+}
+/* The reassuring counterpart: shown only when the AI really did decide. Uses
+   the theme's own accent green rather than a new colour. */
 .engineOk {
   display: inline-flex;
   align-items: center;
@@ -211,9 +230,9 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: #7fe0a8;
-  background: rgba(127, 224, 168, 0.12);
-  border: 1px solid rgba(127, 224, 168, 0.32);
+  color: var(--accent-strong, #395429);
+  background: var(--accent-soft, rgba(75, 107, 58, 0.12));
+  border: 1px solid rgba(75, 107, 58, 0.34);
 }
 .badges {
   display: flex;

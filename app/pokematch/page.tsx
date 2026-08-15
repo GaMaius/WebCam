@@ -127,6 +127,30 @@ export default function PokematchPage() {
     }
   }, []);
 
+  // Live countdown until the rate limit lifts.
+  //
+  // Driven off a DEADLINE rather than by decrementing a counter: an interval
+  // that subtracts one per tick drifts, and browsers throttle timers in a
+  // background tab, so a user who looks away and comes back would see a number
+  // frozen where they left it. Recomputing from the deadline is correct
+  // whenever it happens to run.
+  const [retryIn, setRetryIn] = useState(0);
+  useEffect(() => {
+    if (scan.phase !== "done" || scan.engine !== "local" || scan.retryAfterSec <= 0) {
+      setRetryIn(0);
+      return;
+    }
+    const deadline = Date.now() + scan.retryAfterSec * 1000;
+    // Faster than 1s so the final second doesn't visibly hang on "1초".
+    const id = setInterval(() => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setRetryIn(left);
+      if (left === 0) clearInterval(id);
+    }, 250);
+    setRetryIn(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    return () => clearInterval(id);
+  }, [scan.phase, scan.engine, scan.retryAfterSec]);
+
   const handleRetry = useCallback(() => {
     setUploadPreview(null);
     if (videoRef.current) void scan.start(videoRef.current);
@@ -254,10 +278,12 @@ export default function PokematchPage() {
                     ? "지금 사용량이 많아서 AI 판정을 받지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."
                     : "AI 판정을 불러오지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."}
                 </span>
-                <button className={styles.engineRetry} onClick={handleRetry}>
-                  {scan.retryAfterSec > 0
-                    ? `${scan.retryAfterSec}초 뒤 AI로 다시 찾기`
-                    : "AI로 다시 찾기"}
+                <button
+                  className={styles.engineRetry}
+                  onClick={handleRetry}
+                  disabled={retryIn > 0}
+                >
+                  {retryIn > 0 ? `${retryIn}초 후 다시 찾기` : "AI로 다시 찾기"}
                 </button>
               </div>
             </div>
