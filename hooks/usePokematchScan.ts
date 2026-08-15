@@ -8,7 +8,7 @@ import {
   loadPokedex,
   embedFace,
   matchTopK,
-  shortlistFromPool,
+  scoreSlugs,
   debugRank,
   POKEMATCH_IMG_SIZE,
   type Gallery,
@@ -56,12 +56,6 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 const JUDGE_IMAGE_SIZE = 256;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
-
-/** How many of the 291 curated species the judge chooses among. Wide enough
- * that the model still does the choosing, narrow enough that the choice is
- * anchored to species this face measurably scores on — see shortlistFromPool.
- * Also cuts roughly 900 tokens off each request. */
-const JUDGE_SHORTLIST_SIZE = 40;
 
 interface FaceBox {
   x: number;
@@ -273,13 +267,19 @@ export function usePokematchScan() {
       features: FaceFeatures | null,
       image: string | null
     ) => {
-      // The curated pool narrowed to what THIS face actually scores well on.
+      // The WHOLE curated pool goes to the judge. Narrowing it to the top 40
+      // by embedding score was tried and reverted — see the note in CLAUDE.md.
+      // Short version: the embedding's idea of resemblance is not a person's.
+      // The top 40 came back 38/40 gen 1 (the pool is ~40% gen 1), because the
+      // encoder favours simple round cartoon faces, and it therefore cut
+      // exactly the sharp-featured later-gen species the user had picked out
+      // as the good matches. Filtering by a signal that disagrees with the
+      // goal removes the right answers first.
       //
-      // Sending all 291 grounded the choice in nothing measurable: dozens fit
-      // any face, the model has no strong preference among them, and so
-      // consecutive scans returned entirely different fives. The embedding is
-      // the only part of the pipeline that measures the individual, and it was
-      // being spent on the displayed percentage rather than on the decision.
+      // So the z-scores stay where they were: driving the displayed percentage
+      // and the local fallback, not the judgement. The judgement is the vision
+      // model looking at the photo, which is the only part that has produced
+      // matches the user recognised.
       //
       // ⚠️ SHUFFLED, and that is deliberate. buildCuratedPool returns dex
       // order, which puts gen 1 at the top — and the judge kept answering from
@@ -292,12 +292,11 @@ export function usePokematchScan() {
       // Shuffling is safe because THIS array is what numbers the prompt and
       // what the reply resolves against — the ordering has to be one array
       // used for both. See candidateOrder.ts for why the permutation is fixed.
-      const scored = shortlistFromPool(
+      const scored = scoreSlugs(
         embedding,
         gallery,
         pokedex,
-        buildCuratedPool(pokedex, gallery.species),
-        JUDGE_SHORTLIST_SIZE
+        buildCuratedPool(pokedex, gallery.species)
       );
       const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";
@@ -354,8 +353,10 @@ export function usePokematchScan() {
               .join("\n") +
             `\n\n` +
             `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
-            // score is what the shortlist ranked by; z only drives the percent.
-            `CANDIDATES (${candidates.length}종 = 291종 중 유사도 상위, 프롬프트 순서 = 번호):\n` +
+            // Both numbers are diagnostic only — neither filters the pool.
+            // score is the hybrid (60% unique-deviation z); ranking by it is
+            // 38/40 gen 1, which is why the pool is NOT cut by it.
+            `CANDIDATES (${candidates.length}종 전체, 프롬프트 순서 = 번호):\n` +
             candidates
               .map(
                 (c, i) =>
