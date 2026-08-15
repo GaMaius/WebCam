@@ -18,9 +18,10 @@ export interface JudgeResult {
   model: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
-   * (judge_unconfigured/rate_limited/judge_unavailable/judge_unusable); this
-   * just carries that (or an http/network reason) back so a silent fallback
-   * to local ranking isn't a dead end to diagnose. */
+   * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
+   * Groq / rate_limited_upstream — Groq's own quota / judge_unavailable /
+   * judge_unusable); this just carries that (or an http/network reason) back
+   * so a silent fallback to local ranking isn't a dead end to diagnose. */
   reason?: string;
 }
 

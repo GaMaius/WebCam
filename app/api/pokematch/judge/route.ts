@@ -82,7 +82,10 @@ export async function POST(request: Request) {
     request.headers.get("x-real-ip")?.trim() ||
     "unknown";
   if (rateLimited(ip)) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+    // Distinct from the upstream "rate_limited" below: this one never reached
+    // Groq at all, so it means the same browser/IP hit our own per-minute cap,
+    // not the provider's daily token budget.
+    return NextResponse.json({ error: "rate_limited_local" }, { status: 429 });
   }
 
   let body: unknown;
@@ -127,7 +130,7 @@ export async function POST(request: Request) {
     console.error("pokematch judge: groq responded", res.status, await res.text().catch(() => ""));
     const limited = res.status === 429;
     return NextResponse.json(
-      { error: limited ? "rate_limited" : "judge_unavailable" },
+      { error: limited ? "rate_limited_upstream" : "judge_unavailable" },
       { status: limited ? 429 : 502 }
     );
   }
