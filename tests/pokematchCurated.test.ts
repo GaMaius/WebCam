@@ -94,10 +94,11 @@ test("the numbered list stays affordable and carries only English names", () => 
   assert.ok(list.length / 4 < 2500, `candidate list is ~${Math.round(list.length / 4)} tokens`);
 });
 
-// The judge returns famous mascots for every face and ignores being told not
-// to, so the pool it sees must simply not contain them. See
-// JUDGE_DEFAULT_SLUGS for the evidence and the trade-off.
-test("the judge's pool drops the mascots the model defaults to", () => {
+// ⚠️ This option is DORMANT — the app does not pass it. Excluding the mascots
+// was tried and backfired (the judge moved to Porygon/Staryu rather than to
+// anything more personal); see JUDGE_DEFAULT_SLUGS. The test stays so the
+// mechanism still works if a future change makes it worth re-enabling.
+test("buildCuratedPool can drop the judge's default mascots when asked", () => {
   const withDefaults = buildCuratedPool(pokedex, available);
   const forJudge = buildCuratedPool(pokedex, available, { excludeJudgeDefaults: true });
 

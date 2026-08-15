@@ -61,12 +61,18 @@ async function callGroq(
   const base = {
     model,
     messages,
-    // Low, because the same face must not get a different answer each scan.
-    // At 0.7 two consecutive scans of one person shared none of their five
-    // picks: many species plausibly fit "sharp eyes, glasses, dark hair", and
-    // sampling re-rolled which of them surfaced. Variety across USERS comes
-    // from the faces differing, which is where it should come from.
-    temperature: 0.15,
+    // ⚠️ HIGH ON PURPOSE. 0.15 was tried, to stop the answer changing between
+    // scans, and it made the app worse: the model collapsed onto its argmax,
+    // which for every face is a famous safe mascot (Psyduck, Pikachu) with a
+    // reason vague enough to fit anyone.
+    //
+    // This model's RANKING is the weak part, not its knowledge — species the
+    // user recognised as genuinely resembling them (Riolu, Zorua, Zoroark) are
+    // inside its distribution but are never its top choice. Sampling is the
+    // only way to reach them. The cost is honest: some scans miss. For a
+    // for-fun app, occasionally excellent beats reliably bland, and re-rolling
+    // is cheap now that requests no longer blow the per-minute cap.
+    temperature: 0.7,
     // Counted against the per-minute budget as if fully used, so it's kept
     // just above what five picks and their one-line reasons actually need
     // (~114 tokens measured) rather than left at a comfortable ceiling.

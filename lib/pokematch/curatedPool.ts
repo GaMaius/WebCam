@@ -88,28 +88,20 @@ export const EXTRA_FAMOUS = [
 ];
 
 /**
- * Species the vision judge reaches for regardless of whose face it is.
+ * ⚠️ DEFINED BUT NOT APPLIED — kept as the record of a failed fix.
  *
- * This is the LLM's version of the embedding's hub problem, and it needs the
- * same treatment. The embedding collapses onto round shapes; the model
- * collapses onto fame. Across repeated scans of one face it returned Psyduck
- * and Pikachu in nearly every run, with reasons generic enough to fit anyone
- * ("부드러운 피부톤이 전체적인 분위기를 살립니다"), while the sharp-featured species
- * the user recognised as actually resembling them never appeared.
+ * The judge kept returning these famous mascots for every face, so they were
+ * removed from its pool. It did not work. Blocking Pikachu and Psyduck did not
+ * push the model toward specific matches; it picked the next generic thing
+ * instead — Porygon, Staryu, Starmie, Poliwag — which resembled the person
+ * less, not more, and read as bizarre rather than safe.
  *
- * Instructing the model not to do this DOES NOT WORK — the system prompt names
- * these very species as defaults to avoid, and they still came back first and
- * second. A pool that doesn't contain them is the enforcement.
+ * The lesson: reaching for mascots was a SYMPTOM of a low temperature
+ * collapsing onto the argmax, not a property of the pool. Removing the top of
+ * a bad ranking just exposes the next entry of the same bad ranking. It is
+ * fixed at the temperature instead (see the route).
  *
- * The cost is real: this is a Pokemon lookalike app and Pikachu is not in it.
- * That is the trade being made, and it is one line to undo. When the model
- * skips the mascots it produces the specific, feature-grounded picks the app
- * is for — one run gave Growlithe for "검은 머리와 날카로운 눈매", which is the
- * kind of answer this list is trying to make room for.
- *
- * ⚠️ Evidence so far is repeated runs of ONE face. Widen or narrow it once
- * more people have tried it; a species that genuinely suits somebody should
- * not stay excluded forever.
+ * Don't re-apply this without changing something else first.
  */
 export const JUDGE_DEFAULT_SLUGS = new Set([
   "pikachu", "psyduck", "golduck", "clefairy", "clefable",

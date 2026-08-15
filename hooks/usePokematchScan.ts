@@ -297,10 +297,12 @@ export function usePokematchScan() {
         embedding,
         gallery,
         pokedex,
-        // excludeJudgeDefaults: the famous mascots the model returns for every
-        // face. The prompt asks it not to and it does anyway — see
-        // JUDGE_DEFAULT_SLUGS. The local fallback keeps its own exclusions.
-        buildCuratedPool(pokedex, gallery.species, { excludeJudgeDefaults: true })
+        // Mascots stay IN. Excluding them was tried and backfired: blocking
+        // Pikachu and Psyduck didn't push the judge toward specific matches,
+        // it pushed it to the next generic thing (Porygon, Staryu, Starmie) —
+        // which read as less like the person, not more. The mascot habit was a
+        // symptom of low temperature, and it is fixed there instead.
+        buildCuratedPool(pokedex, gallery.species)
       );
       const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";
