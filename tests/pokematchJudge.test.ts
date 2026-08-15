@@ -9,6 +9,7 @@ import {
   isUsableImage,
   normalizePicks,
   sanitizeCandidates,
+  sanitizeReason,
   summarizeRateLimit,
 } from "../lib/pokematch/judgeProtocol.ts";
 
@@ -163,6 +164,33 @@ test("the organization id never leaks into the summary", () => {
     null
   );
   assert.ok(!summary.includes("org_01secret"), `leaked: ${summary}`);
+});
+
+// These use sentences the model actually produced. The input is somebody's
+// face, so a withheld reason beats a rude one.
+test("a reason that judges the person's appearance is withheld", () => {
+  assert.equal(sanitizeReason("통통한 얼굴형과 진지한 눈매가 잘 어울립니다"), "");
+  assert.equal(sanitizeReason("약간 어색해 보이는 표정이 잘 통합니다"), "");
+  assert.equal(sanitizeReason("넓은 코와 입술이 특징을 잘 살립니다"), "");
+});
+
+test("a species name leaking into the reason is withheld, since the UI shows a different one", () => {
+  // Real output: this appeared under a row labelled 고라파덕.
+  assert.equal(sanitizeReason("넓게 열린 눈과 긴 이마가 싸이duck와 통합니다"), "");
+  assert.equal(sanitizeReason("Marill의 귀여운 인상과 잘 어울립니다"), "");
+});
+
+test("a good reason survives intact", () => {
+  const good = "둥근 안경과 부드러운 눈매가 잘 어울립니다";
+  assert.equal(sanitizeReason(good), good);
+  assert.equal(sanitizeReason("  눈꼬리가 올라가 시원한 인상이에요  "), "눈꼬리가 올라가 시원한 인상이에요");
+});
+
+test("picks survive a rejected reason — the species still shows, just without a sentence", () => {
+  const picks = normalizePicks({ picks: [{ n: 1, reason: "통통한 얼굴이 닮았습니다" }] }, candidates);
+  assert.equal(picks.length, 1, "a bad sentence must not cost the user their result");
+  assert.equal(picks[0].slug, "pikachu");
+  assert.equal(picks[0].reason, "");
 });
 
 test("an explicit retry-after header wins over the prose, and odd bodies still summarize", () => {
