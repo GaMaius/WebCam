@@ -274,17 +274,23 @@ export default function PokematchPage() {
               <div>
                 <strong className={styles.engineBannerTitle}>AI가 고른 결과가 아니에요</strong>
                 <span className={styles.engineBannerBody}>
-                  {scan.fallbackCause === "busy"
+                  {scan.fallbackCause === "quota"
+                    ? "오늘 쓸 수 있는 AI 사용량을 다 썼어요. 내일 다시 열리기 전까지는 기본 유사도(z-score) 방식으로 찾은 결과가 나와요 — 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."
+                    : scan.fallbackCause === "busy"
                     ? "지금 사용량이 많아서 AI 판정을 받지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."
                     : "AI 판정을 불러오지 못했어요. 대신 기본 유사도(z-score) 방식으로 찾은 결과라, 얼굴 특징보다 전체적인 형태에 반응해 덜 정확할 수 있어요."}
                 </span>
-                <button
-                  className={styles.engineRetry}
-                  onClick={handleRetry}
-                  disabled={retryIn > 0}
-                >
-                  {retryIn > 0 ? `${retryIn}초 후 다시 찾기` : "AI로 다시 찾기"}
-                </button>
+                {/* A daily budget doesn't come back today, so offering a retry
+                    would just spend another failed request. */}
+                {scan.fallbackCause !== "quota" && (
+                  <button
+                    className={styles.engineRetry}
+                    onClick={handleRetry}
+                    disabled={retryIn > 0}
+                  >
+                    {retryIn > 0 ? `${retryIn}초 후 다시 찾기` : "AI로 다시 찾기"}
+                  </button>
+                )}
               </div>
             </div>
           ) : (

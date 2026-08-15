@@ -28,12 +28,13 @@ export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "ana
  * ran instead — surfaced in the UI so a degraded result isn't silent. */
 export type PokematchEngine = "llm" | "local";
 
-/** Why the local ranker ran instead of the judge. "busy" means a rate limit —
- * capacity, not breakage, and worth retrying shortly; "unavailable" covers
- * everything else. null when the judge produced the result. The distinction is
+/** Why the local ranker ran instead of the judge. "busy" is a per-minute cap,
+ * which lifts in seconds and is worth retrying; "quota" is the DAILY budget,
+ * which will not lift today and must not be dressed up as a short wait;
+ * "unavailable" covers everything else. null when the judge produced the result. The distinction is
  * surfaced to the user, who otherwise can't tell a degraded result from a
  * normal one. */
-export type PokematchFallbackCause = "busy" | "unavailable" | null;
+export type PokematchFallbackCause = "busy" | "quota" | "unavailable" | null;
 
 const FRAMES_TO_AVERAGE = 8; // averaging several frames stabilizes the match (consistency)
 const CROP_COEF = 1.15; // tight face-only crop margin
@@ -312,6 +313,7 @@ export function usePokematchScan() {
       let judgeFailReason = "";
       let retryAfter = 0;
       let rateLimited = false;
+      let dailyLimit = false;
       // The model's picks BEFORE pickGuards trims them. Without this the debug
       // panel can't tell an unstable MODEL from a guard that reshuffled a
       // stable one — the displayed five are chosen from a larger list, so both
@@ -328,6 +330,7 @@ export function usePokematchScan() {
           judgeFailReason = judged.reason ?? "unknown";
           retryAfter = judged.retryAfterSec ?? 0;
           rateLimited = judged.rateLimited === true;
+          dailyLimit = judged.dailyLimit === true;
         }
       } else {
         judgeFailReason = "no_image";
@@ -383,7 +386,9 @@ export function usePokematchScan() {
 
       setEngine(usedLlm ? "llm" : "local");
       setRetryAfterSec(usedLlm ? 0 : retryAfter);
-      setFallbackCause(usedLlm ? null : rateLimited ? "busy" : "unavailable");
+      setFallbackCause(
+        usedLlm ? null : dailyLimit ? "quota" : rateLimited ? "busy" : "unavailable"
+      );
       setMatches(finalMatches);
       setPhase("done");
     },

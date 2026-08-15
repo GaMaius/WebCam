@@ -39,6 +39,12 @@ export interface JudgeResult {
    * says so plainly, because a rate-limited result and a failed one look
    * identical on screen but only one is worth retrying. */
   rateLimited?: boolean;
+  /** True when the limit that tripped was a DAILY one rather than per-minute.
+   * The two need opposite advice: a per-minute cap lifts in seconds, a daily
+   * budget does not lift today at all, and telling someone to wait a moment
+   * for something that won't come back until tomorrow is worse than saying
+   * nothing. */
+  dailyLimit?: boolean;
 }
 
 /** The wait Groq asked for, when it's short enough to be worth offering as a
@@ -47,6 +53,12 @@ function parseRetryAfter(detail: string | undefined): number | undefined {
   const raw = detail ? /retry_after=([\d.]+)/.exec(detail)?.[1] : undefined;
   const sec = raw ? Number(raw) : NaN;
   return Number.isFinite(sec) && sec > 0 && sec <= 120 ? Math.ceil(sec) : undefined;
+}
+
+/** Whether the tripped limit was a per-DAY one. summarizeRateLimit emits the
+ * limit name verbatim ("tokens_per_day", "requests_per_day"). */
+function isDailyLimit(detail: string | undefined): boolean {
+  return detail ? /_per_day/.test(detail) : false;
 }
 
 const JUDGE_TIMEOUT_MS = 50_000;
@@ -90,6 +102,7 @@ export async function judgeCandidates(
         reason,
         retryAfterSec: parseRetryAfter(body?.detail),
         rateLimited: res.status === 429,
+        dailyLimit: res.status === 429 && isDailyLimit(body?.detail),
       };
     }
     const data = (await res.json()) as Partial<JudgeResult>;

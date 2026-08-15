@@ -197,3 +197,21 @@ test("an explicit retry-after header wins over the prose, and odd bodies still s
   assert.match(summarizeRateLimit("on requests per day (RPD): ... try again in 9s", "60"), /retry_after=60/);
   assert.equal(summarizeRateLimit("something unparseable", null), "unspecified");
 });
+
+// A per-minute cap and a daily budget both arrive as 429 but need opposite
+// advice — one lifts in seconds, the other not until tomorrow — so the limit
+// name has to survive into the summary the client reads.
+test("the summary says whether the limit was per-minute or per-day", () => {
+  const perDay = summarizeRateLimit(
+    "Rate limit reached ... on tokens per day (TPD): Limit 200000, Used 200000, Requested 3600.",
+    null
+  );
+  assert.match(perDay, /_per_day/, "client keys the 'come back tomorrow' copy off this");
+
+  const perMinute = summarizeRateLimit(
+    "Rate limit reached ... on tokens per minute (TPM): Limit 8000, Used 6000, Requested 3600. Please try again in 12s.",
+    null
+  );
+  assert.doesNotMatch(perMinute, /_per_day/);
+  assert.match(perMinute, /_per_minute/);
+});
