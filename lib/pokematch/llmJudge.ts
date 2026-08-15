@@ -23,6 +23,19 @@ export interface JudgeResult {
    * judge_unusable); this just carries that (or an http/network reason) back
    * so a silent fallback to local ranking isn't a dead end to diagnose. */
   reason?: string;
+  /** Seconds to wait, when the judge was refused by a rate limit that will
+   * lift on its own. Drives a "try again in Ns" message — the local fallback
+   * is visibly worse, so telling the user it's temporary beats letting them
+   * conclude the feature is broken. */
+  retryAfterSec?: number;
+}
+
+/** The wait Groq asked for, when it's short enough to be worth offering as a
+ * retry rather than reading as "come back tomorrow". */
+function parseRetryAfter(detail: string | undefined): number | undefined {
+  const raw = detail ? /retry_after=([\d.]+)/.exec(detail)?.[1] : undefined;
+  const sec = raw ? Number(raw) : NaN;
+  return Number.isFinite(sec) && sec > 0 && sec <= 120 ? Math.ceil(sec) : undefined;
 }
 
 const JUDGE_TIMEOUT_MS = 50_000;
@@ -60,7 +73,7 @@ export async function judgeCandidates(
         // Present on upstream 429s: names the limit that tripped, so a burst
         // against the per-minute cap is distinguishable from a spent daily one.
         (body?.detail ? ` (${body.detail})` : "");
-      return { picks: [], model: "", reason };
+      return { picks: [], model: "", reason, retryAfterSec: parseRetryAfter(body?.detail) };
     }
     const data = (await res.json()) as Partial<JudgeResult>;
     if (!Array.isArray(data.picks) || data.picks.length === 0) {

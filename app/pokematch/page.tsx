@@ -248,8 +248,9 @@ export default function PokematchPage() {
           </div>
           {scan.engine === "local" && (
             <p className={styles.engineNote}>
-              AI 판정을 불러오지 못해 기본 유사도 순위로 보여주고 있어요. 잠시 후 다시 시도하면 판정 결과를 볼 수
-              있어요.
+              {scan.retryAfterSec > 0
+                ? `AI 판정 요청이 잠시 몰려서 기본 유사도 순위로 보여주고 있어요. ${scan.retryAfterSec}초 뒤에 다시 찾으면 AI가 고른 결과를 볼 수 있어요.`
+                : "AI 판정을 불러오지 못해 기본 유사도 순위로 보여주고 있어요. 잠시 후 다시 시도하면 판정 결과를 볼 수 있어요."}
             </p>
           )}
           <ResultActions

@@ -35,8 +35,17 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 // The judge is a vision model, so it needs an actual picture. This crop is
 // deliberately wider than the embedding's (CROP_COEF) — hair, ears and the
 // jawline all inform "who does this person look like", and the tight 1.15 box
-// cuts them off. 448px at q0.85 lands around 40KB of base64.
-const JUDGE_IMAGE_SIZE = 448;
+// cuts them off.
+//
+// ⚠️ SIZE IS A TOKEN DECISION, NOT A QUALITY ONE. Groq bills the image by
+// patch count, which scales with AREA. This was 448px on the estimate that it
+// cost ~256 tokens; a measured 429 (requested=5616 against an 8K per-minute
+// cap) put the real figure near 3,500 — more than the entire text prompt, and
+// enough that a single scan barely fit in a minute's budget. At 256px the
+// image costs about a third of that. Raising this back up will silently
+// reintroduce constant 429s; check the `requested=` number in a ?debug
+// rate-limit line before changing it.
+const JUDGE_IMAGE_SIZE = 256;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
 
@@ -191,6 +200,9 @@ export function usePokematchScan() {
   const [progress, setProgress] = useState(0);
   const [matches, setMatches] = useState<PokematchMatch[] | null>(null);
   const [engine, setEngine] = useState<PokematchEngine>("llm");
+  // Non-zero only when the fallback was caused by a rate limit that lifts on
+  // its own, so the UI can say "try again in Ns" instead of implying defeat.
+  const [retryAfterSec, setRetryAfterSec] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
   const [debugText, setDebugText] = useState<string | null>(null);
   const runningRef = useRef(false);
@@ -204,6 +216,7 @@ export function usePokematchScan() {
     setProgress(0);
     setMatches(null);
     setEngine("llm");
+    setRetryAfterSec(0);
     setErrorMessage("");
     setDebugText(null);
     faceAspectRef.current = 1.15;
@@ -257,6 +270,7 @@ export function usePokematchScan() {
       let result: PokematchMatch[] | null = null;
       let judgeModel = "";
       let judgeFailReason = "";
+      let retryAfter = 0;
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
@@ -265,6 +279,7 @@ export function usePokematchScan() {
           judgeModel = judged.model;
         } else {
           judgeFailReason = judged.reason ?? "unknown";
+          retryAfter = judged.retryAfterSec ?? 0;
         }
       } else {
         judgeFailReason = "no_image";
@@ -296,6 +311,7 @@ export function usePokematchScan() {
       }
 
       setEngine(usedLlm ? "llm" : "local");
+      setRetryAfterSec(usedLlm ? 0 : retryAfter);
       setMatches(finalMatches);
       setPhase("done");
     },
@@ -470,5 +486,16 @@ export function usePokematchScan() {
     [measureFace, rank]
   );
 
-  return { phase, progress, matches, engine, errorMessage, debugText, start, startWithImage, reset };
+  return {
+    phase,
+    progress,
+    matches,
+    engine,
+    retryAfterSec,
+    errorMessage,
+    debugText,
+    start,
+    startWithImage,
+    reset,
+  };
 }

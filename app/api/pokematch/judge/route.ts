@@ -62,7 +62,10 @@ async function callGroq(
     model,
     messages,
     temperature: 0.7,
-    max_completion_tokens: 400,
+    // Counted against the per-minute budget as if fully used, so it's kept
+    // just above what five picks and their one-line reasons actually need
+    // (~114 tokens measured) rather than left at a comfortable ceiling.
+    max_completion_tokens: 300,
     reasoning_effort: "none",
   };
   const post = (body: unknown) =>
