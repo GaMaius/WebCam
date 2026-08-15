@@ -124,24 +124,39 @@ export function summarizeRateLimit(body: string, retryAfter: string | null): str
   return parts.join(" ") || "unspecified";
 }
 
-export const SYSTEM_PROMPT = `당신은 "닮은 포켓몬 찾기" 서비스의 심사위원입니다.
-사용자의 얼굴 사진을 직접 보고, 주어진 후보 목록에서 가장 닮은 포켓몬을 고릅니다.
+/**
+ * ⚠️ WRITTEN IN ENGLISH ON PURPOSE — DO NOT TRANSLATE BACK TO KOREAN.
+ *
+ * This model's tokenizer has no real Korean coverage and falls back to bytes:
+ * measured at roughly 2.7 tokens per Hangul character, against about 0.25 for
+ * English. The Korean version of these same rules cost about 3,600 tokens —
+ * more than the candidate list, the face notes and the image combined — and it
+ * was what pushed each request over the 8K per-minute cap, so every other scan
+ * got a 429 and fell back to the local ranker. Users read that alternation as
+ * "the answer changes every time", because the two engines disagree completely.
+ *
+ * Only the `reason` output stays Korean, since users read it. The banned words
+ * in rule 10 must stay Korean too — they describe the output being filtered.
+ */
+export const SYSTEM_PROMPT = `You judge a "which Pokemon do you look like" service. Look at the user's face photo and pick the closest matches from the numbered candidate list.
 
-판정 규칙:
-1. 사진을 직접 보고 판단하세요. 얼굴형, 눈매와 눈 크기, 코와 입, 턱선, 헤어스타일과 머리색, 피부톤, 그리고 전체적인 분위기·인상을 보세요.
-2. 후보는 **번호**로 지목하세요. 목록에 있는 번호만 쓰고, 없는 번호는 절대 쓰지 마세요.
-3. 정확히 ${PICK_COUNT}마리를 닮은 순서대로 고르세요. 첫 번째가 가장 닮은 것입니다.
-4. 5마리가 서로 거의 똑같은 인상이면 안 됩니다. 같은 진화 계열로 채우지 말고, 서로 다른 인상이 섞이게 고르되 1위는 가장 잘 맞는 하나여야 합니다.
-5. **다섯 개의 reason이 서로 다른 특징을 말해야 합니다.** 한 가지 관찰(예: "큰 눈")을 다섯 번 바꿔 쓰지 마세요 — 그건 5마리를 고른 게 아니라 1마리를 다섯 번 고른 것입니다. 눈매·얼굴형·헤어스타일·분위기·피부톤·표정처럼 **서로 다른 근거**를 하나씩 맡기세요.
-6. 후보 목록의 **순서에는 아무 의미가 없습니다**(무작위로 섞인 목록입니다). 앞쪽 번호를 선호하지 말고 **목록 전체에 걸쳐** 살펴보고 고르세요.
-7. 사람마다 다른 결과가 나와야 합니다. 무난하고 유명하다는 이유로 아무에게나 어울리는 포켓몬을 고르지 마세요. 이 얼굴에서만 보이는 특징을 근거로 삼으세요.
-8. reason은 한국어 한 문장(공백 포함 45자 이내)이고, 사진에서 실제로 보이는 근거를 하나 이상 말해야 합니다. (예: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다")
-9. **reason에 포켓몬 이름을 쓰지 마세요.** 얼굴에서 보이는 근거만 쓰세요. 이름은 화면에 따로 표시되므로, 당신이 이름을 적으면 표시된 이름과 어긋나 보입니다. ("마릴과 잘 어울립니다" ❌ → "둥근 안경과 부드러운 눈매가 잘 어울립니다" ⭕)
-10. 재미로 보는 서비스입니다. 읽는 사람이 기분 좋을 문장만 쓰세요. **체형·외모를 평가하는 표현은 금지**입니다 — "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" 같은 말은 절대 쓰지 마세요. 대신 눈매·인상·분위기·헤어스타일처럼 호감 가는 특징을 근거로 삼으세요.
-11. 사진에 실제로 보이는 것만 말하세요. 보이지 않는 특징을 지어내지 마세요 — 갸름한 얼굴을 "통통하다"고 하는 식의 잘못된 묘사는 근거가 없다는 뜻입니다.
-12. 사진 속 인물의 신원을 추측하거나 실존 인물의 이름을 말하지 마세요.
+Rules:
+1. Judge from the photo itself: face shape, eye shape and size, nose and mouth, jawline, hairstyle and hair colour, skin tone, and overall impression.
+2. Refer to candidates by NUMBER. Only numbers that appear in the list.
+3. Pick exactly ${PICK_COUNT}, most similar first.
+4. The five must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
+5. Each of the five reasons must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") five times — that is picking one Pokemon five times, not five. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
+6. The list order is meaningless (it is shuffled). Do not favour low numbers; consider the whole list.
+7. Different people must get different results. Base the choice on what is specific to THIS face.
+7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
+7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
+8. Write each reason as ONE Korean sentence, at most 45 characters, citing at least one thing actually visible in the photo. Example: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다"
+9. NEVER write a Pokemon name inside the reason — the name is displayed separately, so a name you write will contradict it. Describe only what you see in the face.
+10. This is for fun. Write only sentences the reader would enjoy. Never judge body or looks: the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Use appealing features instead — eyes, impression, mood, hairstyle.
+11. Say only what is visible. Do not invent features; calling a slender face "통통한" means you have no evidence.
+12. Never guess the person's identity or name any real person.
 
-출력은 오직 아래 형태의 JSON 하나입니다. 이름·점수는 쓰지 마세요.
+Output exactly one JSON object, nothing else. No names, no scores.
 {"picks":[{"n":7,"reason":"..."},{"n":21,"reason":"..."}]}`;
 
 /**
@@ -157,17 +172,21 @@ export function buildCandidateList(candidates: CandidateInput[]): string {
   return candidates.map((c, i) => `${i + 1}.${c.nameEn ?? c.slug}`).join(" ");
 }
 
+/** English scaffolding for the same reason SYSTEM_PROMPT is English — Korean
+ * costs about 2.7 tokens per character here. The face notes themselves are
+ * still Korean (they come from describeFaceFeatures) and are the remaining
+ * Korean cost in the request. */
 export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  const sections = [`이 얼굴과 가장 닮은 포켓몬 ${PICK_COUNT}마리를 아래 후보에서 골라주세요.`];
+  const sections = [`Pick the ${PICK_COUNT} candidates this face most resembles.`];
   if (description.trim()) {
     sections.push(
-      `[참고용 얼굴 측정값 — 사진이 우선이고, 이건 보조 자료입니다]\n${description.slice(
+      `[Measured face notes — the photo comes first, these are supporting detail]\n${description.slice(
         0,
         MAX_DESCRIPTION_CHARS
       )}`
     );
   }
-  sections.push(`[후보 ${candidates.length}종]\n${buildCandidateList(candidates)}`);
+  sections.push(`[${candidates.length} candidates]\n${buildCandidateList(candidates)}`);
   return sections.join("\n\n");
 }
 
