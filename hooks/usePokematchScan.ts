@@ -14,11 +14,13 @@ import {
   POKEMATCH_IMG_SIZE,
   type Gallery,
   type PokedexEntry,
+  type PokematchCandidate,
   type PokematchMatch,
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
 import { buildCuratedPool } from "@/lib/pokematch/curatedPool";
+import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
 
@@ -159,16 +161,6 @@ function computeFaceAspect(landmarks?: Landmark[]): number {
   return faceW > 0 ? faceH / faceW : 1.15;
 }
 
-/** Fisher-Yates copy. Used to break the correlation between a candidate's
- * position in the prompt and how likely the judge is to pick it. */
-function shuffled<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
 
 /** Normalized L2 mean of the per-frame embeddings. */
 function meanEmbedding(embeddings: Float32Array[]): Float32Array {
@@ -288,13 +280,18 @@ export function usePokematchScan() {
       // designs, so "the top of the list" and "the obvious answer" were the
       // same thing and the bias was invisible.
       //
-      // Shuffling per scan is safe because THIS array is what numbers the
-      // prompt and what the reply resolves against — the ordering just has to
-      // be one array used for both, not a stable one across runs. ?debug
-      // prints it in the order actually sent.
-      const candidates = shuffled(
-        scoreSlugs(embedding, gallery, pokedex, buildCuratedPool(pokedex, gallery.species))
+      // Shuffling is safe because THIS array is what numbers the prompt and
+      // what the reply resolves against — the ordering has to be one array
+      // used for both, not the same one every run. ?debug prints the order
+      // actually sent. The seed is derived from the face so one person keeps
+      // one ordering (see faceSeed).
+      const scored = scoreSlugs(
+        embedding,
+        gallery,
+        pokedex,
+        buildCuratedPool(pokedex, gallery.species)
       );
+      const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";
 
       let result: PokematchMatch[] | null = null;

@@ -61,7 +61,12 @@ async function callGroq(
   const base = {
     model,
     messages,
-    temperature: 0.7,
+    // Low, because the same face must not get a different answer each scan.
+    // At 0.7 two consecutive scans of one person shared none of their five
+    // picks: many species plausibly fit "sharp eyes, glasses, dark hair", and
+    // sampling re-rolled which of them surfaced. Variety across USERS comes
+    // from the faces differing, which is where it should come from.
+    temperature: 0.15,
     // Counted against the per-minute budget as if fully used, so it's kept
     // just above what five picks and their one-line reasons actually need
     // (~114 tokens measured) rather than left at a comfortable ceiling.
