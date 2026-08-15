@@ -8,8 +8,7 @@ import {
   loadPokedex,
   embedFace,
   matchTopK,
-  buildCandidates,
-  scoreSlugs,
+  shortlistFromPool,
   debugRank,
   POKEMATCH_IMG_SIZE,
   type Gallery,
@@ -57,6 +56,12 @@ const FEATURE_FRAME_WIDTH = 320; // downscaled frame used for color sampling
 const JUDGE_IMAGE_SIZE = 256;
 const JUDGE_CROP_COEF = 1.55;
 const JUDGE_IMAGE_QUALITY = 0.85;
+
+/** How many of the 291 curated species the judge chooses among. Wide enough
+ * that the model still does the choosing, narrow enough that the choice is
+ * anchored to species this face measurably scores on — see shortlistFromPool.
+ * Also cuts roughly 900 tokens off each request. */
+const JUDGE_SHORTLIST_SIZE = 40;
 
 interface FaceBox {
   x: number;
@@ -268,9 +273,13 @@ export function usePokematchScan() {
       features: FaceFeatures | null,
       image: string | null
     ) => {
-      // The curated pool, scored against THIS face. The z-scores no longer go
-      // to the model (it looks at the photo instead) but they still drive the
-      // displayed percentage and the local fallback ranking.
+      // The curated pool narrowed to what THIS face actually scores well on.
+      //
+      // Sending all 291 grounded the choice in nothing measurable: dozens fit
+      // any face, the model has no strong preference among them, and so
+      // consecutive scans returned entirely different fives. The embedding is
+      // the only part of the pipeline that measures the individual, and it was
+      // being spent on the displayed percentage rather than on the decision.
       //
       // ⚠️ SHUFFLED, and that is deliberate. buildCuratedPool returns dex
       // order, which puts gen 1 at the top — and the judge kept answering from
@@ -282,14 +291,13 @@ export function usePokematchScan() {
       //
       // Shuffling is safe because THIS array is what numbers the prompt and
       // what the reply resolves against — the ordering has to be one array
-      // used for both, not the same one every run. ?debug prints the order
-      // actually sent. The seed is derived from the face so one person keeps
-      // one ordering (see faceSeed).
-      const scored = scoreSlugs(
+      // used for both. See candidateOrder.ts for why the permutation is fixed.
+      const scored = shortlistFromPool(
         embedding,
         gallery,
         pokedex,
-        buildCuratedPool(pokedex, gallery.species)
+        buildCuratedPool(pokedex, gallery.species),
+        JUDGE_SHORTLIST_SIZE
       );
       const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";
@@ -346,9 +354,14 @@ export function usePokematchScan() {
               .join("\n") +
             `\n\n` +
             `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
-            `CANDIDATES (${candidates.length}종, 프롬프트 순서 = 번호):\n` +
+            // score is what the shortlist ranked by; z only drives the percent.
+            `CANDIDATES (${candidates.length}종 = 291종 중 유사도 상위, 프롬프트 순서 = 번호):\n` +
             candidates
-              .map((c, i) => `${String(i + 1).padStart(3)}. ${c.slug.padEnd(16)} z=${c.z.toFixed(2).padStart(6)}`)
+              .map(
+                (c, i) =>
+                  `${String(i + 1).padStart(3)}. ${c.slug.padEnd(16)} ` +
+                  `score=${(c.score ?? 0).toFixed(2).padStart(6)} z=${c.z.toFixed(2).padStart(6)}`
+              )
               .join("\n") +
             `\n\n` +
             debugDump(embedding, gallery)

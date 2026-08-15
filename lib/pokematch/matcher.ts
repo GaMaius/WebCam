@@ -343,8 +343,13 @@ export interface PokematchCandidate {
   entry: PokedexEntry | null;
   /** Raw cosine similarity to the face embedding. */
   cos: number;
-  /** Popularity-debiased z-score — the actual ordering signal. */
+  /** Popularity-debiased z-score. Drives the displayed percentage. Note this
+   * is RAW z, which hub species dominate — it is not what shortlisting ranks
+   * by. */
   z: number;
+  /** Hybrid score (60% unique-deviation z + 40% raw z). Present when the
+   * candidate came from a shortlist, which ranks by this rather than z. */
+  score?: number;
 }
 
 /** Person-specific deviation vector: strips the generic "human face" component
@@ -419,6 +424,56 @@ export function scoreSlugs(
     });
   }
   return out;
+}
+
+/**
+ * The curated pool narrowed to the species this face actually scores well on.
+ *
+ * Why this exists: handing the judge all 291 curated species meant the choice
+ * was grounded in nothing measurable. Dozens of them plausibly fit any given
+ * face, the model has no strong preference among them, and so consecutive
+ * scans of one person returned entirely different fives — the photo shifts a
+ * little and a different plausible species wins. The embedding is the only
+ * part of this pipeline that measures the individual, and it was being spent
+ * on the displayed percentage instead of on the decision.
+ *
+ * Ranked by the hybrid score, not raw z. Raw z is what the debug panel prints
+ * and it is dominated by hub species — jigglypuff, mew and persian sit at the
+ * top of it for everyone. The hybrid is 60% unique-deviation z, which
+ * subtracts the generic human-face component precisely so that person-specific
+ * species can surface. HUB_EXCLUDE_SLUGS drops the rest of the known
+ * everybody-matches-this set, the same list matchTopK uses.
+ *
+ * The shortlist is deliberately wide (40 of 291). It removes the species this
+ * face has no claim to; choosing among what remains is still the model's job,
+ * looking at the actual photo.
+ */
+export function shortlistFromPool(
+  embedding: Float32Array,
+  gallery: Gallery,
+  pokedex: Record<string, PokedexEntry>,
+  slugs: string[],
+  n = 40
+): PokematchCandidate[] {
+  const indexOf = new Map(gallery.species.map((s, i) => [s, i]));
+  const uniqueEmb = uniqueDeviation(embedding, gallery);
+
+  const rows: (PokematchCandidate & { score: number })[] = [];
+  for (const slug of slugs) {
+    const s = indexOf.get(slug);
+    if (s === undefined || HUB_EXCLUDE_SLUGS.has(slug)) continue;
+    const { cos, z, score } = scoreIndex(s, embedding, uniqueEmb, gallery);
+    rows.push({
+      slug,
+      entry: pokedex[slug] ?? null,
+      cos: Number(cos.toFixed(3)),
+      z: Number(z.toFixed(2)),
+      score: Number(score.toFixed(2)),
+    });
+  }
+
+  rows.sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug));
+  return rows.slice(0, n);
 }
 
 /**
