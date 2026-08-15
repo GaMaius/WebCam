@@ -7,6 +7,9 @@
 // vision model — that's the feature. The intro modal says so; keep it saying so.
 
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
+import { PICK_COUNT } from "./judgeProtocol";
+import { applyPickGuards } from "./pickGuards";
+import type { FaceFeatures } from "./faceFeatures";
 
 export interface JudgePick {
   slug: string;
@@ -136,8 +139,21 @@ function withoutSpeciesNames(
 export function picksToMatches(
   picks: JudgePick[],
   pokedex: Record<string, PokedexEntry>,
-  candidates: PokematchCandidate[]
+  candidates: PokematchCandidate[],
+  features: FaceFeatures | null = null
 ): PokematchMatch[] {
+  // The judge is asked for more picks than are shown, so the surplus can be
+  // spent here on quality rather than displayed as-is. See pickGuards: a
+  // reason that contradicts this face's own measurements is withheld, and one
+  // silhouette can't take over the whole set.
+  const guarded = applyPickGuards(
+    picks.map((p) => ({ slug: p.slug, reason: p.reason ?? "" })),
+    pokedex,
+    features,
+    PICK_COUNT
+  );
+  picks = guarded;
+
   const zBySlug = new Map(candidates.map((c) => [c.slug, c.z]));
 
   const zs = candidates.map((c) => c.z);

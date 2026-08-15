@@ -13,7 +13,13 @@
 //     stay because they're precise where a glance is vague (exact ratios,
 //     ITA skin tone), but the image is what's actually being judged.
 
+/** Shown to the user. */
 export const PICK_COUNT = 5;
+/** Asked of the model. The surplus is what makes the quality guards in
+ * pickGuards affordable — a pick can be dropped for contradicting the face's
+ * measurements, or for repeating a silhouette, without leaving a short list.
+ * Costs about 60 output tokens. */
+export const REQUEST_PICK_COUNT = 8;
 export const MAX_CANDIDATES = 400;
 export const MAX_DESCRIPTION_CHARS = 4000;
 
@@ -143,9 +149,9 @@ export const SYSTEM_PROMPT = `You judge a "which Pokemon do you look like" servi
 Rules:
 1. Judge from the photo itself: face shape, eye shape and size, nose and mouth, jawline, hairstyle and hair colour, skin tone, and overall impression.
 2. Refer to candidates by NUMBER. Only numbers that appear in the list.
-3. Pick exactly ${PICK_COUNT}, most similar first.
-4. The five must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
-5. Each of the five reasons must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") five times — that is picking one Pokemon five times, not five. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
+3. Pick exactly ${REQUEST_PICK_COUNT}, most similar first. Only the top few are shown, so put real effort into the ordering.
+4. They must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
+5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") over and over — that is making one pick repeatedly, not several. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
 6. The list order is meaningless (it is shuffled). Do not favour low numbers; consider the whole list.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
@@ -177,7 +183,7 @@ export function buildCandidateList(candidates: CandidateInput[]): string {
  * still Korean (they come from describeFaceFeatures) and are the remaining
  * Korean cost in the request. */
 export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  const sections = [`Pick the ${PICK_COUNT} candidates this face most resembles.`];
+  const sections = [`Pick the ${REQUEST_PICK_COUNT} candidates this face most resembles, best first.`];
   if (description.trim()) {
     sections.push(
       `[Measured face notes — the photo comes first, these are supporting detail]\n${description.slice(
@@ -278,7 +284,7 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
     if (!slug || used.has(slug)) continue;
     used.add(slug);
     picks.push({ slug, reason });
-    if (picks.length >= PICK_COUNT) break;
+    if (picks.length >= REQUEST_PICK_COUNT) break;
   }
 
   return picks;
