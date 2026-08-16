@@ -50,8 +50,13 @@ test("no banned species reaches the pool", () => {
   for (const slug of pool) {
     assert.ok(!BANNED_SLUGS.has(slug), `${slug} should not be a result this app hands someone`);
   }
-  for (const slug of ["muk", "snorlax", "magikarp", "hypno", "jynx", "ditto"]) {
+  for (const slug of ["muk", "garbodor", "magikarp", "hypno", "jynx", "ditto"]) {
     assert.ok(!pool.includes(slug), `${slug} leaked into the pool`);
+  }
+  // Weight/laziness jokes were deliberately un-banned — the user judged these
+  // fine to receive, so a future tidy-up must not sweep them back in.
+  for (const slug of ["snorlax", "slowpoke", "slowbro"]) {
+    assert.ok(pool.includes(slug), `${slug} should be an allowed result`);
   }
 });
 

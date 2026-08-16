@@ -29,9 +29,11 @@ export const BANNED_SLUGS = new Set([
   "grimer", "muk", "grimer_alola", "muk_alola", "koffing", "weezing", "weezing_galar",
   "trubbish", "garbodor", "gulpin", "swalot", "stunfisk", "stunfisk_galar", "pyukumuku",
   "amoonguss", "foongus", "shiinotic", "morelull", "slugma", "magcargo",
-  // Weight / laziness jokes.
-  "snorlax", "munchlax", "slowpoke", "slowbro", "slowking", "slowpoke_galar",
-  "slowbro_galar", "slowking_galar", "wobbuffet", "wynaut", "makuhita", "hariyama",
+  // ⚠️ Weight / laziness jokes used to be excluded here (Snorlax, Slowpoke and
+  // their families). The user judged those fine to receive, so they're allowed.
+  // The categories below stay: being told you resemble living sludge, or a
+  // design with a caricature history, is a different thing from being told you
+  // look like Snorlax.
   // "Useless" jokes.
   "magikarp", "feebas", "sunkern", "metapod", "kakuna", "silcoon", "cascoon",
   // Unsettling or historically criticized designs.
