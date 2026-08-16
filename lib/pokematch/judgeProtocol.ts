@@ -21,7 +21,11 @@ export const PICK_COUNT = 5;
  * measurements, or for repeating a silhouette, without leaving a short list.
  * Costs about 60 output tokens. */
 export const REQUEST_PICK_COUNT = 8;
-export const MAX_CANDIDATES = 400;
+/** ⚠️ Sized for the whole shippable gallery, not the old 294-species curated
+ * pool — the client now sends everything that isn't banned, because gating the
+ * answer on the narrow pool was deleting half of it. These never become tokens
+ * (the prompt stopped listing them); they only have to resolve names. */
+export const MAX_CANDIDATES = 1200;
 export const MAX_DESCRIPTION_CHARS = 4000;
 
 /** Base64 payload cap for the face crop. A 448x448 JPEG lands around 40KB;
@@ -282,9 +286,23 @@ function nameKey(s: string): string {
  */
 function buildNameIndex(candidates: CandidateInput[]): Map<string, string> {
   const index = new Map<string, string>();
+  const add = (name: string | undefined, slug: string) => {
+    if (!name) return;
+    const key = nameKey(name);
+    // First writer wins, so a base form claims the bare name ahead of a
+    // regional variant that normalizes to the same thing.
+    if (key && !index.has(key)) index.set(key, slug);
+  };
   for (const c of candidates) {
-    for (const name of [c.nameEn, c.nameKo, c.slug]) {
-      if (name) index.set(nameKey(name), c.slug);
+    for (const name of [c.nameEn, c.nameKo, c.slug]) add(name, c.slug);
+  }
+  // SECOND PASS, so every exact name is claimed first. Models write the
+  // species, not the form: "Lycanroc", never "Lycanroc (Midday)". A form only
+  // answers to the bare name when no species owns it outright.
+  for (const c of candidates) {
+    for (const name of [c.nameEn, c.nameKo]) {
+      const base = name?.replace(/\s*[({[].*$/, "").trim();
+      if (base && base !== name) add(base, c.slug);
     }
   }
   return index;

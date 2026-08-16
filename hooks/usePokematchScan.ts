@@ -18,7 +18,7 @@ import {
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
-import { buildCuratedPool } from "@/lib/pokematch/curatedPool";
+import { buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
@@ -286,28 +286,27 @@ export function usePokematchScan() {
       // model looking at the photo, which is the only part that has produced
       // matches the user recognised.
       //
-      // ⚠️ SHUFFLED, and that is deliberate. buildCuratedPool returns dex
-      // order, which puts gen 1 at the top — and the judge kept answering from
-      // there: one measured run picked candidates 23, 36, 51, 53 and 57 out of
-      // 291, which random choice would produce about 4 times in 10,000. Dex
-      // order also correlates position with fame and with round early-gen
-      // designs, so "the top of the list" and "the obvious answer" were the
-      // same thing and the bias was invisible.
+      // ⚠️ THE ALLOWLIST IS EVERYTHING SHIPPABLE MINUS THE BAN LIST, not the
+      // 294-species curated pool. Measured: the model named eight species and
+      // four were deleted for being outside that pool — Aipom, Braixen, Emolga,
+      // Purrloin — none of them obscure, one of them the middle stage of a line
+      // whose other two members were included. Recognition is the prompt's job
+      // and the model's; the ban list is the only part that has to be a hard
+      // gate. See buildJudgeAllowlist.
       //
-      // Shuffling is safe because THIS array is what numbers the prompt and
-      // what the reply resolves against — the ordering has to be one array
-      // used for both. See candidateOrder.ts for why the permutation is fixed.
-      const scored = scoreSlugs(
-        embedding,
-        gallery,
-        pokedex,
-        // Mascots stay IN. Excluding them was tried and backfired: blocking
-        // Pikachu and Psyduck didn't push the judge toward specific matches,
-        // it pushed it to the next generic thing (Porygon, Staryu, Starmie) —
-        // which read as less like the person, not more. The mascot habit was a
-        // symptom of low temperature, and it is fixed there instead.
-        buildCuratedPool(pokedex, gallery.species)
-      );
+      // Mascots stay IN. Excluding them was tried and backfired: blocking
+      // Pikachu and Psyduck didn't push the judge toward specific matches, it
+      // pushed it to the next generic thing (Porygon, Staryu, Starmie) — which
+      // read as less like the person, not more. That habit was a symptom of low
+      // temperature and is fixed there instead.
+      const scored = scoreSlugs(embedding, gallery, pokedex, buildJudgeAllowlist(pokedex, gallery.species));
+      // ⚠️ The shuffle is now VESTIGIAL, kept only so the legacy bare-number
+      // reply path resolves against a stable array. It existed because the
+      // prompt used to carry a NUMBERED list and the judge answered from the
+      // top of it (one run picked 23, 36, 51, 53, 57 out of 291 — about 4 in
+      // 10,000 by chance). The prompt no longer lists candidates at all, so
+      // position can't bias anything; the "후보#" in the debug dump below is a
+      // lookup index, not evidence of ordering bias any more.
       const candidates = orderCandidatesForJudge(scored);
       const description = features ? describeFaceFeatures(features) : "";
 
@@ -415,14 +414,19 @@ export function usePokematchScan() {
               .join("\n") +
             `\n\n` +
             `FACE FEATURES (보조 자료):\n${description || "(측정 실패)"}\n\n` +
-            // Both numbers are diagnostic only — neither filters the pool.
-            // score is the hybrid (60% unique-deviation z); ranking by it is
-            // 38/40 gen 1, which is why the pool is NOT cut by it.
-            `CANDIDATES (${candidates.length}종 전체, 프롬프트 순서 = 번호):\n` +
-            candidates
+            // ⚠️ TOP SLICE ONLY, and the full list is no longer worth printing.
+            // It used to answer "is the species I expected even eligible?" —
+            // now everything shippable is, bar the ban list, so the answer is
+            // always yes. Both numbers are diagnostic: neither filters
+            // anything. score is the hybrid (60% unique-deviation z); ranking
+            // by it is 38/40 gen 1, which is why nothing is cut by it.
+            `CANDIDATES (허용 ${candidates.length}종 중 score 상위 30):\n` +
+            [...candidates]
+              .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+              .slice(0, 30)
               .map(
-                (c, i) =>
-                  `${String(i + 1).padStart(3)}. ${c.slug.padEnd(16)} ` +
+                (c) =>
+                  `  ${c.slug.padEnd(16)} ` +
                   `score=${(c.score ?? 0).toFixed(2).padStart(6)} z=${c.z.toFixed(2).padStart(6)}`
               )
               .join("\n") +

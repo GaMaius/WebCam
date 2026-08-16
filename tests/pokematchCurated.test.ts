@@ -7,6 +7,7 @@ import {
   EXTRA_FAMOUS,
   JUDGE_DEFAULT_SLUGS,
   buildCuratedPool,
+  buildJudgeAllowlist,
 } from "../lib/pokematch/curatedPool.ts";
 import { sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
 
@@ -99,6 +100,43 @@ test("every pooled species has an English name the judge's answer can resolve to
   // Two species sharing a normalized name would make one unreachable.
   const keys = candidates.map((c) => (c.nameEn ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""));
   assert.equal(new Set(keys).size, keys.length, "two species normalize to the same name");
+});
+
+// ⚠️ THE ALLOWLIST, not the curated pool, is what the judge's answer resolves
+// against. Measured: the model named eight species and four were deleted for
+// being outside the pool — Aipom, Braixen, Emolga, Purrloin — none obscure, and
+// one the middle stage of a line whose other two members were included. The
+// user saw four cards where the page promises five.
+const allowed = buildJudgeAllowlist(pokedex, available);
+
+test("the allowlist keeps every shippable species that isn't banned", () => {
+  assert.ok(allowed.length > pool.length * 2, `allowlist is only ${allowed.length} species`);
+
+  // The exact species this was built for.
+  for (const slug of ["aipom", "braixen", "emolga", "purrloin"]) {
+    assert.ok(allowed.includes(slug), `${slug} was a good answer that got deleted`);
+  }
+
+  // Nothing without a sprite or a pokedex entry — those render as broken rows.
+  for (const slug of allowed) {
+    assert.ok(pokedex[slug], `${slug} is not in pokedex.json`);
+    assert.ok(available.has(slug), `${slug} has no embedding in gallery.json`);
+  }
+});
+
+// ⚠️ The ban list is the ONE thing the widening must not relax. Recognition is
+// a preference the prompt expresses; this is a guarantee.
+test("widening the allowlist does not let a banned species through", () => {
+  for (const slug of allowed) {
+    assert.ok(!BANNED_SLUGS.has(slug), `${slug} must never be a result this app hands someone`);
+  }
+  for (const slug of ["muk", "garbodor", "magikarp", "hypno", "jynx", "grimer_alola"]) {
+    assert.ok(!allowed.includes(slug), `${slug} leaked past the widening`);
+  }
+  // And the deliberately un-banned ones are still reachable.
+  for (const slug of ["snorlax", "slowpoke"]) {
+    assert.ok(allowed.includes(slug), `${slug} should be an allowed result`);
+  }
 });
 
 // ⚠️ This option is DORMANT — the app does not pass it. Excluding the mascots

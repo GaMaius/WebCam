@@ -128,6 +128,40 @@ export const JUDGE_DEFAULT_SLUGS = new Set([
 const LAST_GEN1_DEX = 151;
 
 /**
+ * Everything the judge's answer is allowed to resolve to.
+ *
+ * ⚠️ THIS IS THE GATE NOW, NOT buildCuratedPool. Measured: on the first working
+ * vision run the model named eight species and FOUR were deleted for being
+ * outside the curated pool — Aipom, Braixen, Emolga and Purrloin. None of those
+ * is obscure; Braixen is the middle stage of a line whose other two members are
+ * both in EXTRA_FAMOUS. The user saw four cards where the page promises five,
+ * and the missing ones were perfectly good answers.
+ *
+ * The curated pool was built to serve two purposes, and only one of them still
+ * needs it:
+ *   - RECOGNITION ("don't name a species nobody can picture"). This is now the
+ *     prompt's job and the model's. It is choosing Emolga and Aipom, not Klink,
+ *     so it does not need a whitelist to keep it sensible — and a whitelist of
+ *     294 out of ~1000 deletes half of a good answer to prevent a bad one that
+ *     isn't happening.
+ *   - THE BAN LIST ("somebody's face is the input"). That is a guarantee, not a
+ *     preference, so it stays enforced here.
+ *
+ * buildCuratedPool is kept because EXTRA_FAMOUS still documents which post-gen-1
+ * species we consider household names, and the tests hold the ban list to
+ * account through it.
+ */
+export function buildJudgeAllowlist(
+  pokedex: Record<string, PokedexEntry>,
+  availableSlugs: Iterable<string>
+): string[] {
+  const available = availableSlugs instanceof Set ? availableSlugs : new Set(availableSlugs);
+  return [...available]
+    .filter((slug) => pokedex[slug] && !BANNED_SLUGS.has(slug))
+    .sort((a, b) => (pokedex[a].dex ?? 9999) - (pokedex[b].dex ?? 9999) || a.localeCompare(b));
+}
+
+/**
  * Builds the ordered candidate pool from the shipped pokedex.
  *
  * Gen 1 wholesale + EXTRA_FAMOUS, minus BANNED_SLUGS, minus anything not
