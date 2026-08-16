@@ -56,7 +56,14 @@ interface Claim {
 
 const CLAIMS: Claim[] = [
   {
-    words: ["둥근 얼굴", "동그란 얼굴", "둥글고", "동그랗고", "둥근 얼굴형", "통통"],
+    words: [
+      "둥근 얼굴", "동그란 얼굴", "둥글고", "동그랗고", "둥근 얼굴형", "통통",
+      // Observed on a face measured at 1.35: "부드러운 얼굴 라인이 사랑스러운
+      // 인상을 줍니다". These are roundness claims in softer words, so they are
+      // checkable the same way. The bare word 부드러운 is NOT here — "부드러운
+      // 눈매" says nothing about shape and vagueness isn't falsehood.
+      "부드러운 얼굴 라인", "부드러운 얼굴선", "부드러운 얼굴 윤곽", "부드러운 얼굴형",
+    ],
     contradicts: (f) => f.lengthToWidth >= LONG_FACE,
   },
   {

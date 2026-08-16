@@ -32,6 +32,18 @@ test("a reason is dropped when this face's measurements say it is false", () => 
   assert.equal(reasonContradictsFace("처진 눈매가 순한 인상을 줍니다", LONG_FACE), true);
 });
 
+// ⚠️ Real output on a face measured at 1.35 length-to-width. A roundness claim
+// in softer words is still a roundness claim.
+test("roundness asserted politely is still contradicted", () => {
+  assert.equal(reasonContradictsFace("부드러운 얼굴 라인이 사랑스러운 인상을 줍니다", LONG_FACE), true);
+  assert.equal(reasonContradictsFace("부드러운 얼굴선이 잘 어울립니다", LONG_FACE), true);
+});
+
+test("the bare word 부드러운 is left alone — it claims nothing measurable", () => {
+  assert.equal(reasonContradictsFace("부드러운 눈매가 잘 어울립니다", LONG_FACE), false);
+  assert.equal(reasonContradictsFace("부드러운 표정이 인상적입니다", LONG_FACE), false);
+});
+
 test("the same sentences are fine on a face they actually describe", () => {
   assert.equal(reasonContradictsFace("얼굴이 둥글고 눈이 커서 잘 어울립니다", ROUND_FACE), false);
   assert.equal(reasonContradictsFace("갸름한 얼굴선이 잘 맞습니다", LONG_FACE), false);

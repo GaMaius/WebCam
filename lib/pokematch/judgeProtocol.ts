@@ -66,6 +66,13 @@ const SLUG_RE = /^[a-z0-9_-]{1,40}$/;
  */
 const DEMEANING_TERMS = [
   "통통", "뚱뚱", "살찐", "포동", "두툼한 얼굴",
+  // ⚠️ Euphemisms for the same thing, and they slipped through because the
+  // list was literal. Observed: "폭신한 볼륨과 편안한 표정이 잘 어울립니다" on a
+  // face measured at 1.35 length-to-width. The rule is not "avoid the word
+  // 통통", it is "never comment on how full someone's face is", so the polite
+  // phrasings have to go too. "볼륨감 있는 입술" stays allowed — full lips are
+  // a neutral feature the pipeline itself measures.
+  "폭신", "푸근한 얼굴", "살집", "볼륨감 있는 얼굴", "볼륨 있는 얼굴",
   "못생", "안 예쁘", "안예쁘", "볼품", "촌스",
   "어색", "이상한", "우스", "웃긴 얼굴", "특이하게 생",
   "넓은 코", "낮은 코", "큰 코", "작은 눈", "찢어진 눈",

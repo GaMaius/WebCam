@@ -300,6 +300,21 @@ test("a species name leaking into the reason is withheld, since the UI shows a d
   assert.equal(sanitizeReason("Marill의 귀여운 인상과 잘 어울립니다"), "");
 });
 
+// ⚠️ The list was literal, so the polite version of the same remark walked
+// straight past it. Real output on a face measured at 1.35 length-to-width:
+// "폭신한 볼륨과 편안한 표정이 잘 어울립니다".
+test("a polite way of calling someone's face full is withheld too", () => {
+  assert.equal(sanitizeReason("폭신한 볼륨과 편안한 표정이 잘 어울립니다"), "");
+  assert.equal(sanitizeReason("귀여운 눈매와 폭신한 볼륨이 잘 어울립니다"), "");
+  assert.equal(sanitizeReason("푸근한 얼굴이 편안한 인상을 줍니다"), "");
+  assert.equal(sanitizeReason("볼륨감 있는 얼굴이 잘 어울립니다"), "");
+});
+
+test("full lips stay sayable — the pipeline measures them as a neutral feature", () => {
+  const ok = "볼륨감 있는 입술이 또렷한 인상을 줍니다";
+  assert.equal(sanitizeReason(ok), ok);
+});
+
 test("a good reason survives intact", () => {
   const good = "둥근 안경과 부드러운 눈매가 잘 어울립니다";
   assert.equal(sanitizeReason(good), good);
