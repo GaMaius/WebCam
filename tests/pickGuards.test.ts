@@ -89,6 +89,54 @@ test("a short list is filled rather than returned incomplete", () => {
   assert.equal(out.length, 3, "an incomplete result is worse than a repetitive one");
 });
 
+// ⚠️ THE REAL RUN THIS ENCODES. With the answer gated on the 294-species pool,
+// four of the judge's eight picks were deleted outright (Emolga, Braixen, Aipom
+// among them). Widening the gate fixed that and immediately showed what the
+// narrow one had also been doing: the next run led with Crobat, then Dunsparce,
+// Skuntank, Bonsly — a bat, a drill-snake, a skunk. Only Zorua, Absol and
+// Vulpix read as a lookalike, and those three were exactly the pool members.
+test("household names lead, and the obscure ones are demoted rather than deleted", () => {
+  const familiar = new Set(["d", "e"]);
+  const out = applyPickGuards(picks("a", "b", "c", "d", "e", "f"), pokedex, null, 5, familiar);
+
+  assert.deepEqual(out.slice(0, 2).map((p) => p.slug), ["d", "e"], "familiar picks lead");
+  assert.equal(out.length, 5, "the rest still fill the set — this is a preference, not a gate");
+  assert.ok(out.some((p) => !familiar.has(p.slug)), "an unfamiliar species must still be reachable");
+});
+
+// ⚠️ Replayed from the real run. Zorua, Absol and Vulpix are all `quadruped`,
+// so the silhouette cap pushed Vulpix out and gave its slot to Crobat — a bat.
+// Repetitive beats wrong, so a capped familiar pick outranks an uncapped
+// unfamiliar one.
+test("the silhouette cap yields to familiarity rather than seating an oddity", () => {
+  const dex = {
+    zorua: { shape: "quadruped" },
+    absol: { shape: "quadruped" },
+    vulpix: { shape: "quadruped" },
+    crobat: { shape: "bug-wings" },
+    dunsparce: { shape: "squiggle" },
+  } as unknown as Record<string, PokedexEntry>;
+  const out = applyPickGuards(
+    picks("crobat", "dunsparce", "zorua", "absol", "vulpix"),
+    dex,
+    null,
+    5,
+    new Set(["zorua", "absol", "vulpix"])
+  );
+  assert.deepEqual(out.slice(0, 3).map((p) => p.slug), ["zorua", "absol", "vulpix"]);
+});
+
+test("preference never shortens the result when nothing is familiar", () => {
+  const out = applyPickGuards(picks("a", "d", "e"), pokedex, null, 5, new Set(["zzz"]));
+  assert.deepEqual(out.map((p) => p.slug), ["a", "d", "e"], "order is untouched when none match");
+});
+
+test("the model's order survives inside each familiarity group", () => {
+  const out = applyPickGuards(picks("a", "d", "b", "e"), pokedex, null, 4, new Set(["d", "e"]));
+  // d before e (model order), then a before b (model order).
+  assert.deepEqual(out.map((p) => p.slug), ["d", "e", "a", "b"]);
+});
+
 test("a contradicted reason is blanked but never costs the user the pick", () => {
   const out = applyPickGuards(
     [{ slug: "a", reason: "얼굴이 둥글고 잘 어울립니다" }],

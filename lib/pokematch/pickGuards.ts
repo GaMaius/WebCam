@@ -105,13 +105,41 @@ export interface GuardablePick {
 const MAX_PER_SHAPE = 2;
 
 /**
+ * Stable partition putting household-name species ahead of the rest.
+ *
+ * ⚠️ MEASURED, and it replaces a filter that was doing this job by DELETION.
+ * The judge's answer used to be gated on the 294-species curated pool, which
+ * silently deleted anything outside it — that cost real answers (Emolga,
+ * Braixen, Aipom all vanished from one run) so the gate was widened to every
+ * shippable species. The very next run showed what the narrow gate had also
+ * been doing: the model led with Crobat, then Dunsparce, Skuntank and Bonsly.
+ * A bat, a drill-snake, a skunk. Of its eight picks only three (Zorua, Absol,
+ * Vulpix) were species a person reads as a lookalike, and the old pool would
+ * have kept exactly those three.
+ *
+ * So familiarity is a PREFERENCE now, not a gate. A species outside the pool is
+ * still shown when there aren't five better-known ones — which is how Emolga
+ * gets to appear — but it doesn't take the top slot from Zorua. The model's
+ * relative order survives inside each group; this only decides which group goes
+ * first.
+ */
+export function preferFamiliar(picks: GuardablePick[], familiar: Set<string>): GuardablePick[] {
+  if (familiar.size === 0) return picks;
+  return [
+    ...picks.filter((p) => familiar.has(p.slug)),
+    ...picks.filter((p) => !familiar.has(p.slug)),
+  ];
+}
+
+/**
  * Trims the judge's picks down to the ones worth showing.
  *
- * Order is the model's and is preserved — it is the one part of the judgement
- * that holds up. What changes is which picks survive: a contradicted reason is
- * blanked rather than shown as a false statement about someone's face, and a
- * silhouette that already appears twice is skipped so the five don't collapse
- * into one impression.
+ * Order is the model's and is largely preserved — it is the part of the
+ * judgement that holds up best. What changes is which picks survive: familiar
+ * species come first (see preferFamiliar), a contradicted reason is blanked
+ * rather than shown as a false statement about someone's face, and a silhouette
+ * that already appears twice is skipped so the five don't collapse into one
+ * impression.
  *
  * Falls back to filling from the skipped picks rather than returning fewer
  * than asked for — an incomplete result is worse than a repetitive one.
@@ -120,31 +148,43 @@ export function applyPickGuards(
   picks: GuardablePick[],
   pokedex: Record<string, PokedexEntry>,
   features: FaceFeatures | null,
-  want: number
+  want: number,
+  familiar: Set<string> = new Set()
 ): GuardablePick[] {
-  const kept: GuardablePick[] = [];
-  const skipped: GuardablePick[] = [];
   const shapeCount = new Map<string, number>();
 
-  for (const pick of picks) {
-    const cleaned: GuardablePick = {
-      slug: pick.slug,
-      reason: reasonContradictsFace(pick.reason, features) ? "" : pick.reason,
-    };
-    const shape = pokedex[pick.slug]?.shape ?? "";
-    const used = shapeCount.get(shape) ?? 0;
-    if (shape && used >= MAX_PER_SHAPE) {
-      skipped.push(cleaned);
-      continue;
+  /** Runs the silhouette cap over one group, blanking false reasons as it
+   * goes. The count is shared across groups so the cap still bounds the whole
+   * set. */
+  const cap = (group: GuardablePick[]) => {
+    const kept: GuardablePick[] = [];
+    const skipped: GuardablePick[] = [];
+    for (const pick of group) {
+      const cleaned: GuardablePick = {
+        slug: pick.slug,
+        reason: reasonContradictsFace(pick.reason, features) ? "" : pick.reason,
+      };
+      const shape = pokedex[pick.slug]?.shape ?? "";
+      const used = shapeCount.get(shape) ?? 0;
+      if (shape && used >= MAX_PER_SHAPE) {
+        skipped.push(cleaned);
+        continue;
+      }
+      shapeCount.set(shape, used + 1);
+      kept.push(cleaned);
     }
-    shapeCount.set(shape, used + 1);
-    kept.push(cleaned);
-    if (kept.length >= want) break;
-  }
+    return { kept, skipped };
+  };
 
-  for (const pick of skipped) {
-    if (kept.length >= want) break;
-    kept.push(pick);
-  }
-  return kept.slice(0, want);
+  const isFamiliar = (p: GuardablePick) => familiar.has(p.slug);
+  const fam = cap(familiar.size ? picks.filter(isFamiliar) : []);
+  const rest = cap(familiar.size ? picks.filter((p) => !isFamiliar(p)) : picks);
+
+  // ⚠️ A CAPPED FAMILIAR PICK OUTRANKS AN UNCAPPED UNFAMILIAR ONE — fam.skipped
+  // comes before rest.kept. Replaying the real run showed why: Zorua, Absol and
+  // Vulpix are all `quadruped`, so the cap pushed Vulpix out and handed its slot
+  // to Crobat, a bat. Three familiar quadrupeds is a repetitive five; two good
+  // ones plus a bat, a drill-snake and a skunk is a wrong five, and repetitive
+  // is the lesser fault.
+  return [...fam.kept, ...fam.skipped, ...rest.kept, ...rest.skipped].slice(0, want);
 }

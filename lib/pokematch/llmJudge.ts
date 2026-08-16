@@ -9,6 +9,7 @@
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
 import { PICK_COUNT } from "./judgeProtocol";
 import { applyPickGuards } from "./pickGuards";
+import { buildCuratedPool } from "./curatedPool";
 import type { FaceFeatures } from "./faceFeatures";
 
 export interface JudgePick {
@@ -182,11 +183,19 @@ export function picksToMatches(
   // spent here on quality rather than displayed as-is. See pickGuards: a
   // reason that contradicts this face's own measurements is withheld, and one
   // silhouette can't take over the whole set.
+  //
+  // `familiar` is the curated pool, which stopped being a GATE on the answer
+  // (that deleted Emolga, Braixen and Aipom out of one run) and is a preference
+  // instead: household names sort ahead, everything else still gets shown when
+  // there aren't five of them. Computed from the candidates actually sent, so
+  // it can't reference a species this scan couldn't render.
+  const familiar = new Set(buildCuratedPool(pokedex, candidates.map((c) => c.slug)));
   const guarded = applyPickGuards(
     picks.map((p) => ({ slug: p.slug, reason: p.reason ?? "" })),
     pokedex,
     features,
-    PICK_COUNT
+    PICK_COUNT,
+    familiar
   );
   picks = guarded;
 
