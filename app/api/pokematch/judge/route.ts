@@ -119,36 +119,43 @@ function rateLimited(ip: string): boolean {
  */
 interface CallPlan {
   label: string;
-  reasoning: boolean;
+  /** ⚠️ ALWAYS SENT EXPLICITLY — omitting it does NOT disable thinking.
+   * Qwen 3.6 is a hybrid reasoning model and thinks by default, so a request
+   * with no reasoning_effort still opened a <think> block and spent its whole
+   * 500-token budget in it. "none" is the off switch. */
+  reasoning: "none" | "default";
   maxTokens: number;
 }
 
-/** ⚠️ Reasoning is ON for the first try, and the budget is MEASURED now.
+/**
+ * ⚠️ THINKING OFF IS THE DEFAULT PLAN, and that is a measured decision.
  *
- * Why it's on at all: over three consecutive scans of one face the judge
- * returned 15 species with ZERO repeats. Sampling from even a 20-species
- * preference does that 0.3% of the time, so the model rates 40-60 species as
- * equally good and is indifferent among them. Its perception is stable — every
- * run cited dark hair, sharp eyes, a defined jaw — but the mapping from that to
- * a species is a fresh roll, which is what free association looks like when a
- * model answers without deliberating. Temperature can't fix it: there is no
- * concentrated preference to sharpen, which is why 0.15 collapsed onto safe
- * mascots rather than onto good answers.
+ * Reasoning was switched on to attack a real problem: over three consecutive
+ * scans of one face the judge returned 15 species with ZERO repeats. Sampling
+ * from even a 20-species preference does that 0.3% of the time, so the model
+ * rates 40-60 species as equally good. Its perception is stable — every run
+ * cited dark hair, sharp eyes, a defined jaw — but the mapping from that to a
+ * species is a fresh roll, which is what free association looks like when a
+ * model answers without deliberating.
  *
- * Why 4000: the prompt measured 2,307 tokens against an 8K per-minute cap, so
- * 5,693 is genuinely available. Two earlier budgets (700, then 1400) were both
- * spent entirely on thinking with nothing left to answer with — this model
- * deliberates over eight picks and 1400 wasn't close. Reserving 4000 still
- * leaves the request under the cap.
+ * It never got to prove it. Given 700, then 1400, then 4000 tokens, the
+ * thinking pass spent every one of them and wrote no answer at all — three
+ * measurements of finish=length with an unclosed <think> block. A budget that
+ * fits would leave nothing under the 8K per-minute cap. So the deliberate plan
+ * is demoted to a fallback: this endpoint's job is to return a result.
+ *
+ * 1400 output tokens: eight picks with a Korean sentence each. Korean costs
+ * roughly 2.7 tokens per character on this tokenizer, so a 45-character reason
+ * is ~120 tokens and eight of them are ~1,000 — the 300 this used to run at
+ * was quietly truncating them.
  */
-const DELIBERATE: CallPlan = { label: "think", reasoning: true, maxTokens: 4000 };
+const DIRECT: CallPlan = { label: "direct", reasoning: "none", maxTokens: 1400 };
 
-/** The retry. No thinking, small budget — this is the configuration that
- * demonstrably produced results before reasoning was switched on, so it is a
- * known-good answer rather than a second guess. At 2,307 + 500 it also costs a
- * third of the deliberate attempt, which is what makes it affordable as a
- * fallback inside the same minute. */
-const DIRECT: CallPlan = { label: "direct", reasoning: false, maxTokens: 500 };
+/** The fallback, and the last chance for the deliberate path. 5,600 is the most
+ * that fits: 2,308 prompt + 5,600 = 7,908, just under the 8K per-minute cap.
+ * If this still comes back finish=length, thinking simply does not terminate on
+ * this task and the plan should be deleted rather than budgeted for again. */
+const DELIBERATE: CallPlan = { label: "think", reasoning: "default", maxTokens: 5600 };
 
 async function callProvider(
   provider: Provider,
@@ -176,7 +183,9 @@ async function callProvider(
     // model uses it or not, so this is a capacity decision, not a safety
     // margin. Sized per plan above; see DELIBERATE for why 4000.
     max_completion_tokens: plan.maxTokens,
-    ...(plan.reasoning ? { reasoning_effort: "default" } : {}),
+    // ⚠️ Sent even when it's "none". Leaving the field out leaves thinking ON
+    // for this model — measured, not assumed.
+    reasoning_effort: plan.reasoning,
   };
   const post = (body: unknown) =>
     fetch(provider.url, {
@@ -195,11 +204,12 @@ async function callProvider(
   // fenced, prefixed and prose-wrapped output, so the mode was never
   // load-bearing.
   //
-  // reasoning_effort keeps its fallback because a model that rejects it fails
-  // every time otherwise, and that path only runs on models that don't
-  // support it.
+  // reasoning_effort keeps its fallback because a model that rejects the
+  // parameter outright fails every time otherwise. That path only runs on
+  // models that don't support it — and note it is not an "off" switch: for a
+  // hybrid model, dropping the field leaves thinking enabled.
   let res = await post(base);
-  if (res.status === 400 && plan.reasoning) {
+  if (res.status === 400) {
     const { reasoning_effort: _dropped, ...noReasoning } = base;
     res = await post(noReasoning);
   }
@@ -359,21 +369,20 @@ export async function POST(request: Request) {
   const start = Math.floor(Math.random() * configured.length);
   const order = configured.map((_, i) => configured[(start + i) % configured.length]);
 
-  // ⚠️ THE FIRST ATTEMPT DELIBERATES, EVERY RETRY ANSWERS DIRECTLY. Sending an
-  // identical request to both keys made the second reproduce the first's
-  // failure verbatim — observed as finish=length on both, each having spent
-  // its whole budget thinking. Varying the plan is what turns a second key
-  // into an actual fallback rather than a second roll of the same dice.
+  // ⚠️ EACH ATTEMPT USES A DIFFERENT PLAN. Both keys used to send an identical
+  // request, so when the request itself was the problem the second key
+  // reproduced the first's failure verbatim — observed as finish=length on
+  // both. A backup that repeats the mistake is not a backup.
   //
-  // With a single key configured the direct retry still happens, on that same
-  // key. It may be refused by the per-minute cap (the deliberate attempt has
-  // already reserved most of it), but a 429 is a strictly better outcome than
-  // never trying the configuration that is known to work.
+  // Direct goes first because it is the plan that returns an answer. The
+  // deliberate one is kept as the retry rather than deleted: it is the only
+  // lever aimed at the model's indifference between species, and it costs
+  // nothing while the first attempt keeps succeeding.
   const attempts: { provider: Provider; plan: CallPlan }[] = order.map((provider, i) => ({
     provider,
-    plan: i === 0 ? DELIBERATE : DIRECT,
+    plan: i === 0 ? DIRECT : DELIBERATE,
   }));
-  if (attempts.length === 1) attempts.push({ provider: order[0], plan: DIRECT });
+  if (attempts.length === 1) attempts.push({ provider: order[0], plan: DELIBERATE });
 
   // EVERY key's failure is reported, not just the last one.
   //
