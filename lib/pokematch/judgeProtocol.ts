@@ -223,10 +223,17 @@ export function buildMessages(
 }
 
 /** Models emit reasoning, and json_object mode isn't guaranteed if the model
- * config rejects it, so accept fenced, prefixed and prose-wrapped JSON. */
+ * config rejects it, so accept fenced, prefixed and prose-wrapped JSON.
+ *
+ * The UNTERMINATED `<think>` case matters as much as the closed one: when the
+ * completion budget runs out mid-thought there is no closing tag, and without
+ * this the leftover reasoning prose gets scanned for braces and can yield a
+ * fragment that parses into nonsense. Everything after an unclosed tag is
+ * thinking, so it all goes. */
 export function extractJson(content: string): unknown {
   const trimmed = content
     .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/<think>[\s\S]*$/, "")
     .replace(/```(?:json)?/g, "")
     .trim();
   try {
@@ -281,6 +288,51 @@ function buildNameIndex(candidates: CandidateInput[]): Map<string, string> {
     }
   }
   return index;
+}
+
+/**
+ * Why a successful (HTTP 200) call still produced nothing renderable.
+ *
+ * ⚠️ This exists because "judge_unusable" on its own is undiagnosable, and the
+ * two things it can mean need OPPOSITE fixes:
+ *   - the completion budget was spent on reasoning and no answer was written
+ *     ("empty_content" / finish=length) — raise max_completion_tokens
+ *   - the model named species that aren't in the pool ("unresolved:…") — a pool
+ *     or prompt problem, where raising the budget would do nothing
+ * Guessing between them is exactly the mistake this feature has already paid
+ * for twice, so the answer is reported instead of inferred.
+ *
+ * Safe to return to the browser: it contains the model's own species names and
+ * a short snippet of its output about the requester's own scan, never the key,
+ * the organization or the image.
+ */
+export function describeUnusable(content: string, parsed: unknown): string {
+  if (!content.trim()) return "empty_content";
+  if (parsed === null || parsed === undefined) {
+    return `unparsed:${content.trim().replace(/\s+/g, " ").slice(0, 80)}`;
+  }
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { picks?: unknown })?.picks)
+    ? (parsed as { picks: unknown[] }).picks
+    : [];
+  if (list.length === 0) return "no_picks_in_json";
+
+  const named = list
+    .map((item) => {
+      if (typeof item === "string" || typeof item === "number") return String(item);
+      if (item && typeof item === "object") {
+        const p = item as Record<string, unknown>;
+        const v = p.name ?? p.pokemon ?? p.slug ?? p.n;
+        return v == null ? "" : String(v);
+      }
+      return "";
+    })
+    .map((s) => s.replace(/[^A-Za-z0-9 .'-]/g, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  return named.length ? `unresolved:${named.join(",")}` : "unnamed_picks";
 }
 
 export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick[] {

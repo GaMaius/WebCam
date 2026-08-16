@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   PICK_COUNT,
   buildMessages,
+  describeUnusable,
   extractJson,
   isUsableImage,
   normalizePicks,
@@ -141,12 +142,22 @@ async function callProvider(
     temperature: 0.7,
     // ⚠️ RESERVED, NOT MEASURED. Groq counts this against the per-minute
     // budget in full whether or not the model uses it, so it is a capacity
-    // decision rather than a safety margin. Raising it to 1100 for the
-    // thinking pass silently cut a key from two scans a minute to one, and
-    // the second scan in a row started failing with nobody else using the
-    // app. Sized now to what the job needs: ~550 to think plus ~150 for
-    // eight picks and their one-line reasons.
-    max_completion_tokens: 700,
+    // decision rather than a safety margin.
+    //
+    // It covers REASONING PLUS THE ANSWER. At 700 the thinking pass could
+    // spend the whole budget and leave nothing to write with, which returns a
+    // 200 with empty content and reads downstream as judge_unusable — the
+    // failure that prompted this number being revisited. finish_reason and the
+    // completion count are now reported to ?debug so this stays observable
+    // instead of inferred.
+    //
+    // Raising it is close to free here. The per-minute cap is 8K and the
+    // prompt is roughly 5K now that the 291-name candidate list is gone, so
+    // anything up to about 3K completion still allows exactly one scan per
+    // minute per key — the same rate 700 allowed. The cost is only against the
+    // daily budget (~31 scans a key instead of ~35), which is a good trade
+    // against a scan that fails outright.
+    max_completion_tokens: 1400,
     reasoning_effort: "default",
   };
   const post = (body: unknown) =>
@@ -229,31 +240,46 @@ async function attempt(
   }
 
   const payload = (await res.json().catch(() => null)) as {
-    choices?: { message?: { content?: string } }[];
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   } | null;
-  const content = payload?.choices?.[0]?.message?.content ?? "";
-  // Picks come back as numbers into `candidates`, so the same array that built
-  // the prompt has to resolve them — order matters, don't sort in between.
-  const picks = normalizePicks(extractJson(content), candidates);
+  const choice = payload?.choices?.[0];
+  const content = choice?.message?.content ?? "";
+  const parsed = extractJson(content);
+  // The model NAMES species now; normalizePicks resolves those against the
+  // pool, which is what the numbered list used to do.
+  const picks = normalizePicks(parsed, candidates);
+  const u = payload?.usage;
+  const tokens = u ? `prompt=${u.prompt_tokens} completion=${u.completion_tokens}` : undefined;
 
   if (picks.length === 0) {
     console.error(
       `pokematch judge: ${provider.label} unusable output:`,
       content.slice(0, 500)
     );
+    // ⚠️ The reason travels back to ?debug, not just the server log. A bare
+    // "judge_unusable" cannot be acted on: an empty completion (the thinking
+    // budget swallowed the answer) and species named outside the pool are the
+    // same symptom with opposite fixes, and Vercel logs aren't where this gets
+    // looked at. finish_reason and the token counts come along because
+    // "finish=length" is the tell for the first case.
+    const detail = [
+      describeUnusable(content, parsed),
+      choice?.finish_reason ? `finish=${choice.finish_reason}` : "",
+      tokens,
+    ]
+      .filter(Boolean)
+      .join(" ");
     // Counts as a failure worth failing over on: a model that answered but
     // answered unusably is exactly what a second provider is for.
-    return { ok: false, status: 502, error: "judge_unusable" };
+    return { ok: false, status: 502, error: "judge_unusable", detail };
   }
   // ⚠️ MEASURED, NOT ESTIMATED. Every token figure in this feature was
   // guessed from character counts until a 429 body showed requested=6074
   // against an estimate of 3650 — a 66% miss that had been driving real
   // decisions about image size and prompt language. The provider reports the
   // exact number on every successful call; use that.
-  const u = payload?.usage;
-  const usage = u ? `prompt=${u.prompt_tokens} completion=${u.completion_tokens}` : undefined;
-  return { ok: true, picks, model: provider.model, usage };
+  return { ok: true, picks, model: provider.model, usage: tokens };
 }
 
 export async function POST(request: Request) {

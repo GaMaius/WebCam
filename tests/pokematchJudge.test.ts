@@ -5,6 +5,7 @@ import {
   PICK_COUNT,
   buildMessages,
   buildUserPrompt,
+  describeUnusable,
   extractJson,
   isUsableImage,
   normalizePicks,
@@ -72,6 +73,58 @@ test("JSON survives code fences, reasoning tags and surrounding prose", () => {
 test("unparseable output yields no picks rather than a broken result", () => {
   assert.equal(extractJson("모델이 그냥 말로 대답했습니다"), null);
   assert.deepEqual(normalizePicks(null, candidates), []);
+});
+
+// When the completion budget runs out mid-thought there's no closing tag, so
+// the reasoning prose stays in `content`. Scanning that for braces can find a
+// fragment that parses into something meaningless.
+test("reasoning that was cut off mid-thought yields nothing, not a fragment", () => {
+  const truncated = '<think>Let me consider. The face is {"picks":[{"name":"Pikachu"';
+  assert.equal(extractJson(truncated), null);
+
+  // A closed think block still gives up its answer.
+  const closed = '<think>done thinking</think>{"picks":[{"name":"pikachu"}]}';
+  assert.deepEqual(normalizePicks(extractJson(closed), candidates).map((p) => p.slug), ["pikachu"]);
+});
+
+// ⚠️ "judge_unusable" alone can't be acted on. An empty completion and a
+// species named outside the pool are the same symptom with opposite fixes —
+// raise the token budget, or change the pool — so the reason has to survive
+// into ?debug rather than being inferred.
+test("an unusable answer says WHY it was unusable", () => {
+  // The thinking pass spent the whole budget: nothing was written.
+  assert.equal(describeUnusable("", null), "empty_content");
+  assert.equal(describeUnusable("   ", null), "empty_content");
+
+  // The model answered in prose. The snippet shows what it said instead.
+  const prose = describeUnusable("죄송하지만 사람 얼굴은 판단할 수 없습니다.", null);
+  assert.match(prose, /^unparsed:/);
+  assert.ok(prose.includes("죄송"), "the snippet must carry the actual refusal");
+
+  // Valid JSON, but every species named is outside the curated pool — raising
+  // the token budget would do nothing for this one.
+  assert.equal(
+    describeUnusable('{"picks":[{"name":"Muk"},{"name":"Garbodor"}]}', {
+      picks: [{ name: "Muk" }, { name: "Garbodor" }],
+    }),
+    "unresolved:Muk,Garbodor"
+  );
+
+  assert.equal(describeUnusable('{"picks":[]}', { picks: [] }), "no_picks_in_json");
+});
+
+test("the unusable summary can't smuggle anything through", () => {
+  // The snippet is capped and flattened — a model that dumped its whole
+  // reasoning must not paste it into a public response.
+  const long = describeUnusable("가".repeat(500), null);
+  assert.ok(long.length < 120, `snippet was ${long.length} chars`);
+  assert.ok(!long.includes("\n"));
+
+  // Names are stripped to plain text before being echoed back.
+  const nasty = describeUnusable('{"picks":[{"name":"<script>x</script>"}]}', {
+    picks: [{ name: "<script>x</script>" }],
+  });
+  assert.ok(!nasty.includes("<"), `leaked markup: ${nasty}`);
 });
 
 test("candidate sanitizing rejects unsafe slugs and caps the list", () => {
