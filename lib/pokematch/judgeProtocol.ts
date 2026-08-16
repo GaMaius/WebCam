@@ -339,47 +339,61 @@ export function describeUnusable(content: string, parsed: unknown): string {
   return named.length ? `unresolved:${named.join(",")}` : "unnamed_picks";
 }
 
-export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick[] {
-  const list = Array.isArray(raw)
+/** The items the model returned, whatever shape it used. */
+function pickList(raw: unknown): unknown[] {
+  return Array.isArray(raw)
     ? raw
     : Array.isArray((raw as { picks?: unknown })?.picks)
     ? (raw as { picks: unknown[] }).picks
     : [];
+}
 
+/** One item -> the slug it refers to, or "" if it refers to nothing we can
+ * show. Shared by normalizePicks and unresolvedNames so the two can never
+ * disagree about what counts as resolvable. */
+function resolveItem(
+  item: unknown,
+  candidates: CandidateInput[],
+  bySlug: Map<string, CandidateInput>,
+  byName: Map<string, string>
+): { slug: string; named: string; reason: string } {
+  if (typeof item === "number" || typeof item === "string") {
+    const n = Number(item);
+    if (Number.isInteger(n)) {
+      return { slug: candidates[n - 1]?.slug ?? "", named: String(item), reason: "" };
+    }
+    const s = String(item).trim();
+    const slug = bySlug.has(s.toLowerCase()) ? s.toLowerCase() : byName.get(nameKey(s)) ?? "";
+    return { slug, named: s, reason: "" };
+  }
+  if (!item || typeof item !== "object") return { slug: "", named: "", reason: "" };
+
+  const p = item as Record<string, unknown>;
+  const reason = typeof p.reason === "string" ? sanitizeReason(p.reason) : "";
+  const n = Number(p.n ?? p.number ?? p.index);
+  if (Number.isInteger(n) && n >= 1 && n <= candidates.length) {
+    return { slug: candidates[n - 1].slug, named: String(n), reason };
+  }
+  if (typeof p.slug === "string" && bySlug.has(p.slug.trim().toLowerCase())) {
+    return { slug: p.slug.trim().toLowerCase(), named: p.slug, reason };
+  }
+  // The model answers with NAMES, since listing 291 candidates cost ~1,050
+  // tokens. Anything it names that isn't in the pool doesn't resolve.
+  const named = p.name ?? p.pokemon ?? p.slug;
+  if (typeof named === "string") {
+    return { slug: byName.get(nameKey(named)) ?? "", named, reason };
+  }
+  return { slug: "", named: "", reason };
+}
+
+export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick[] {
   const bySlug = new Map(candidates.map((c) => [c.slug, c]));
   const byName = buildNameIndex(candidates);
   const picks: Pick[] = [];
   const used = new Set<string>();
 
-  for (const item of list) {
-    let slug = "";
-    let reason = "";
-
-    if (typeof item === "number" || typeof item === "string") {
-      const n = Number(item);
-      if (Number.isInteger(n)) slug = candidates[n - 1]?.slug ?? "";
-      else if (typeof item === "string") {
-        slug = bySlug.has(item.trim().toLowerCase())
-          ? item.trim().toLowerCase()
-          : byName.get(nameKey(item)) ?? "";
-      }
-    } else if (item && typeof item === "object") {
-      const p = item as Record<string, unknown>;
-      const n = Number(p.n ?? p.number ?? p.index);
-      if (Number.isInteger(n) && n >= 1 && n <= candidates.length) {
-        slug = candidates[n - 1].slug;
-      } else if (typeof p.slug === "string" && bySlug.has(p.slug.trim().toLowerCase())) {
-        slug = p.slug.trim().toLowerCase();
-      } else {
-        // The model now answers with NAMES, since listing 291 candidates cost
-        // ~1,050 tokens of a 6,070-token request. Anything it names that isn't
-        // in the pool simply doesn't resolve.
-        const named = p.name ?? p.pokemon ?? p.slug;
-        if (typeof named === "string") slug = byName.get(nameKey(named)) ?? "";
-      }
-      if (typeof p.reason === "string") reason = sanitizeReason(p.reason);
-    }
-
+  for (const item of pickList(raw)) {
+    const { slug, reason } = resolveItem(item, candidates, bySlug, byName);
     if (!slug || used.has(slug)) continue;
     used.add(slug);
     picks.push({ slug, reason });
@@ -387,4 +401,27 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
   }
 
   return picks;
+}
+
+/**
+ * The species the model named that we refused to show.
+ *
+ * ⚠️ Dropping these used to be SILENT, which made a short result unreadable:
+ * eight picks arriving and one being displayed looks identical to the model
+ * only returning one. The two need opposite fixes — widen what's accepted, or
+ * ask the model for more — so the names travel back to ?debug.
+ *
+ * Sanitized the same way describeUnusable does, since this reaches the browser.
+ */
+export function unresolvedNames(raw: unknown, candidates: CandidateInput[]): string[] {
+  const bySlug = new Map(candidates.map((c) => [c.slug, c]));
+  const byName = buildNameIndex(candidates);
+  const out: string[] = [];
+  for (const item of pickList(raw)) {
+    const { slug, named } = resolveItem(item, candidates, bySlug, byName);
+    if (slug || !named) continue;
+    const clean = named.replace(/[^A-Za-z0-9 .'-]/g, "").trim().slice(0, 24);
+    if (clean) out.push(clean);
+  }
+  return out.slice(0, 12);
 }

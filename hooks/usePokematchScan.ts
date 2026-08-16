@@ -322,10 +322,12 @@ export function usePokematchScan() {
       // stable one — the displayed five are chosen from a larger list, so both
       // look the same from the outside.
       let rawPicks: { slug: string; reason: string }[] = [];
+      let droppedNames = "";
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
         rawPicks = judged.picks;
+        droppedNames = judged.dropped ?? "";
         if (judged.picks.length > 0) {
           result = picksToMatches(judged.picks, pokedex, candidates, features);
           judgeModel =
@@ -345,10 +347,37 @@ export function usePokematchScan() {
       // Local z-score ranking is the fallback, not the primary path — it's what
       // the LLM judge replaced, kept so a missing key or a network blip still
       // produces a result instead of an error.
-      const finalMatches =
+      let finalMatches =
         result && result.length > 0
           ? result
           : matchTopK(embedding, gallery, pokedex, 5, { faceAspect: faceAspectRef.current });
+
+      // ⚠️ A SHORT JUDGE RESULT STILL FILLS TO FIVE. The judge is asked for
+      // eight and everything it names has to survive the pool, so a run where
+      // most names fall outside it left the screen showing one card — measured:
+      // one pick displayed out of a request for eight. The page is built around
+      // a top five, and one lonely card reads as broken rather than as decisive.
+      //
+      // The model's own picks stay first and keep their order; the local ranker
+      // only supplies the tail. That keeps the part the user reads (the best
+      // match and its sentence) entirely the judge's.
+      if (usedLlm && finalMatches.length < 5) {
+        const have = new Set(finalMatches.map((m) => m.slug));
+        const filler = matchTopK(embedding, gallery, pokedex, 5 + finalMatches.length, {
+          faceAspect: faceAspectRef.current,
+        }).filter((m) => !have.has(m.slug));
+        finalMatches = [...finalMatches, ...filler].slice(0, 5);
+        // percent came from two different standardizations, so re-impose the
+        // descending order the UI assumes.
+        for (let i = 1; i < finalMatches.length; i++) {
+          if (finalMatches[i].percent >= finalMatches[i - 1].percent) {
+            finalMatches[i] = {
+              ...finalMatches[i],
+              percent: Math.max(50, finalMatches[i - 1].percent - 2),
+            };
+          }
+        }
+      }
 
       if (isDebug()) {
         setDebugText(
@@ -359,6 +388,19 @@ export function usePokematchScan() {
             // The picks are the one thing worth reading here: everything else
             // is the input to a judgement whose OUTPUT used to be missing from
             // this dump entirely, which made the result impossible to review.
+            // ⚠️ What the MODEL said, before anything trimmed it. Without this
+            // a short or shuffled result is unreadable: the displayed five are
+            // chosen from a larger request, so an unstable model and a guard
+            // that reshuffled a stable one look identical from outside.
+            (rawPicks.length
+              ? `MODEL RAW PICKS (${rawPicks.length}개 통과):\n` +
+                rawPicks.map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`).join("\n") +
+                `\n`
+              : "") +
+            // Named but refused by the curated pool. A short result means one
+            // of these two lines is long — and they need opposite fixes.
+            (droppedNames ? `POOL이 거부한 이름: ${droppedNames}\n` : "") +
+            (rawPicks.length || droppedNames ? `\n` : "") +
             `RESULT (표시된 5마리):\n` +
             finalMatches
               .map((m, i) => {

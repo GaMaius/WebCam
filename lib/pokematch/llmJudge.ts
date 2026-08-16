@@ -26,6 +26,11 @@ export interface JudgeResult {
   /** The provider's own token accounting for this call ("prompt=… completion=…").
    * Measured, unlike every character-count estimate that preceded it. */
   usage?: string;
+  /** Species the model named that the curated pool refused, comma-separated.
+   * Without it a short result can't be read: eight picks arriving and one being
+   * shown is indistinguishable from the model returning one, and those need
+   * opposite fixes. */
+  dropped?: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
    * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
@@ -122,6 +127,7 @@ export async function judgeCandidates(
       model: typeof data.model === "string" ? data.model : "",
       provider: typeof data.provider === "string" ? data.provider : undefined,
       usage: typeof data.usage === "string" ? data.usage : undefined,
+      dropped: typeof data.dropped === "string" ? data.dropped : undefined,
     };
   } catch (err) {
     const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";

@@ -8,6 +8,7 @@ import {
   normalizePicks,
   sanitizeCandidates,
   summarizeRateLimit,
+  unresolvedNames,
 } from "@/lib/pokematch/judgeProtocol";
 
 // PokéMatch's ranking judge: a Groq-hosted VISION model looks at the cropped
@@ -234,7 +235,13 @@ async function attempt(
   candidates: ReturnType<typeof sanitizeCandidates>,
   plan: CallPlan
 ): Promise<
-  | { ok: true; picks: ReturnType<typeof normalizePicks>; model: string; usage?: string }
+  | {
+      ok: true;
+      picks: ReturnType<typeof normalizePicks>;
+      model: string;
+      usage?: string;
+      dropped?: string;
+    }
   | { ok: false; status: number; error: string; detail?: string }
 > {
   const controller = new AbortController();
@@ -308,7 +315,18 @@ async function attempt(
   // against an estimate of 3650 — a 66% miss that had been driving real
   // decisions about image size and prompt language. The provider reports the
   // exact number on every successful call; use that.
-  return { ok: true, picks, model: provider.model, usage: tokens };
+  // ⚠️ A short result is ambiguous without this. Eight picks arriving and one
+  // being shown looks exactly like the model returning one, and the fixes are
+  // opposite — widen what resolves, or ask the model differently. The names it
+  // wanted but we refused go back with the answer.
+  const dropped = unresolvedNames(parsed, candidates);
+  return {
+    ok: true,
+    picks,
+    model: provider.model,
+    usage: tokens,
+    ...(dropped.length ? { dropped: dropped.join(",") } : {}),
+  };
 }
 
 export async function POST(request: Request) {
@@ -403,6 +421,8 @@ export async function POST(request: Request) {
         // whether the answer came from the thinking pass or the direct retry.
         provider: `${provider.label}/${plan.label}`,
         usage: result.usage,
+        // Species it named that the pool refused. Present only when some were.
+        ...(result.dropped ? { dropped: result.dropped } : {}),
         // Present only when an earlier key had to be given up on.
         ...(failures.length ? { failedFirst: summarizeFailures(failures) } : {}),
       });

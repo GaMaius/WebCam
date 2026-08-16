@@ -12,6 +12,7 @@ import {
   sanitizeCandidates,
   sanitizeReason,
   summarizeRateLimit,
+  unresolvedNames,
 } from "../lib/pokematch/judgeProtocol.ts";
 
 // The judge is an LLM, so its output is untrusted input. Everything the prompt
@@ -186,6 +187,40 @@ test("a named species resolves only if the pool allows it", () => {
     pool
   );
   assert.deepEqual(blocked, [], "anything outside the pool must be dropped");
+});
+
+// ⚠️ Dropping a named species used to be silent, which made a short result
+// impossible to read: eight picks arriving and one being shown looks exactly
+// like the model returning one, and those need opposite fixes.
+test("species the pool refuses are reported, not silently discarded", () => {
+  const pool = sanitizeCandidates([
+    { slug: "riolu", nameEn: "Riolu" },
+    { slug: "zorua", nameEn: "Zorua" },
+  ]);
+  const raw = {
+    picks: [
+      { name: "Riolu", reason: "좋아요" },
+      { name: "Snorlax", reason: "x" },
+      { name: "Mightyena", reason: "x" },
+      { name: "Notapokemon", reason: "x" },
+    ],
+  };
+
+  assert.deepEqual(normalizePicks(raw, pool).map((p) => p.slug), ["riolu"]);
+  assert.deepEqual(unresolvedNames(raw, pool), ["Snorlax", "Mightyena", "Notapokemon"]);
+
+  // Nothing to report when everything resolved.
+  assert.deepEqual(unresolvedNames({ picks: [{ name: "Zorua" }] }, pool), []);
+});
+
+test("the dropped-name list can't smuggle markup or run long", () => {
+  const pool = sanitizeCandidates([{ slug: "riolu", nameEn: "Riolu" }]);
+  const names = unresolvedNames(
+    { picks: Array.from({ length: 30 }, () => ({ name: "<b>Ghost</b>" })) },
+    pool
+  );
+  assert.ok(names.length <= 12, `reported ${names.length} names`);
+  assert.ok(!names.some((n) => n.includes("<")), `leaked markup: ${names.join(",")}`);
 });
 
 test("the prompt still works with no face measurements at all", () => {
