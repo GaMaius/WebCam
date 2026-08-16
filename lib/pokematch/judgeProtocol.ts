@@ -18,9 +18,16 @@
 export const PICK_COUNT = 5;
 /** Asked of the model. The surplus is what makes the quality guards in
  * pickGuards affordable — a pick can be dropped for contradicting the face's
- * measurements, or for repeating a silhouette, without leaving a short list.
- * Costs about 60 output tokens. */
-export const REQUEST_PICK_COUNT = 8;
+ * measurements, repeating a silhouette, or being an obscure species, without
+ * leaving a short list.
+ *
+ * ⚠️ Raised from 8 because the surplus wasn't deep enough. One measured run
+ * produced only three household names out of eight picks, so the tail had to
+ * come from the local embedding ranker instead of from the judge that actually
+ * looked at the face. Twelve gives it more chances to name something familiar.
+ * Cheap: that run's completion was 284 tokens against a 1400 budget, and each
+ * extra pick is roughly 35. */
+export const REQUEST_PICK_COUNT = 12;
 /** ⚠️ Sized for the whole shippable gallery, not the old 294-species curated
  * pool — the client now sends everything that isn't banned, because gating the
  * answer on the narrow pool was deleting half of it. These never become tokens

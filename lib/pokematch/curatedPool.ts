@@ -52,6 +52,14 @@ export const BANNED_SLUGS = new Set([
 export const EXTRA_FAMOUS = [
   // Eeveelutions — distinct impressions, universally known.
   "espeon", "umbreon", "vaporeon", "jolteon", "flareon", "leafeon", "glaceon", "sylveon",
+  // ⚠️ ADDED BECAUSE THE JUDGE ASKED FOR THEM. The ?debug line "POOL이 거부한
+  // 이름" reports every species the model named that this list didn't contain,
+  // which turns a guessing game into a maintenance loop: these four came from
+  // one real run (Aipom, Braixen, Emolga, Purrloin) and none is obscure —
+  // Braixen is the middle stage of a line whose other two members were already
+  // here. Add to this group when that line names something recognisable; don't
+  // try to anticipate it.
+  "aipom", "ambipom", "braixen", "emolga", "purrloin", "liepard",
   // Gen 2
   "chikorita", "cyndaquil", "totodile", "typhlosion", "feraligatr", "meganium",
   "togepi", "togetic", "togekiss", "marill", "azumarill", "ampharos", "mareep",

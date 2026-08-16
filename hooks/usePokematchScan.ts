@@ -18,7 +18,7 @@ import {
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
-import { buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
+import { buildCuratedPool, buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
@@ -299,7 +299,8 @@ export function usePokematchScan() {
       // pushed it to the next generic thing (Porygon, Staryu, Starmie) — which
       // read as less like the person, not more. That habit was a symptom of low
       // temperature and is fixed there instead.
-      const scored = scoreSlugs(embedding, gallery, pokedex, buildJudgeAllowlist(pokedex, gallery.species));
+      const allowed = buildJudgeAllowlist(pokedex, gallery.species);
+      const scored = scoreSlugs(embedding, gallery, pokedex, allowed);
       // ⚠️ The shuffle is now VESTIGIAL, kept only so the legacy bare-number
       // reply path resolves against a stable array. It existed because the
       // prompt used to carry a NUMBERED list and the judge answered from the
@@ -351,21 +352,43 @@ export function usePokematchScan() {
           ? result
           : matchTopK(embedding, gallery, pokedex, 5, { faceAspect: faceAspectRef.current });
 
-      // ⚠️ A SHORT JUDGE RESULT STILL FILLS TO FIVE. The judge is asked for
-      // eight and everything it names has to survive the pool, so a run where
-      // most names fall outside it left the screen showing one card — measured:
-      // one pick displayed out of a request for eight. The page is built around
-      // a top five, and one lonely card reads as broken rather than as decisive.
+      // ⚠️ WHAT FILLS THE TAIL, AND IN WHAT ORDER. The judge is asked for more
+      // picks than are shown, and the leftovers it offers are not all worth
+      // showing: one measured run led with Crobat and went on to Dunsparce,
+      // Skuntank and Bonsly — a bat, a drill-snake, a skunk. Only three of its
+      // eight (Zorua, Absol, Vulpix) read as a lookalike, and those three were
+      // the curated-pool members.
       //
-      // The model's own picks stay first and keep their order; the local ranker
-      // only supplies the tail. That keeps the part the user reads (the best
-      // match and its sentence) entirely the judge's.
-      if (usedLlm && finalMatches.length < 5) {
-        const have = new Set(finalMatches.map((m) => m.slug));
-        const filler = matchTopK(embedding, gallery, pokedex, 5 + finalMatches.length, {
+      // So the five are assembled in strict preference order:
+      //   1. the judge's picks that are household names — its order, untouched
+      //   2. the local ranker, restricted to the same household names
+      //   3. the judge's remaining picks, however odd
+      //   4. the local ranker unrestricted
+      // Step 2 is what keeps Crobat off the screen: there is almost always a
+      // familiar species with a real score to put there instead. Step 3 still
+      // exists so nothing is ever deleted outright — it just has to lose to
+      // both of the alternatives first.
+      if (usedLlm) {
+        const familiar = new Set(buildCuratedPool(pokedex, allowed));
+        const local = matchTopK(embedding, gallery, pokedex, 12, {
           faceAspect: faceAspectRef.current,
-        }).filter((m) => !have.has(m.slug));
-        finalMatches = [...finalMatches, ...filler].slice(0, 5);
+        });
+        const tiers = [
+          finalMatches.filter((m) => familiar.has(m.slug)),
+          local.filter((m) => familiar.has(m.slug)),
+          finalMatches.filter((m) => !familiar.has(m.slug)),
+          local,
+        ];
+        const have = new Set<string>();
+        const assembled: typeof finalMatches = [];
+        for (const tier of tiers) {
+          for (const m of tier) {
+            if (assembled.length >= 5 || have.has(m.slug)) continue;
+            have.add(m.slug);
+            assembled.push(m);
+          }
+        }
+        finalMatches = assembled;
         // percent came from two different standardizations, so re-impose the
         // descending order the UI assumes.
         for (let i = 1; i < finalMatches.length; i++) {
