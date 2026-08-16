@@ -89,25 +89,49 @@ test("candidate sanitizing rejects unsafe slugs and caps the list", () => {
   assert.equal(clean[1].nameEn, "Muk");
 });
 
-test("the prompt numbers candidates by English name and keeps the face notes", () => {
+// The 291-name list cost ~1,050 tokens of a 6,070-token request against an 8K
+// per-minute cap, and taught the model nothing it didn't know. It's gone from
+// the prompt; the pool still gates the ANSWER via normalizePicks.
+test("the prompt carries the face notes but not the candidate list", () => {
   const clean = sanitizeCandidates([
     { slug: "pikachu", nameKo: "피카츄", nameEn: "Pikachu" },
     { slug: "gengar", nameKo: "팬텀", nameEn: "Gengar" },
   ]);
-  const prompt = buildUserPrompt("얼굴형: 계란형", clean);
+  const prompt = buildUserPrompt("eye tilt 8deg (upturned/sharp)", clean);
 
-  assert.ok(prompt.includes("1.Pikachu"));
-  assert.ok(prompt.includes("2.Gengar"));
-  assert.ok(prompt.includes("얼굴형: 계란형"));
-  // The Korean name is display-side only; the model works from English.
-  assert.ok(!prompt.includes("피카츄"), "Korean name should not be spent on tokens");
+  assert.ok(prompt.includes("eye tilt 8deg"), "face notes must survive");
+  assert.ok(!prompt.includes("Pikachu"), "candidate names must not be spent on tokens");
+  assert.ok(!prompt.includes("1."), "no numbered list any more");
+  assert.ok(!prompt.includes("피카츄"), "Korean names were never sent");
+  assert.ok(prompt.length < 900, `prompt ballooned to ${prompt.length} chars`);
+});
+
+test("a named species resolves only if the pool allows it", () => {
+  const pool = sanitizeCandidates([
+    { slug: "riolu", nameEn: "Riolu" },
+    { slug: "zorua", nameEn: "Zorua" },
+  ]);
+  // Case, spacing and punctuation vary in what a model writes.
+  const ok = normalizePicks(
+    { picks: [{ name: "riolu", reason: "좋아요" }, { name: "  Zorua ", reason: "좋아요" }] },
+    pool
+  );
+  assert.deepEqual(ok.map((p) => p.slug), ["riolu", "zorua"]);
+
+  // A banned or unavailable species simply doesn't resolve — this is what
+  // replaces the numbered list as the safety mechanism.
+  const blocked = normalizePicks(
+    { picks: [{ name: "Snorlax", reason: "x" }, { name: "Notapokemon", reason: "x" }] },
+    pool
+  );
+  assert.deepEqual(blocked, [], "anything outside the pool must be dropped");
 });
 
 test("the prompt still works with no face measurements at all", () => {
   const clean = sanitizeCandidates([{ slug: "pikachu", nameEn: "Pikachu" }]);
   const prompt = buildUserPrompt("", clean);
-  assert.ok(prompt.includes("1.Pikachu"));
-  assert.ok(!prompt.includes("참고용 얼굴 측정값"), "empty description should not print a header");
+  assert.ok(prompt.includes("Name the"), "the instruction must survive");
+  assert.ok(!prompt.includes("Measured face notes"), "empty description should not print a header");
 });
 
 test("the image is the last message part, after the instructions", () => {

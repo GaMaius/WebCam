@@ -8,7 +8,7 @@ import {
   JUDGE_DEFAULT_SLUGS,
   buildCuratedPool,
 } from "../lib/pokematch/curatedPool.ts";
-import { buildCandidateList, sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
+import { sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
 
 // The curated pool is the set of answers this app is willing to give. It's
 // computed from the shipped pokedex, so these tests run against the real asset
@@ -78,20 +78,22 @@ test("recognizable staples are present", () => {
   }
 });
 
-test("the numbered list stays affordable and carries only English names", () => {
+// The list is no longer sent to the model at all — it cost ~1,050 tokens and
+// taught it nothing. What still matters is that every pooled species can be
+// RESOLVED from a name the model writes, which is what replaced it as the
+// hallucination and ban-list guard.
+test("every pooled species has an English name the judge's answer can resolve to", () => {
   const candidates = sanitizeCandidates(
     pool.map((slug) => ({ slug, nameEn: pokedex[slug].nameEn, nameKo: pokedex[slug].nameKo }))
   );
   assert.equal(candidates.length, pool.length, "sanitizeCandidates dropped pool members");
 
-  const list = buildCandidateList(candidates);
-  assert.ok(list.startsWith("1.Bulbasaur"), list.slice(0, 40));
-  // Korean names are ~25% more tokens here and the model's species knowledge is
-  // anchored to English — the Korean name is resolved back on our side.
-  assert.ok(!/[가-힣]/.test(list), "Korean leaked into the candidate list");
-  // Rough token proxy: the list must stay small enough to fit the free tier's
-  // 8K per-minute ceiling alongside the image and the system prompt.
-  assert.ok(list.length / 4 < 2500, `candidate list is ~${Math.round(list.length / 4)} tokens`);
+  const missing = candidates.filter((c) => !c.nameEn);
+  assert.deepEqual(missing, [], `species with no English name: ${missing.map((c) => c.slug).join(", ")}`);
+
+  // Two species sharing a normalized name would make one unreachable.
+  const keys = candidates.map((c) => (c.nameEn ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+  assert.equal(new Set(keys).size, keys.length, "two species normalize to the same name");
 });
 
 // ⚠️ This option is DORMANT — the app does not pass it. Excluding the mascots

@@ -3,12 +3,13 @@
 // next/server, which isn't loadable there) — and because parsing an LLM's
 // output is the part most likely to be wrong in a way a build won't catch.
 //
-// The judge is a VISION model: it receives the cropped face image and picks
-// from a numbered list of species. Two consequences that shape everything here:
-//   - Candidates are just numbers + English names. No appearance descriptions,
-//     because the model already knows what these species look like, and no
-//     Korean, because the model's knowledge is anchored to the English names
-//     (which also tokenize cheaper — measured, see CLAUDE.md).
+// The judge is a VISION model: it receives the cropped face image and NAMES
+// the species it resembles. Two consequences that shape everything here:
+//   - The candidate list is no longer sent. It cost ~1,050 tokens of a
+//     6,070-token request and taught the model nothing — it already knows
+//     every Pokemon. The pool still gates the ANSWER: normalizePicks resolves
+//     the name against it, so anything banned or unavailable is dropped, which
+//     is what the numbered list used to do.
 //   - The measured face descriptors are supporting detail, not the input. They
 //     stay because they're precise where a glance is vague (exact ratios,
 //     ITA skin tone), but the image is what's actually being judged.
@@ -144,15 +145,15 @@ export function summarizeRateLimit(body: string, retryAfter: string | null): str
  * Only the `reason` output stays Korean, since users read it. The banned words
  * in rule 10 must stay Korean too — they describe the output being filtered.
  */
-export const SYSTEM_PROMPT = `You judge a "which Pokemon do you look like" service. Look at the user's face photo and pick the closest matches from the numbered candidate list.
+export const SYSTEM_PROMPT = `You judge a "which Pokemon do you look like" service. Look at the user's face photo and name the Pokemon it most resembles.
 
 Rules:
 1. Judge from the photo itself: face shape, eye shape and size, nose and mouth, jawline, hairstyle and hair colour, skin tone, and overall impression.
-2. Refer to candidates by NUMBER. Only numbers that appear in the list.
+2. Answer with the ENGLISH species name, spelled correctly. Choose only well-known species that a casual fan would picture instantly — an obscure one is not a result, it is a shrug.
+2a. Never name a species that is a joke about being fat, filthy, useless or unsettling (Snorlax, Muk, Magikarp, Jynx, Hypno and the like). The input is a real person's face and the answer has to be something they enjoy being shown.
 3. Pick exactly ${REQUEST_PICK_COUNT}, most similar first. Only the top few are shown, so put real effort into the ordering.
 4. They must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
 5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") over and over — that is making one pick repeatedly, not several. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
-6. The list order is meaningless (it is shuffled). Do not favour low numbers; consider the whole list.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
 7c. Commit to the answer. Before choosing, decide which two or three features of this face are the most distinctive, then pick the species that match THOSE. Shown the same photo again you should reach the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
@@ -163,28 +164,34 @@ Rules:
 11. Say only what is visible. Do not invent features; calling a slender face "통통한" means you have no evidence.
 12. Never guess the person's identity or name any real person.
 
-Output exactly one JSON object, nothing else. No names, no scores.
-{"picks":[{"n":7,"reason":"..."},{"n":21,"reason":"..."}]}`;
+Output exactly one JSON object, nothing else. No scores.
+{"picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
 
-/**
- * The numbered candidate list.
- *
- * English names, because that's where the model's knowledge of these species
- * lives — the Korean name is resolved back on our side for display. Numbering
- * follows the array order and is what normalizePicks resolves against, so the
- * array must not be reordered between building the prompt and reading the
- * reply.
- */
-export function buildCandidateList(candidates: CandidateInput[]): string {
-  return candidates.map((c, i) => `${i + 1}.${c.nameEn ?? c.slug}`).join(" ");
-}
 
 /** English scaffolding for the same reason SYSTEM_PROMPT is English — Korean
  * costs about 2.7 tokens per character here. The face notes themselves are
  * still Korean (they come from describeFaceFeatures) and are the remaining
  * Korean cost in the request. */
-export function buildUserPrompt(description: string, candidates: CandidateInput[]): string {
-  const sections = [`Pick the ${REQUEST_PICK_COUNT} candidates this face most resembles, best first.`];
+/**
+ * ⚠️ THE CANDIDATE LIST IS DELIBERATELY NOT IN THE PROMPT.
+ *
+ * It used to be: 291 numbered names, measured at ~1,050 tokens of a
+ * 6,070-token request against an 8K per-minute cap. The model already knows
+ * every Pokemon, so those tokens were never teaching it anything — the list
+ * was there to stop hallucination and to enforce the ban list.
+ *
+ * Both of those still hold; they just don't have to be paid for in tokens.
+ * The client still sends the pool, so normalizePicks resolves whatever the
+ * model names against it and drops anything absent. A banned or unavailable
+ * species fails to resolve exactly as an out-of-range number used to.
+ *
+ * `candidates` stays in the signature because every caller has it and the
+ * resolver needs the same array; it simply isn't rendered any more.
+ */
+export function buildUserPrompt(description: string, _candidates: CandidateInput[]): string {
+  const sections = [
+    `Name the ${REQUEST_PICK_COUNT} Pokemon this face most resembles, best first.`,
+  ];
   if (description.trim()) {
     sections.push(
       `[Measured face notes — the photo comes first, these are supporting detail]\n${description.slice(
@@ -193,7 +200,6 @@ export function buildUserPrompt(description: string, candidates: CandidateInput[
       )}`
     );
   }
-  sections.push(`[${candidates.length} candidates]\n${buildCandidateList(candidates)}`);
   return sections.join("\n\n");
 }
 
@@ -250,6 +256,33 @@ export function extractJson(content: string): unknown {
  * asked for; the displayed similarity is computed from the embedding z-scores
  * client-side, where it's derived from real numbers instead of invented ones.
  */
+/** Loose key for matching a species name the model wrote against our own —
+ * case, spacing, punctuation and form suffixes vary ("Mr. Mime", "mr_mime",
+ * "Lycanroc (Midday)"). */
+function nameKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Name -> slug for everything the app is willing to show.
+ *
+ * This is what makes it safe to stop listing 291 candidates in the prompt.
+ * The list still exists — the client sends it, it just isn't spent as tokens —
+ * so a species the model names is only accepted if it is in the curated pool,
+ * which is what enforces BANNED_SLUGS. A name that isn't in the pool (an
+ * excluded species, a form we have no sprite for, an invented one) resolves to
+ * nothing and the pick is dropped, exactly as an out-of-range number was.
+ */
+function buildNameIndex(candidates: CandidateInput[]): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const c of candidates) {
+    for (const name of [c.nameEn, c.nameKo, c.slug]) {
+      if (name) index.set(nameKey(name), c.slug);
+    }
+  }
+  return index;
+}
+
 export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick[] {
   const list = Array.isArray(raw)
     ? raw
@@ -258,6 +291,7 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
     : [];
 
   const bySlug = new Map(candidates.map((c) => [c.slug, c]));
+  const byName = buildNameIndex(candidates);
   const picks: Pick[] = [];
   const used = new Set<string>();
 
@@ -268,8 +302,10 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
     if (typeof item === "number" || typeof item === "string") {
       const n = Number(item);
       if (Number.isInteger(n)) slug = candidates[n - 1]?.slug ?? "";
-      else if (typeof item === "string" && bySlug.has(item.trim().toLowerCase())) {
-        slug = item.trim().toLowerCase();
+      else if (typeof item === "string") {
+        slug = bySlug.has(item.trim().toLowerCase())
+          ? item.trim().toLowerCase()
+          : byName.get(nameKey(item)) ?? "";
       }
     } else if (item && typeof item === "object") {
       const p = item as Record<string, unknown>;
@@ -278,6 +314,12 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
         slug = candidates[n - 1].slug;
       } else if (typeof p.slug === "string" && bySlug.has(p.slug.trim().toLowerCase())) {
         slug = p.slug.trim().toLowerCase();
+      } else {
+        // The model now answers with NAMES, since listing 291 candidates cost
+        // ~1,050 tokens of a 6,070-token request. Anything it names that isn't
+        // in the pool simply doesn't resolve.
+        const named = p.name ?? p.pokemon ?? p.slug;
+        if (typeof named === "string") slug = byName.get(nameKey(named)) ?? "";
       }
       if (typeof p.reason === "string") reason = sanitizeReason(p.reason);
     }
