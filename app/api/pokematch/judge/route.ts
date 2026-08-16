@@ -103,28 +103,59 @@ function rateLimited(ip: string): boolean {
   return recent.length > RATE_MAX_REQUESTS;
 }
 
+/**
+ * How hard one attempt is allowed to think.
+ *
+ * ⚠️ THE TWO PLANS EXIST SO A FAILOVER MEANS SOMETHING. Both keys used to send
+ * identical requests, so when the request itself was the problem the second key
+ * reproduced the first key's failure exactly — observed as
+ * `primary=judge_unusable secondary=judge_unusable` with the same finish=length
+ * on both. A backup that repeats the mistake is not a backup.
+ *
+ * So the FIRST attempt deliberates and the retries answer directly. That also
+ * hedges the open question: whether this model's thinking pass fits in a budget
+ * we can afford. If it does, the good path runs first; if it doesn't, the user
+ * still gets a result instead of the local fallback.
+ */
+interface CallPlan {
+  label: string;
+  reasoning: boolean;
+  maxTokens: number;
+}
+
+/** ⚠️ Reasoning is ON for the first try, and the budget is MEASURED now.
+ *
+ * Why it's on at all: over three consecutive scans of one face the judge
+ * returned 15 species with ZERO repeats. Sampling from even a 20-species
+ * preference does that 0.3% of the time, so the model rates 40-60 species as
+ * equally good and is indifferent among them. Its perception is stable — every
+ * run cited dark hair, sharp eyes, a defined jaw — but the mapping from that to
+ * a species is a fresh roll, which is what free association looks like when a
+ * model answers without deliberating. Temperature can't fix it: there is no
+ * concentrated preference to sharpen, which is why 0.15 collapsed onto safe
+ * mascots rather than onto good answers.
+ *
+ * Why 4000: the prompt measured 2,307 tokens against an 8K per-minute cap, so
+ * 5,693 is genuinely available. Two earlier budgets (700, then 1400) were both
+ * spent entirely on thinking with nothing left to answer with — this model
+ * deliberates over eight picks and 1400 wasn't close. Reserving 4000 still
+ * leaves the request under the cap.
+ */
+const DELIBERATE: CallPlan = { label: "think", reasoning: true, maxTokens: 4000 };
+
+/** The retry. No thinking, small budget — this is the configuration that
+ * demonstrably produced results before reasoning was switched on, so it is a
+ * known-good answer rather than a second guess. At 2,307 + 500 it also costs a
+ * third of the deliberate attempt, which is what makes it affordable as a
+ * fallback inside the same minute. */
+const DIRECT: CallPlan = { label: "direct", reasoning: false, maxTokens: 500 };
+
 async function callProvider(
   provider: Provider,
   messages: unknown[],
+  plan: CallPlan,
   signal: AbortSignal
 ) {
-  // ⚠️ Reasoning is ON again, and the reason it was ever off no longer holds.
-  //
-  // It was disabled to save 300-900 tokens when a request cost ~5,800 against
-  // an 8K per-minute cap. The English prompt cut that to ~3,500 and a second
-  // key doubled the ceiling to 16K, so the constraint that forced the decision
-  // is gone.
-  //
-  // What put it back: measured over three consecutive scans of one face, the
-  // judge returned 15 species with ZERO repeats. If it were sampling from even
-  // a 20-species preference, that happens 0.3% of the time; it implies the
-  // model rates 40-60 species as equally good and is effectively indifferent
-  // among them. Its perception is stable — every run cited dark hair, sharp
-  // eyes, a defined jaw — but the mapping from that to a species is a fresh
-  // roll each time, which is what free association looks like when a model
-  // answers without deliberating. Temperature cannot fix that: there is no
-  // concentrated preference to sharpen, which is why 0.15 collapsed onto safe
-  // mascots instead of onto good answers.
   const base = {
     model: provider.model,
     messages,
@@ -140,25 +171,12 @@ async function callProvider(
     // for-fun app, occasionally excellent beats reliably bland, and re-rolling
     // is cheap now that requests no longer blow the per-minute cap.
     temperature: 0.7,
-    // ⚠️ RESERVED, NOT MEASURED. Groq counts this against the per-minute
-    // budget in full whether or not the model uses it, so it is a capacity
-    // decision rather than a safety margin.
-    //
-    // It covers REASONING PLUS THE ANSWER. At 700 the thinking pass could
-    // spend the whole budget and leave nothing to write with, which returns a
-    // 200 with empty content and reads downstream as judge_unusable — the
-    // failure that prompted this number being revisited. finish_reason and the
-    // completion count are now reported to ?debug so this stays observable
-    // instead of inferred.
-    //
-    // Raising it is close to free here. The per-minute cap is 8K and the
-    // prompt is roughly 5K now that the 291-name candidate list is gone, so
-    // anything up to about 3K completion still allows exactly one scan per
-    // minute per key — the same rate 700 allowed. The cost is only against the
-    // daily budget (~31 scans a key instead of ~35), which is a good trade
-    // against a scan that fails outright.
-    max_completion_tokens: 1400,
-    reasoning_effort: "default",
+    // ⚠️ RESERVED, NOT MEASURED, and it covers REASONING PLUS THE ANSWER.
+    // Groq charges the full amount against the per-minute budget whether the
+    // model uses it or not, so this is a capacity decision, not a safety
+    // margin. Sized per plan above; see DELIBERATE for why 4000.
+    max_completion_tokens: plan.maxTokens,
+    ...(plan.reasoning ? { reasoning_effort: "default" } : {}),
   };
   const post = (body: unknown) =>
     fetch(provider.url, {
@@ -168,20 +186,20 @@ async function callProvider(
       signal,
     });
 
-  // ⚠️ The plain request goes FIRST, and json_object mode is not used at all.
+  // ⚠️ json_object mode is not used at all.
   //
   // This used to lead with response_format: json_object and fall back on a
   // 400. That optimism costs a whole extra round trip whenever the model
-  // rejects the mode, and against an 8K per-minute cap where one request is
-  // already 6,070 tokens, a wasted call is the difference between working and
-  // locked out. extractJson already handles fenced, prefixed and
-  // prose-wrapped output, so the mode was never load-bearing.
+  // rejects the mode, and against an 8K per-minute cap a wasted call is the
+  // difference between working and locked out. extractJson already handles
+  // fenced, prefixed and prose-wrapped output, so the mode was never
+  // load-bearing.
   //
   // reasoning_effort keeps its fallback because a model that rejects it fails
   // every time otherwise, and that path only runs on models that don't
   // support it.
   let res = await post(base);
-  if (res.status === 400) {
+  if (res.status === 400 && plan.reasoning) {
     const { reasoning_effort: _dropped, ...noReasoning } = base;
     res = await post(noReasoning);
   }
@@ -203,7 +221,8 @@ function summarizeFailures(
 async function attempt(
   provider: Provider,
   messages: unknown[],
-  candidates: ReturnType<typeof sanitizeCandidates>
+  candidates: ReturnType<typeof sanitizeCandidates>,
+  plan: CallPlan
 ): Promise<
   | { ok: true; picks: ReturnType<typeof normalizePicks>; model: string; usage?: string }
   | { ok: false; status: number; error: string; detail?: string }
@@ -212,7 +231,7 @@ async function attempt(
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await callProvider(provider, messages, controller.signal);
+    res = await callProvider(provider, messages, plan, controller.signal);
   } catch (err) {
     console.error(`pokematch judge: ${provider.label} request failed:`, err);
     return { ok: false, status: 502, error: "judge_unavailable" };
@@ -340,6 +359,22 @@ export async function POST(request: Request) {
   const start = Math.floor(Math.random() * configured.length);
   const order = configured.map((_, i) => configured[(start + i) % configured.length]);
 
+  // ⚠️ THE FIRST ATTEMPT DELIBERATES, EVERY RETRY ANSWERS DIRECTLY. Sending an
+  // identical request to both keys made the second reproduce the first's
+  // failure verbatim — observed as finish=length on both, each having spent
+  // its whole budget thinking. Varying the plan is what turns a second key
+  // into an actual fallback rather than a second roll of the same dice.
+  //
+  // With a single key configured the direct retry still happens, on that same
+  // key. It may be refused by the per-minute cap (the deliberate attempt has
+  // already reserved most of it), but a 429 is a strictly better outcome than
+  // never trying the configuration that is known to work.
+  const attempts: { provider: Provider; plan: CallPlan }[] = order.map((provider, i) => ({
+    provider,
+    plan: i === 0 ? DELIBERATE : DIRECT,
+  }));
+  if (attempts.length === 1) attempts.push({ provider: order[0], plan: DIRECT });
+
   // EVERY key's failure is reported, not just the last one.
   //
   // A single scan has to fit inside ONE key's per-minute budget — the two
@@ -349,24 +384,29 @@ export async function POST(request: Request) {
   // even being reached.
   const failures: { label: string; error: string; detail?: string }[] = [];
   let last: { status: number; error: string; detail?: string } | null = null;
-  for (const provider of order) {
-    const result = await attempt(provider, messages, candidates);
+  for (const { provider, plan } of attempts) {
+    const result = await attempt(provider, messages, candidates, plan);
     if (result.ok) {
       return NextResponse.json({
         picks: result.picks,
         model: result.model,
-        // Which key answered, so ?debug can show a silent failover.
-        provider: provider.label,
+        // Which key answered and how, so ?debug shows a silent failover and
+        // whether the answer came from the thinking pass or the direct retry.
+        provider: `${provider.label}/${plan.label}`,
         usage: result.usage,
         // Present only when an earlier key had to be given up on.
         ...(failures.length ? { failedFirst: summarizeFailures(failures) } : {}),
       });
     }
-    failures.push({ label: provider.label, error: result.error, detail: result.detail });
+    failures.push({
+      label: `${provider.label}/${plan.label}`,
+      error: result.error,
+      detail: result.detail,
+    });
     last = { status: result.status, error: result.error, detail: result.detail };
-    if (order.length > 1) {
-      console.warn(`pokematch judge: ${provider.label} failed (${result.error}), trying next`);
-    }
+    console.warn(
+      `pokematch judge: ${provider.label}/${plan.label} failed (${result.error}), trying next`
+    );
   }
 
   return NextResponse.json(

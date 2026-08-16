@@ -308,6 +308,10 @@ function buildNameIndex(candidates: CandidateInput[]): Map<string, string> {
  */
 export function describeUnusable(content: string, parsed: unknown): string {
   if (!content.trim()) return "empty_content";
+  // An opened-but-never-closed think block means the budget ran out mid-thought
+  // and no answer was ever written. Same fix as empty_content — more budget —
+  // so it gets its own name rather than looking like malformed output.
+  if (/<think>/.test(content) && !/<\/think>/.test(content)) return "thinking_never_finished";
   if (parsed === null || parsed === undefined) {
     return `unparsed:${content.trim().replace(/\s+/g, " ").slice(0, 80)}`;
   }

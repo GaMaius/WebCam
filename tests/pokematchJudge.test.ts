@@ -96,6 +96,14 @@ test("an unusable answer says WHY it was unusable", () => {
   assert.equal(describeUnusable("", null), "empty_content");
   assert.equal(describeUnusable("   ", null), "empty_content");
 
+  // Real observed failure: the whole 1400-token budget went into a think block
+  // that never closed. Named separately because it needs the same fix as
+  // empty_content (more budget), not a prompt change.
+  assert.equal(
+    describeUnusable("<think> The user wants me to identify 8 Pokemon that resemble", null),
+    "thinking_never_finished"
+  );
+
   // The model answered in prose. The snippet shows what it said instead.
   const prose = describeUnusable("죄송하지만 사람 얼굴은 판단할 수 없습니다.", null);
   assert.match(prose, /^unparsed:/);
