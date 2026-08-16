@@ -70,7 +70,20 @@ const pokedex = {
   f: { shape: "wings" },
 } as unknown as Record<string, PokedexEntry>;
 
-const picks = (...slugs: string[]) => slugs.map((slug) => ({ slug, reason: "좋은 인상입니다" }));
+// ⚠️ Distinct reasons on purpose. Giving every pick the same sentence used to
+// be harmless, but a reworded reason is now itself a demotion trigger, so a
+// shared fixture string would silently test the duplicate guard instead of
+// whatever the test is actually about.
+const REASONS: Record<string, string> = {
+  a: "어두운 머리가 잘 어울립니다",
+  b: "둥근 안경이 자연스럽게 어우러집니다",
+  c: "신비로운 눈빛이 깊은 인상을 줍니다",
+  d: "강인한 턱선이 포인트가 됩니다",
+  e: "오똑한 코가 특징적입니다",
+  f: "넓은 이마와 차분한 표정이 맞습니다",
+};
+const picks = (...slugs: string[]) =>
+  slugs.map((slug) => ({ slug, reason: REASONS[slug] ?? `${slug} 고유한 인상입니다` }));
 
 test("one silhouette cannot take over the set when there are spares to use", () => {
   // The real shape: the judge is asked for 8 and 5 are shown, so the cap has
@@ -147,6 +160,71 @@ test("the model's order survives inside each familiarity group", () => {
   const out = applyPickGuards(picks("a", "d", "b", "e"), pokedex, null, 4, new Set(["d", "e"]));
   // d before e (model order), then a before b (model order).
   assert.deepEqual(out.map((p) => p.slug), ["d", "e", "a", "b"]);
+});
+
+// ⚠️ The tell that the model stopped judging and started filling the list is
+// textual before it is anything else. A real run returned twelve variations of
+// one sentence; two of them scored 0.842 on bigram overlap, while the worst
+// pair inside a healthy scan scored 0.258.
+test("a pick justified by another pick's sentence is demoted", () => {
+  const out = applyPickGuards(
+    [
+      { slug: "a", reason: "부드러운 얼굴 라인과 차분한 눈매가 귀여운 불꽃 포켓몬과 잘 어울립니다" },
+      { slug: "d", reason: "부드러운 피부톤과 차분한 눈매가 귀여운 불꽃 포켓몬과 잘 어울립니다" },
+      { slug: "e", reason: "강인한 턱선이 인상의 포인트가 됩니다" },
+    ],
+    pokedex,
+    null,
+    2
+  );
+  assert.deepEqual(out.map((p) => p.slug), ["a", "e"], "the reworded pick lost its slot");
+});
+
+test("genuinely different reasons all survive", () => {
+  // The four reasons from a run that judged properly.
+  const out = applyPickGuards(
+    [
+      { slug: "a", reason: "어두운 머리와 위를 향한 눈매가 잘 어울립니다" },
+      { slug: "d", reason: "둥근 안경이 얼굴 곡선과 자연스럽게 어우러집니다" },
+      { slug: "e", reason: "신비로운 눈빛이 깊은 인상을 줍니다" },
+      { slug: "f", reason: "강인한 턱선이 인상의 포인트가 됩니다" },
+    ],
+    pokedex,
+    null,
+    4
+  );
+  assert.equal(out.length, 4);
+  assert.deepEqual(out.map((p) => p.slug), ["a", "d", "e", "f"]);
+});
+
+test("a repeated reason still yields rather than shortening the result", () => {
+  // Demoted, not deleted — an incomplete five is worse than a repetitive one.
+  const same = "부드러운 얼굴 라인이 사랑스러운 인상을 줍니다";
+  const out = applyPickGuards(
+    [
+      { slug: "a", reason: same },
+      { slug: "d", reason: same },
+      { slug: "e", reason: same },
+    ],
+    pokedex,
+    null,
+    3
+  );
+  assert.equal(out.length, 3);
+});
+
+test("blank reasons never collide with each other", () => {
+  const out = applyPickGuards(
+    [
+      { slug: "a", reason: "" },
+      { slug: "d", reason: "" },
+      { slug: "e", reason: "" },
+    ],
+    pokedex,
+    null,
+    3
+  );
+  assert.equal(out.length, 3, "an empty reason is not a repeat of another empty one");
 });
 
 test("a contradicted reason is blanked but never costs the user the pick", () => {

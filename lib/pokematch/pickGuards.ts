@@ -112,6 +112,43 @@ export interface GuardablePick {
 const MAX_PER_SHAPE = 2;
 
 /**
+ * Dice coefficient over Korean character bigrams. Cheap, needs no tokenizer,
+ * and is stable against the reordering the model does when it reuses a
+ * sentence ("부드러운 얼굴 라인과 차분한 눈매가…" / "부드러운 피부톤과 차분한
+ * 눈매가…").
+ */
+function reasonOverlap(a: string, b: string): number {
+  const grams = (s: string) => {
+    const t = s.replace(/[^가-힣a-zA-Z0-9]/g, "");
+    const out = new Set<string>();
+    for (let i = 0; i + 1 < t.length; i++) out.add(t.slice(i, i + 2));
+    return out;
+  };
+  const A = grams(a);
+  const B = grams(b);
+  if (!A.size || !B.size) return 0;
+  let shared = 0;
+  for (const g of A) if (B.has(g)) shared++;
+  return (2 * shared) / (A.size + B.size);
+}
+
+/**
+ * How much two reasons may overlap before the second is treated as a repeat.
+ *
+ * ⚠️ MEASURED, NOT CHOSEN. Computed over the reasons of four real runs: within
+ * a single healthy scan the worst pair scored 0.138 and 0.258, while the run
+ * where the model collapsed into reworking one sentence had a median of 0.423
+ * and a worst pair of 0.842. 0.45 sits in the gap.
+ *
+ * Rule 5 of the prompt already asks for a different feature per pick and the
+ * model ignores it under pressure, which is what this enforces. Note the
+ * borderline case is a true positive, not a false one: "어두운 머리와 위를 향한
+ * 눈매" against "검은 머리와 날카로운 눈매" scores 0.571, and those are the same
+ * observation twice.
+ */
+const MAX_REASON_OVERLAP = 0.45;
+
+/**
  * Stable partition putting household-name species ahead of the rest.
  *
  * ⚠️ MEASURED, and it replaces a filter that was doing this job by DELETION.
@@ -163,6 +200,7 @@ export function applyPickGuards(
   /** Runs the silhouette cap over one group, blanking false reasons as it
    * goes. The count is shared across groups so the cap still bounds the whole
    * set. */
+  const reasonsUsed: string[] = [];
   const cap = (group: GuardablePick[]) => {
     const kept: GuardablePick[] = [];
     const skipped: GuardablePick[] = [];
@@ -173,11 +211,20 @@ export function applyPickGuards(
       };
       const shape = pokedex[pick.slug]?.shape ?? "";
       const used = shapeCount.get(shape) ?? 0;
-      if (shape && used >= MAX_PER_SHAPE) {
+      // ⚠️ A REWORDED REASON IS A REPEATED PICK. Under pressure the model
+      // stops judging and starts filling the list, and the tell is textual
+      // before it is anything else: one run returned twelve variations of
+      // "부드러운 얼굴 라인과 …가 귀여운 포켓몬과 잘 어울립니다". A pick whose
+      // only justification is another pick's sentence has not been justified.
+      const repeats = cleaned.reason
+        ? reasonsUsed.some((r) => reasonOverlap(r, cleaned.reason) >= MAX_REASON_OVERLAP)
+        : false;
+      if (repeats || (shape && used >= MAX_PER_SHAPE)) {
         skipped.push(cleaned);
         continue;
       }
       shapeCount.set(shape, used + 1);
+      if (cleaned.reason) reasonsUsed.push(cleaned.reason);
       kept.push(cleaned);
     }
     return { kept, skipped };

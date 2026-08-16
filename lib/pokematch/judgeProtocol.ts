@@ -21,13 +21,26 @@ export const PICK_COUNT = 5;
  * measurements, repeating a silhouette, or being an obscure species, without
  * leaving a short list.
  *
- * ⚠️ Raised from 8 because the surplus wasn't deep enough. One measured run
- * produced only three household names out of eight picks, so the tail had to
- * come from the local embedding ranker instead of from the judge that actually
- * looked at the face. Twelve gives it more chances to name something familiar.
- * Cheap: that run's completion was 284 tokens against a 1400 budget, and each
- * extra pick is roughly 35. */
-export const REQUEST_PICK_COUNT = 12;
+ * ⚠️⚠️ DO NOT RAISE THIS. Twelve was tried, to give the familiarity ranking a
+ * deeper pool to draw from, and it broke the judgement itself. Measured across
+ * four runs:
+ *
+ *   8  → Houndour, Pancham, Zorua, Riolu … distinct species, specific reasons
+ *   8  → Crobat, Slowking, Dunsparce … odd species, but still distinct
+ *   12 → Mimikyu, Gothita, Elgyem … drifting cute, reasons starting to repeat
+ *   12 → Eevee, Jigglypuff, Munchlax, Snorlax, Pikachu, Togepi, Bulbasaur,
+ *        Charmander, Squirtle, Mew … every one a starter or a mascot, with one
+ *        sentence reworded twelve times, and Pikachu called "전설의 포켓몬"
+ *
+ * Asked for twelve, the model cannot find twelve distinctive matches, so it
+ * switches from judging to enumerating famous Pokemon. And because it plans the
+ * whole list before writing, THE FIRST PICK DEGRADES TOO — the collapse is not
+ * confined to the tail that gets discarded.
+ *
+ * Eight leaves enough surplus for the guards (a pick can be dropped for
+ * contradicting the measurements, repeating a silhouette, or reusing another
+ * pick's reason) without pushing the model into list-filling. */
+export const REQUEST_PICK_COUNT = 8;
 /** ⚠️ Sized for the whole shippable gallery, not the old 294-species curated
  * pool — the client now sends everything that isn't banned, because gating the
  * answer on the narrow pool was deleting half of it. These never become tokens
