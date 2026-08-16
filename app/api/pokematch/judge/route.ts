@@ -157,12 +157,19 @@ async function callProvider(
       signal,
     });
 
-  // Neither json_object mode nor reasoning_effort is universal across models;
-  // a 400 here usually means the configured model rejected one of them, so
-  // retry progressively barer rather than failing outright (extractJson copes
-  // with fenced/prose-wrapped output).
-  let res = await post({ ...base, response_format: { type: "json_object" } });
-  if (res.status === 400) res = await post(base);
+  // ⚠️ The plain request goes FIRST, and json_object mode is not used at all.
+  //
+  // This used to lead with response_format: json_object and fall back on a
+  // 400. That optimism costs a whole extra round trip whenever the model
+  // rejects the mode, and against an 8K per-minute cap where one request is
+  // already 6,070 tokens, a wasted call is the difference between working and
+  // locked out. extractJson already handles fenced, prefixed and
+  // prose-wrapped output, so the mode was never load-bearing.
+  //
+  // reasoning_effort keeps its fallback because a model that rejects it fails
+  // every time otherwise, and that path only runs on models that don't
+  // support it.
+  let res = await post(base);
   if (res.status === 400) {
     const { reasoning_effort: _dropped, ...noReasoning } = base;
     res = await post(noReasoning);
