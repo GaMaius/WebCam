@@ -1,0 +1,109 @@
+.stage {
+  position: relative;
+  width: 100%;
+  /* The embedded app lays itself out against its own viewport (100vw/100dvh), so
+     the iframe box IS its screen — a bigger box is genuinely more room to play in,
+     not just a bigger picture. Phones get the tall box. */
+  height: min(76vh, 680px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: #111;
+  box-shadow: var(--shadow);
+}
+
+/* Desktop: break out of ModuleShell's 720px reading column, which otherwise
+   leaves this app as a small square in the middle of a wide monitor. The shell
+   centres its content in a flex column, so `align-self: center` is enough to
+   centre a child that's WIDER than the column — no negative-margin trick — and
+   .wrap sets no overflow, so the spill isn't clipped.
+   16/9 with a viewport cap: on a short screen the height clamps and the box just
+   gets wider still, which is the direction we want. */
+@media (min-width: 760px) {
+  .stage {
+    align-self: center;
+    /* Not 100vw: that includes the scrollbar and would force a horizontal
+       scrollbar of its own. */
+    width: min(calc(100vw - 44px), 1440px);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: 86vh;
+  }
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  line-height: 1.6;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  background: rgba(17, 17, 17, 0.9);
+  backdrop-filter: blur(2px);
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--m-accent, var(--accent));
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Kept in the layout (so the camera keeps running) but out of sight. Not
+   display:none — a detached or undisplayed video element can get its playback
+   throttled, and the instrument reads frames off this same stream. */
+.cameraHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Revealed only when the camera failed, so CameraView's own error message and
+   retry button become reachable. */
+.cameraPanel {
+  margin-top: 16px;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.credit {
+  margin-top: 16px;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.credit a {
+  color: var(--m-accent, var(--accent));
+  text-decoration: none;
+}
+
+.credit a:hover {
+  text-decoration: underline;
+}

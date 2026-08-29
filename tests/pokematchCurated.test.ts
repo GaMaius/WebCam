@@ -1,0 +1,171 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  BANNED_SLUGS,
+  EXTRA_FAMOUS,
+  JUDGE_DEFAULT_SLUGS,
+  buildCuratedPool,
+  buildJudgeAllowlist,
+} from "../lib/pokematch/curatedPool.ts";
+import { sanitizeCandidates } from "../lib/pokematch/judgeProtocol.ts";
+
+// The curated pool is the set of answers this app is willing to give. It's
+// computed from the shipped pokedex, so these tests run against the real asset
+// files — a slug that isn't actually there would be picked by the judge and
+// then render as a broken row with no sprite.
+
+const root = fileURLToPath(new URL("..", import.meta.url));
+import type { PokedexEntry } from "../lib/pokematch/matcher.ts";
+const pokedex = JSON.parse(readFileSync(root + "public/pokemon/pokedex.json", "utf8")) as Record<
+  string,
+  PokedexEntry
+>;
+const gallery = JSON.parse(readFileSync(root + "public/pokemon/gallery.json", "utf8")) as { species: string[] };
+const available = new Set(gallery.species);
+const pool = buildCuratedPool(pokedex, available);
+
+test("the pool is large enough to be worth judging over", () => {
+  // The ask was "at least ~200". Below that we're back to a shortlist that
+  // decides the answer before the judge sees it.
+  assert.ok(pool.length >= 200, `pool is only ${pool.length} species`);
+});
+
+test("every pooled slug exists in both the pokedex and the shipped gallery", () => {
+  for (const slug of pool) {
+    assert.ok(pokedex[slug], `${slug} is not in pokedex.json`);
+    assert.ok(available.has(slug), `${slug} has no embedding in gallery.json`);
+  }
+});
+
+test("every EXTRA_FAMOUS slug is real — a typo would silently vanish", () => {
+  // buildCuratedPool filters unknown slugs, so a misspelling costs a species
+  // with no error anywhere. This is the only thing that catches it.
+  const bogus = [...new Set(EXTRA_FAMOUS)].filter((s) => !pokedex[s] || !available.has(s));
+  assert.deepEqual(bogus, [], `unknown slugs in EXTRA_FAMOUS: ${bogus.join(", ")}`);
+});
+
+test("no banned species reaches the pool", () => {
+  // Somebody's face is the input. See the exclusion note in curatedPool.ts.
+  for (const slug of pool) {
+    assert.ok(!BANNED_SLUGS.has(slug), `${slug} should not be a result this app hands someone`);
+  }
+  for (const slug of ["muk", "garbodor", "magikarp", "hypno", "jynx", "ditto"]) {
+    assert.ok(!pool.includes(slug), `${slug} leaked into the pool`);
+  }
+  // Weight/laziness jokes were deliberately un-banned — the user judged these
+  // fine to receive, so a future tidy-up must not sweep them back in.
+  for (const slug of ["snorlax", "slowpoke", "slowbro"]) {
+    assert.ok(pool.includes(slug), `${slug} should be an allowed result`);
+  }
+});
+
+test("the pool has no duplicates and is ordered by dex", () => {
+  assert.equal(new Set(pool).size, pool.length, "duplicate slug in the pool");
+  const dexes = pool.map((s) => pokedex[s].dex ?? 9999);
+  for (let i = 1; i < dexes.length; i++) {
+    assert.ok(dexes[i] >= dexes[i - 1], `pool is not dex-ordered at index ${i}`);
+  }
+});
+
+test("ordering is deterministic — the judge answers with positions in this list", () => {
+  assert.deepEqual(buildCuratedPool(pokedex, available), pool);
+});
+
+test("the pool spans distinct impressions rather than variations of one", () => {
+  const shapes = new Set(pool.map((s) => pokedex[s]?.shape ?? "?"));
+  assert.ok(shapes.size >= 8, `only ${shapes.size} distinct shapes in the pool`);
+});
+
+test("recognizable staples are present", () => {
+  for (const slug of ["pikachu", "charizard", "gengar", "eevee", "lucario", "gardevoir", "mimikyu"]) {
+    assert.ok(pool.includes(slug), `${slug} should be in the pool`);
+  }
+});
+
+// The list is no longer sent to the model at all — it cost ~1,050 tokens and
+// taught it nothing. What still matters is that every pooled species can be
+// RESOLVED from a name the model writes, which is what replaced it as the
+// hallucination and ban-list guard.
+test("every pooled species has an English name the judge's answer can resolve to", () => {
+  const candidates = sanitizeCandidates(
+    pool.map((slug) => ({ slug, nameEn: pokedex[slug].nameEn, nameKo: pokedex[slug].nameKo }))
+  );
+  assert.equal(candidates.length, pool.length, "sanitizeCandidates dropped pool members");
+
+  const missing = candidates.filter((c) => !c.nameEn);
+  assert.deepEqual(missing, [], `species with no English name: ${missing.map((c) => c.slug).join(", ")}`);
+
+  // Two species sharing a normalized name would make one unreachable.
+  const keys = candidates.map((c) => (c.nameEn ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+  assert.equal(new Set(keys).size, keys.length, "two species normalize to the same name");
+});
+
+// ⚠️ THE ALLOWLIST, not the curated pool, is what the judge's answer resolves
+// against. Measured: the model named eight species and four were deleted for
+// being outside the pool — Aipom, Braixen, Emolga, Purrloin — none obscure, and
+// one the middle stage of a line whose other two members were included. The
+// user saw four cards where the page promises five.
+const allowed = buildJudgeAllowlist(pokedex, available);
+
+test("the allowlist keeps every shippable species that isn't banned", () => {
+  assert.ok(allowed.length > pool.length * 2, `allowlist is only ${allowed.length} species`);
+
+  // The exact species this was built for.
+  for (const slug of ["aipom", "braixen", "emolga", "purrloin"]) {
+    assert.ok(allowed.includes(slug), `${slug} was a good answer that got deleted`);
+  }
+
+  // Nothing without a sprite or a pokedex entry — those render as broken rows.
+  for (const slug of allowed) {
+    assert.ok(pokedex[slug], `${slug} is not in pokedex.json`);
+    assert.ok(available.has(slug), `${slug} has no embedding in gallery.json`);
+  }
+});
+
+// ⚠️ The ban list is the ONE thing the widening must not relax. Recognition is
+// a preference the prompt expresses; this is a guarantee.
+test("widening the allowlist does not let a banned species through", () => {
+  for (const slug of allowed) {
+    assert.ok(!BANNED_SLUGS.has(slug), `${slug} must never be a result this app hands someone`);
+  }
+  for (const slug of ["muk", "garbodor", "magikarp", "hypno", "jynx", "grimer_alola"]) {
+    assert.ok(!allowed.includes(slug), `${slug} leaked past the widening`);
+  }
+  // And the deliberately un-banned ones are still reachable.
+  for (const slug of ["snorlax", "slowpoke"]) {
+    assert.ok(allowed.includes(slug), `${slug} should be an allowed result`);
+  }
+});
+
+// ⚠️ This option is DORMANT — the app does not pass it. Excluding the mascots
+// was tried and backfired (the judge moved to Porygon/Staryu rather than to
+// anything more personal); see JUDGE_DEFAULT_SLUGS. The test stays so the
+// mechanism still works if a future change makes it worth re-enabling.
+test("buildCuratedPool can drop the judge's default mascots when asked", () => {
+  const withDefaults = buildCuratedPool(pokedex, available);
+  const forJudge = buildCuratedPool(pokedex, available, { excludeJudgeDefaults: true });
+
+  assert.ok(withDefaults.includes("pikachu"), "fixture sanity: pikachu is normally in the pool");
+  for (const slug of JUDGE_DEFAULT_SLUGS) {
+    assert.ok(!forJudge.includes(slug), `${slug} must not reach the judge`);
+  }
+  assert.ok(
+    forJudge.length > withDefaults.length - JUDGE_DEFAULT_SLUGS.size - 1,
+    "only the listed defaults may be removed"
+  );
+});
+
+// ⚠️ Records why the pool is NOT filtered by pokedex `shape`. The judge
+// invented anatomy (a lip on Omastar, sharp eyes on the eyeless Zubat) and
+// dropping "faceless" shapes looked like the answer — but `shape` is body-shape
+// taxonomy, not a face indicator, and it takes Mimikyu with it.
+test("shape is not a face indicator, so the pool keeps every silhouette", () => {
+  assert.ok(pool.includes("mimikyu"), "mimikyu is `squiggle` and unmistakably has a face");
+  assert.ok(pool.includes("omastar"), "omastar is `tentacles` and has a face");
+  assert.ok(
+    pool.some((slug) => pokedex[slug]?.shape === "wings"),
+    "birds are `wings` and have faces"
+  );
+});

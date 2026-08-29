@@ -1,3 +1,36 @@
-node_modules/
-recordings/
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
 .env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# local Claude tooling (not part of the product)
+.agents/
+.claude/skills/
+
+.vercel
+.env*
+
+# Raw third-party avatar downloads. These ship 4K PNG texture sets (600MB+) and
+# must never be committed — downscale before anything goes in public/models/.
+/public/models/*-raw/
+/public/models/*/source/
+/public/models/*/textures/

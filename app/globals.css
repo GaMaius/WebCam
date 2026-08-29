@@ -1,0 +1,133 @@
+:root {
+  /* Warm paper surfaces — a wellness-lab notebook, not a dark-mode dashboard */
+  --bg-base: #fbf7ec;
+  --bg-page: #f5efe0;
+  --surface: #fffdf7;
+  --surface-2: #fffdf7;
+  --surface-3: #efe6cf;
+
+  /* Moss — primary accent: organic, vital-signal, ties the whole app to
+     "reading a living signal" rather than a generic tech-purple */
+  --accent: #4b6b3a;
+  --accent-strong: #395429;
+  --accent-soft: rgba(75, 107, 58, 0.12);
+  --accent-glow: rgba(75, 107, 58, 0.3);
+
+  /* Module + secondary accents */
+  --violet: #8c5a73;
+  /* Summary / report */
+  --green: #4b6b3a;
+  /* status dot */
+  --amber: #c08a2e;
+  /* gold — warm highlight */
+  --rose: #c4553a;
+  /* HeartPulse — coral/blood accent */
+
+  /* Text — warm ink, never pure black or pure gray */
+  --text: #1c1f15;
+  --text-dim: #565a48;
+  --text-muted: #8b8a73;
+
+  /* Lines & shadows — poster hairlines + a hard "sticker" offset shadow,
+     the one place this system spends its visual boldness */
+  --border: rgba(28, 31, 21, 0.14);
+  --border-strong: rgba(28, 31, 21, 0.55);
+  --shadow: 0 18px 44px rgba(28, 31, 21, 0.1);
+  --shadow-sm: 0 6px 18px rgba(28, 31, 21, 0.08);
+  --shadow-sticker: 4px 4px 0 rgba(28, 31, 21, 0.94);
+  --shadow-sticker-sm: 3px 3px 0 rgba(28, 31, 21, 0.94);
+
+  /* Geometry — the capsule/pill is the signature shape: a color swatch, a
+     vital sign, a medicine capsule, all at once */
+  --radius-lg: 28px;
+  --radius: 20px;
+  --radius-sm: 14px;
+  --radius-pill: 999px;
+
+  --font-sans: ui-sans-serif, "Pretendard Variable", Pretendard, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
+  --font-display: "Archivo Black", "Segoe UI Black", "Arial Black", Pretendard,
+    ui-sans-serif, "Noto Sans KR", sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo,
+    Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: radial-gradient(
+      900px 520px at 82% -10%,
+      rgba(75, 107, 58, 0.08),
+      transparent 60%
+    ),
+    radial-gradient(
+      760px 480px at 4% 108%,
+      rgba(196, 85, 58, 0.07),
+      transparent 62%
+    ),
+    var(--bg-page);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.1px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--accent-glow);
+  color: #fff;
+}
+
+/* Shared utility primitives */
+.vl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.vl-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

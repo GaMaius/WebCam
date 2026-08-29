@@ -1,0 +1,236 @@
+"use client";
+
+import React, { useRef } from "react";
+import type { BgStyle } from "@/lib/vrm/vrmScene";
+import type { TrackingMode } from "@/lib/vrm/kalidokitBridge";
+import { AVATAR_PRESETS, type AvatarPreset } from "@/lib/vrm/avatarPresets";
+import styles from "./VrmControlPanel.module.css";
+
+interface VrmControlPanelProps {
+  bgStyle: BgStyle;
+  onBgStyleChange: (style: BgStyle) => void;
+  onCustomVrmUpload: (file: File) => void;
+  vrmName: string;
+  isCustomLoaded: boolean;
+  onResetDefault: () => void;
+  onTakeSnapshot: () => void;
+  fps: number;
+  presetId: string;
+  onPresetChange: (preset: AvatarPreset) => void;
+  isLoadingAvatar?: boolean;
+  mode: TrackingMode;
+  onModeChange: (mode: TrackingMode) => void;
+  handCount: number;
+}
+
+export function VrmControlPanel({
+  bgStyle,
+  onBgStyleChange,
+  onCustomVrmUpload,
+  vrmName,
+  isCustomLoaded,
+  onResetDefault,
+  onTakeSnapshot,
+  fps,
+  presetId,
+  onPresetChange,
+  isLoadingAvatar = false,
+  mode,
+  onModeChange,
+  handCount,
+}: VrmControlPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // FBX/glTF rigs are adapted to a VRM humanoid on load (bone-name mapping +
+      // rest-pose fix); only VRM carries expressions.
+      if (/\.(vrm|fbx|glb|gltf)$/i.test(file.name)) {
+        onCustomVrmUpload(file);
+      } else {
+        alert(".vrm / .fbx / .glb 포맷의 3D 캐릭터 파일만 업로드할 수 있습니다.");
+      }
+    }
+  };
+
+  return (
+    <div className={styles.panel} style={{ backgroundColor: "#fffdf7", color: "#1c1f15" }}>
+      {/* Header Info */}
+      <div className={styles.panelHeader}>
+        <div className={styles.avatarNameGroup}>
+          <span className={styles.subText} style={{ color: "#7b52b9" }}>Active Avatar</span>
+          <h3 className={styles.vrmTitle} style={{ color: "#1c1f15" }}>{vrmName}</h3>
+        </div>
+        <div className={styles.fpsBadge} style={{ color: "#059669" }}>
+          <span className={styles.fpsDot} />
+          {Math.round(fps)} FPS
+        </div>
+      </div>
+
+      <hr className={styles.divider} />
+
+      {/* Controls Group */}
+      <div className={styles.controlGrid}>
+        {/* Tracking mode */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>트래킹 범위</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
+            {(
+              [
+                { id: "upper", label: "얼굴 + 손" },
+                { id: "full", label: "전신" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onModeChange(m.id)}
+                className={`${styles.modeBtn} ${mode === m.id ? styles.modeBtnActive : ""}`}
+                style={mode === m.id ? { color: "#fffdf7" } : { color: "#444838" }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <span className={styles.subText} style={{ color: "#7a7e68" }}>
+            {mode === "upper"
+              ? `표정(ARKit 52) + 손가락 · 인식된 손 ${handCount}개 · 다리는 움직이지 않음`
+              : "다리까지 구동 · 전신이 카메라에 들어와야 안정적"}
+          </span>
+        </div>
+
+        {/* Built-in avatars — pointless as a picker while there is only one. */}
+        {AVATAR_PRESETS.length > 1 && (
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>기본 제공 아바타</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
+            {AVATAR_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => onPresetChange(preset)}
+                disabled={isLoadingAvatar}
+                className={`${styles.modeBtn} ${
+                  !isCustomLoaded && presetId === preset.id ? styles.modeBtnActive : ""
+                }`}
+                style={
+                  !isCustomLoaded && presetId === preset.id
+                    ? { color: "#fffdf7" }
+                    : { color: "#444838" }
+                }
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <span className={styles.subText} style={{ color: "#7a7e68" }}>
+            {isLoadingAvatar
+              ? "아바타 불러오는 중…"
+              : AVATAR_PRESETS.find((p) => p.id === presetId)?.hint ?? ""}
+          </span>
+        </div>
+        )}
+
+        {/* Background Setting */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>배경 모드 (Studio / Chroma)</label>
+          <div className={styles.btnGroup} style={{ backgroundColor: "#fbf7ec" }}>
+            {(
+              [
+                { id: "dark", label: "스튜디오" },
+                { id: "chromakey", label: "크로마키" },
+                { id: "transparent", label: "투명" },
+              ] as const
+            ).map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => onBgStyleChange(mode.id)}
+                className={`${styles.modeBtn} ${
+                  bgStyle === mode.id ? styles.modeBtnActive : ""
+                }`}
+                style={{
+                  color: bgStyle === mode.id ? "#ffffff" : "#444838",
+                  backgroundColor: bgStyle === mode.id ? "#7b52b9" : "transparent"
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom VRM Upload */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>
+            커스텀 아바타 (.vrm / .fbx / .glb)
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".vrm,.fbx,.glb,.gltf"
+            className="hidden"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <div className={styles.uploadRow}>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className={styles.uploadBtn}
+              style={{ color: "#1c1f15", backgroundColor: "#fbf7ec" }}
+            >
+              <svg
+                width="16"
+                height="16"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
+              </svg>
+              3D 캐릭터 파일 불러오기
+            </button>
+            {isCustomLoaded && (
+              <button
+                onClick={onResetDefault}
+                className={styles.resetBtn}
+                style={{ color: "#dc2626" }}
+                title="기본 아바타로 복원"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Action Button */}
+      <button onClick={onTakeSnapshot} className={styles.captureBtn} style={{ color: "#ffffff", backgroundColor: "#7b52b9" }}>
+        <svg
+          width="20"
+          height="20"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M3 9a2 2 0 012-2h0.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+          />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
+          />
+        </svg>
+        현재 아바타 포즈 캡처 및 리포트 생성
+      </button>
+    </div>
+  );
+}
