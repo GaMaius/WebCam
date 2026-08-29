@@ -13,6 +13,8 @@
 | **PokéMatch** | 얼굴을 스캔해 시각적으로 가장 닮은 포켓몬 5마리를 찾기 | MobileCLIP2 임베딩 + 편향 제거 재랭킹 |
 | **VRM Capture** | 웹캠으로 얼굴·손·포즈를 실시간 추적해 3D 캐릭터(VRM·FBX)를 움직임 | MediaPipe + Kalidokit + three-vrm |
 
+> 홈 런처에는 위 4개 외에 **Gesture Synth**(Eric Wei 제작)가 제작자 허락을 받아 임베드되어 있습니다. 이 저장소의 작업물은 아닙니다.
+
 ---
 
 ## 기술 스택
