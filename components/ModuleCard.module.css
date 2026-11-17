@@ -1,0 +1,105 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px;
+  min-height: 236px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  box-shadow: var(--shadow-sticker);
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--card-accent);
+}
+.card:active {
+  transform: translate(0, 0);
+  box-shadow: 2px 2px 0 var(--card-accent);
+}
+
+/* Upcoming apps: visible but not clickable, so the roadmap can be shown
+   before a route exists. */
+.cardSoon {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+}
+.cardSoon:hover {
+  transform: none;
+  box-shadow: var(--shadow-sticker);
+}
+.ctaSoon {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.icon {
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--card-accent) 14%, var(--surface));
+  border: 2px solid var(--card-accent);
+  color: var(--card-accent);
+}
+.index {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.14em;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: auto;
+}
+.subtitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--card-accent);
+}
+.title {
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+.desc {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 9px 16px 9px 18px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--text);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 13.5px;
+  font-weight: 700;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.card:hover .cta {
+  background: var(--card-accent);
+  border-color: var(--card-accent);
+  color: #fff;
+}
