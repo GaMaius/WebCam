@@ -34,11 +34,19 @@ export default function VrmMotionPage() {
   const [flushKey, setFlushKey] = useState(0);
 
   // Motion Tracking Hook
-  const { isLoadingModels, fps, isFaceTracked, isPoseTracked, handCount } = useVrmMotionScan(
-    currentVrm,
-    videoRef,
-    mode
-  );
+  const {
+    isLoadingModels,
+    fps,
+    isFaceTracked,
+    isPoseTracked,
+    handCount,
+    calibration,
+    calibrationPhase,
+    calibrationCountdown,
+    startCalibration,
+    cancelCalibration,
+    resetCalibration,
+  } = useVrmMotionScan(currentVrm, videoRef, mode);
 
   // Keep the 3D framing in step with the tracking range.
   const handleModeChange = useCallback((next: TrackingMode) => {
@@ -157,6 +165,33 @@ export default function VrmMotionPage() {
             )}
           </div>
 
+          {/* Calibration overlay: countdown, then "hold still" while the
+              neutral pose is recorded. */}
+          {(calibrationPhase === "countdown" || calibrationPhase === "recording") && (
+            <div className={styles.calibOverlay}>
+              <div className={styles.calibCard}>
+                {calibrationPhase === "countdown" ? (
+                  <>
+                    <div className={styles.calibCount}>{calibrationCountdown}</div>
+                    <p className={styles.calibText}>
+                      화면 정면을 보고 편하게 앉아 주세요
+                      <br />
+                      평소 표정 그대로, 어깨 힘은 빼고요
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className={styles.calibRecording}>측정 중</div>
+                    <p className={styles.calibText}>그대로 잠깐만 멈춰 주세요</p>
+                  </>
+                )}
+                <button className={styles.calibCancel} onClick={cancelCalibration}>
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Live camera self-view (top-right PiP) */}
           <div className={styles.pip}>
             <CameraView
@@ -208,6 +243,11 @@ export default function VrmMotionPage() {
           mode={mode}
           onModeChange={handleModeChange}
           handCount={handCount}
+          isCalibrated={Boolean(calibration)}
+          calibrationPhase={calibrationPhase}
+          canCalibrate={!isLoadingModels && isFaceTracked}
+          onCalibrate={startCalibration}
+          onResetCalibration={resetCalibration}
         />
 
         {/* Capture Result Modal */}

@@ -3,6 +3,7 @@
 import React, { useRef } from "react";
 import type { BgStyle } from "@/lib/vrm/vrmScene";
 import type { TrackingMode } from "@/lib/vrm/kalidokitBridge";
+import type { CalibrationPhase } from "@/hooks/useVrmMotionScan";
 import { AVATAR_PRESETS, type AvatarPreset } from "@/lib/vrm/avatarPresets";
 import styles from "./VrmControlPanel.module.css";
 
@@ -21,6 +22,12 @@ interface VrmControlPanelProps {
   mode: TrackingMode;
   onModeChange: (mode: TrackingMode) => void;
   handCount: number;
+  isCalibrated: boolean;
+  calibrationPhase: CalibrationPhase;
+  /** False until the models are loaded and a face is in frame. */
+  canCalibrate: boolean;
+  onCalibrate: () => void;
+  onResetCalibration: () => void;
 }
 
 export function VrmControlPanel({
@@ -38,7 +45,13 @@ export function VrmControlPanel({
   mode,
   onModeChange,
   handCount,
+  isCalibrated,
+  calibrationPhase,
+  canCalibrate,
+  onCalibrate,
+  onResetCalibration,
 }: VrmControlPanelProps) {
+  const calibrating = calibrationPhase === "countdown" || calibrationPhase === "recording";
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,6 +85,47 @@ export function VrmControlPanel({
 
       {/* Controls Group */}
       <div className={styles.controlGrid}>
+        {/* Neutral-pose calibration (lib/vrm/calibration.ts) */}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} style={{ color: "#444838" }}>자세 보정</label>
+          <div className={styles.uploadRow}>
+            <button
+              onClick={onCalibrate}
+              disabled={!canCalibrate || calibrating}
+              className={styles.uploadBtn}
+              style={{
+                color: "#ffffff",
+                backgroundColor: canCalibrate && !calibrating ? "#7b52b9" : "#b8a9d4",
+                cursor: canCalibrate && !calibrating ? "pointer" : "not-allowed",
+              }}
+            >
+              {calibrating ? "보정 중…" : isCalibrated ? "다시 보정하기" : "보정 시작"}
+            </button>
+            {isCalibrated && !calibrating && (
+              <button
+                onClick={onResetCalibration}
+                className={styles.resetBtn}
+                style={{ color: "#dc2626" }}
+                title="보정값 지우기"
+              >
+                해제
+              </button>
+            )}
+          </div>
+          <span
+            className={styles.subText}
+            style={{ color: calibrationPhase === "failed" ? "#dc2626" : "#7a7e68" }}
+          >
+            {calibrationPhase === "failed"
+              ? "얼굴이 충분히 인식되지 않았어요. 카메라 정면에서 다시 시도해 주세요."
+              : !canCalibrate && !calibrating
+              ? "얼굴이 카메라에 잡히면 보정할 수 있어요."
+              : isCalibrated
+              ? "보정 적용 중 · 카메라 각도와 평소 표정을 기준점으로 씁니다"
+              : "카메라가 비스듬하거나 아바타가 고개를 들고 있다면 보정하세요 (약 5초)"}
+          </span>
+        </div>
+
         {/* Tracking mode */}
         <div className={styles.fieldGroup}>
           <label className={styles.label} style={{ color: "#444838" }}>트래킹 범위</label>

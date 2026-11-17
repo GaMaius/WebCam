@@ -5,6 +5,12 @@ import { vrmExpressionsFromBlendshapes, type BlendshapeCategory } from "./faceEx
 import { solveWristWorldQuaternion } from "./wristSolver";
 import { solveArmAim, applyArmAim } from "./armSolver";
 import {
+  applyBlendshapeBaseline,
+  subtractOffset,
+  type CalibrationProfile,
+  type CalibrationSample,
+} from "./calibration";
+import {
   applyHandRig,
   LERP_BODY,
   LERP_FACE,
@@ -58,12 +64,23 @@ export const _KalidokitForDebug = Kalidokit;
 // live in ./boneRig, which is importable without Kalidokit so they stay
 // unit-testable.
 
+/**
+ * Solves one frame and writes it to the avatar.
+ *
+ * `calibration` (optional) is the user's neutral pose — see calibration.ts. It
+ * is subtracted from the head and torso rotations and used as the zero point of
+ * each blendshape. The RAW (uncalibrated) solved values are returned so the
+ * caller can record a new calibration from them; recording calibrated values
+ * would make a second calibration subtract the first one twice.
+ */
 export function applyTrackingToVRM(
   vrm: MotionAvatar,
   frame: LandmarkFrameData,
-  mode: TrackingMode = "full"
-) {
-  if (!vrm) return;
+  mode: TrackingMode = "full",
+  calibration?: CalibrationProfile | null
+): CalibrationSample {
+  const sample: CalibrationSample = {};
+  if (!vrm) return sample;
 
   // 1. Face — head/neck rotation + blink/mouth expressions.
   if (frame.faceLandmarks && frame.faceLandmarks.length > 0) {
@@ -78,14 +95,20 @@ export function applyTrackingToVRM(
       // three-vrm's normalized bones. Tilting your head right used to tilt the
       // avatar's left. So the head flips Z too — every solver-derived bone in
       // this file now does, which is one rule instead of an exception.
-      rigFaceRotation(vrm, "head", faceRig.head as Rot, 1, LERP_FACE);
-      rigFaceRotation(vrm, "neck", faceRig.head as Rot, 0.4, LERP_FACE);
+      const rawHead = faceRig.head as Rot;
+      sample.head = { x: rawHead.x, y: rawHead.y, z: rawHead.z };
+      const head = subtractOffset(rawHead, calibration?.head);
+      rigFaceRotation(vrm, "head", head, 1, LERP_FACE);
+      rigFaceRotation(vrm, "neck", head, 0.4, LERP_FACE);
 
       if (vrm.expressionManager) {
         // Prefer ARKit blendshapes; they're steadier and cover brows/gaze that
         // Kalidokit doesn't solve at all.
         if (frame.faceBlendshapes && frame.faceBlendshapes.length > 0) {
-          const weights = vrmExpressionsFromBlendshapes(frame.faceBlendshapes);
+          sample.blendshapes = frame.faceBlendshapes;
+          const weights = vrmExpressionsFromBlendshapes(
+            applyBlendshapeBaseline(frame.faceBlendshapes, calibration?.blendshapes)
+          );
           for (const [name, value] of Object.entries(weights)) {
             vrm.expressionManager.setValue(name, value);
           }
@@ -135,9 +158,15 @@ export function applyTrackingToVRM(
 
       if (poseRig) {
         if (gates.torso) {
-          rigRotation(vrm, "hips", poseRig.Hips?.rotation as Rot, 0.7, LERP_BODY, true);
-          rigRotation(vrm, "spine", poseRig.Spine as Rot, 0.45, LERP_BODY, true);
-          rigRotation(vrm, "chest", poseRig.Spine as Rot, 0.25, LERP_BODY, true);
+          const rawHips = poseRig.Hips?.rotation as Rot | undefined;
+          const rawSpine = poseRig.Spine as Rot | undefined;
+          if (rawHips) sample.hips = { x: rawHips.x, y: rawHips.y, z: rawHips.z };
+          if (rawSpine) sample.spine = { x: rawSpine.x, y: rawSpine.y, z: rawSpine.z };
+          const hips = rawHips && subtractOffset(rawHips, calibration?.hips);
+          const spine = rawSpine && subtractOffset(rawSpine, calibration?.spine);
+          rigRotation(vrm, "hips", hips, 0.7, LERP_BODY, true);
+          rigRotation(vrm, "spine", spine, 0.45, LERP_BODY, true);
+          rigRotation(vrm, "chest", spine, 0.25, LERP_BODY, true);
         }
 
         if (gates.arms) {
@@ -173,6 +202,7 @@ export function applyTrackingToVRM(
   // so the wrist's world->local conversion sees the final forearm rotation.
   applyHand(vrm, frame.leftHandLandmarks, frame.leftHandWorldLandmarks, "Left");
   applyHand(vrm, frame.rightHandLandmarks, frame.rightHandWorldLandmarks, "Right");
+  return sample;
 }
 
 /**

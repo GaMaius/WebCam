@@ -10,7 +10,7 @@
 > 리포 루트의 `AGENTS.md`는 **이 파일을 가리키는 포인터**다(예전엔 손으로 맞추는 복사본이었는데 내용이 어긋나서 정리함) —
 > 컨텍스트는 여기 한 곳만 고치면 된다.
 
-## 현재 상태 (2026-08-06 기준)
+## 현재 상태 (2026-11-17 기준)
 
 - **VL-1** 파운데이션: 디자인 시스템(라벤더 헤이즈 `#92A9E1` + 소프트 그래파이트 다크 테마, `app/globals.css`), 랜딩 페이지, `CameraView` 전/후면 전환 컴포넌트
 - **VL-2** HeartPulse: **TS-CAN 신경망**(주엔진) + POS(폴백), MediaPipe FaceLandmarker, 자체 FFT로 BPM/스트레스/HRV 계산. **2026-08-08에 DeepPhys를 버리고 전면 교체함** — 아래 참조.
@@ -18,6 +18,14 @@
 - **VL-4** ~~통합 결과지~~ → **앱별 결과 저장으로 전환**(2026-07-24): 제품을 "독립 앱 런처" 모델로 재구성. 홈은 `lib/apps.ts` 레지스트리를 렌더링(앱 추가 = 항목 1개 + `app/<slug>` 라우트). 각 앱이 자기 결과를 Canvas 이미지로 저장/공유(`components/ResultActions.tsx` + `lib/resultCard.ts`의 `drawHeartPulseCard`/`drawPersonalFrameCard`, Web Share API + 다운로드 폴백). 두 앱을 합치던 `/summary` 라우트와 `lib/summaryCard.ts`는 제거함(이 모델과 충돌). `ModuleCard`는 `status:"soon"`으로 준비 중 앱 표시 지원.
 - **VL-5** Vercel 배포: 완료, 아래 참고
 - **VL-6** PokéMatch("닮은 포켓몬 찾기") — 앱 완성, 자산 커밋됨, 브라우저 end-to-end 검증됨(실기기 최종확인만 남음):
+  - **⚠️⚠️ 2단계 판정 — 리마스터 (2026-11-17, 사용자 "더 얼굴과 비슷한 포켓몬을 추천해줄 수 있도록")**: 1차 판정은 종을 **기억으로** 고른다(얼굴은 보지만 각 포켓몬 생김새는 떠올려야 함) — 그게 약한 고리였다. 그래서 **2차 = 시각 비교 재정렬**을 추가했다.
+    - 클라이언트가 **콘택트 시트 한 장**을 그린다(`lib/pokematch/contactSheet.ts`): 왼쪽 448² 얼굴 + 오른쪽 1차 픽 8종의 **공식 일러스트**를 번호 패널(4×2, 224px)로. `/api/pokematch/judge`에 `mode:"rerank"`로 보내면 모델이 **두 그림을 나란히 보고** 순서를 다시 매기고 비교에 근거한 이유를 새로 쓴다(`llmJudge.ts`의 `rerankPicks`).
+    - **이미지 한 장으로 합친 이유**: 이미지는 픽셀과 무관한 **정액 과금**(실측)이라 한 장이면 비용이 1장분이다. 2차 호출은 추론 `none`, `max_completion_tokens` 1000. 1차+2차가 한 키의 8K TPM 안에 들어가도록 잡았다(**미실측** — 실키로 `?debug`의 `RERANK … usage`를 읽을 것).
+    - **절대 결과를 나쁘게 만들지 않는다**: 시트 실패·429·이상한 응답이면 1차 순서를 그대로 쓴다. 2차는 **패널 번호로만 답하므로 새 종을 끌어올 수 없고**, `normalizeRerank`가 항상 완전한 순열을 만든다. 이유 문장은 1차와 같은 `sanitizeReason`을 탄다.
+    - 1차 프롬프트도 바꿨다: **`traits`(가장 두드러진 특징 2~3개, 영어)를 먼저 쓰고** 그에 맞춰 고르게 했다(7c를 출력으로 강제 — 추론을 꺼둔 상태라 "먼저 정하라"는 말만으론 계획이 안 됐다) + 7d "한 특징만 맞는 종보다 전체 인상이 맞는 종". `traits`는 2차 프롬프트에 힌트로 넘어간다.
+    - 이후 4단계 조립(풀 선호 → 로컬 → …)은 그대로이고, **재정렬된 순서**가 1단계 안의 순서가 된다.
+    - `?debug`: `TRAITS`, `RERANK ok/failed (provider · usage, 패널 수, KB)`, `RERANKED ORDER`.
+    - ⚠️ 2차도 **얼굴 사진을 Groq로 보낸다**(같은 crop을 시트에 넣음). UI 안내 문구 불일치는 위 항목대로 사용자 지시로 **그대로 둠**.
   - **⚠️⚠️ 최종 판정자는 비전 LLM이다 (2026-08-09, 사용자 요청 "포켓매치가 좀 별로다" → "이미지로 분석하는 게 아니지?")**: 아래의 z-score 랭킹 엔진은 이제 **폴백**이고, 실제로 보이는 결과는 **Groq의 `qwen/qwen3.6-27b`(비전)** 가 **잘라낸 얼굴 사진을 직접 보고** 고른다.
     - **⚠️ 모델 선택에 여지가 없다**: Groq의 비전 라인업은 `qwen/qwen3.6-27b` **하나뿐**이다 — Llama 4 Scout·Maverick은 둘 다 deprecated(Maverick은 gpt-oss-120b로 대체 권고). 처음엔 사용자가 지정한 `openai/gpt-oss-120b`로 만들었는데 **그건 텍스트 전용이라 사진을 못 봤고**, 그래서 얼굴 측정값을 글로 적어 보내는 방식이었다. 지금은 비전으로 교체됐다. `GROQ_MODEL`로 덮어쓸 수 있다(요청은 평범한 OpenAI 호환 chat + `image_url`).
     - **⚠️ 이 라우트는 사용자 얼굴 사진을 제3자(Groq)로 보낸다**: 얼굴만 448² JPEG(q0.85, ~40KB)로 잘라 보낸다(`hooks/usePokematchScan.ts`의 `captureJudgeImage`, 임베딩용 crop보다 넓은 `JUDGE_CROP_COEF` 1.55 — 머리·턱선이 잘리면 닮은꼴 판단이 안 된다). ⚠️ **UI 안내 문구는 "사진이 아니라 측정된 수치만 전달된다"고 되어 있어 실제 동작과 어긋난다** — 2026-08-09에 사용자가 **문구를 그대로 두라고 두 번 명시**해서 되돌렸다. 임의로 다시 고치지 말고, 고쳐야 한다고 판단되면 사용자에게 먼저 물을 것.
@@ -129,6 +137,15 @@
     5. 표시 `percent`는 여전히 얼굴별 z 표준화 후 `zToPercent(sz, topSz)` 매핑.
   - **검증 스크립트**: 위 결정들은 `scratch/`의 파이썬 진단 스크립트(`diagnose_hubs_detailed.py`, `test_cluster_dedup.py`, `test_dampen_monsters.py`, `diagnose_user_result.py` 등)로 실제 테스터 임베딩에 대해 확인함. `scratch/`는 리포에 커밋돼 있으니 재조정할 때 그대로 재사용할 것.
 - **VL-7** VrmMotion("VRM Capture", `/vrmmotion`) — 실시간 3D 모션캡쳐 앱, 2026-08-02~06 구현. 아래는 **현재 상태 기준**이며, ⚠️ 표시는 실기기에서 한 번씩 틀렸다가 고친 것들이라 **되돌리기 전에 반드시 읽을 것**.
+  - **⚠️⚠️ 리마스터 (2026-11-17, 사용자 "인식을 더 잘하고 모션캡쳐가 원활히, 보정기능 포함")** — 순서대로 적용된다: 검출 → **One Euro 스무딩** → (손) **좌우 연속성 배정** → 드롭아웃 홀드 → 솔브 + **보정 적용**.
+    1. **One Euro 필터** (`lib/vrm/oneEuro.ts`): 얼굴·포즈(이미지/월드)·양손(이미지/월드) 랜드마크를 스트림별로 필터링. 고정 slerp는 정지 시 떨림과 이동 시 지연 사이의 타협이었고 fps에 따라 성질이 바뀌었다. One Euro는 속도에 따라 컷오프가 바뀌어 **멈춰 있을 땐 강하게, 빠를 땐 거의 안** 거른다. 300ms 이상 끊겼다 다시 잡히면 **새 위치로 스냅**(옛 위치에서 미끄러져 오지 않게).
+       - 그래서 **`LERP_*`를 올렸다**(body 0.45 / leg 0.32 / face 0.5 / hand 0.6). ⚠️ 옛 값(0.3/0.22/0.3/0.4)으로 되돌리면 **이중 스무딩**이라 굼떠진다.
+    2. **손 좌우 배정** (`lib/vrm/handAssign.ts`): MediaPipe handedness 라벨은 프레임마다 뒤집히고 가끔 **두 손 다 같은 라벨**이 붙는다. 예전엔 라벨을 그대로 믿어서 **손이 한 프레임씩 반대 팔로 튀었다**. 이제 직전 손목 위치(500ms 이내)와 가까운 쪽으로 배정하고, 증거가 없을 때만 라벨을 쓴다. 라벨이 같으면 화면 x 순서(원본 프레임에서 x가 큰 쪽 = "Left").
+    3. **랜드마커 신뢰도**: pose/hand의 presence·tracking 임계를 0.5 → **0.4**(검출은 0.5 유지). VIDEO 모드에서 임계 밑으로 떨어지면 트랙을 버리고 전체 재검출로 가서 느리고 튄다. 얼굴 랜드마커는 **다른 앱과 공유**라 건드리지 않았다.
+    4. **자세 보정** (`lib/vrm/calibration.ts`, UI는 컨트롤 패널 "자세 보정" + 스테이지 카운트다운 오버레이): 3초 카운트다운 → 1.5초 동안 중립 자세 기록 → **중앙값**으로 프로필 생성. ① 머리 회전 오프셋(노트북 카메라가 눈보다 낮아 아바타가 계속 고개를 든 상태였다) ② 골반·척추 오프셋 ③ **blendshape 개인 기준선**(`(v−base)/(1−base)` — 평소 눈이 살짝 감긴 사람·입이 살짝 벌어진 사람의 아바타가 반쯤 감기거나 놀란 표정이 되던 문제). 오프셋은 **0.6rad 상한**, 기준선은 **0.5 상한**(측정 중 눈 감음 방지). 얼굴 프레임 12개 미만이면 실패 처리. 프로필은 localStorage(`visionlab.vrmmotion.calibration.v1`, try/catch)에 저장되고 "해제"로 지운다.
+       - ⚠️ 브리지(`applyTrackingToVRM`)는 **보정 전 원시값**을 샘플로 돌려준다 — 보정된 값을 기록하면 재보정 때 오프셋이 이중으로 빠진다.
+       - 회전 오프셋은 Euler 성분 차감(근사) — 작은 각도(카메라 각도 수준)에선 충분하다.
+    - 검증: `tests/vrmTrackingQuality.test.ts`(One Euro가 정지 떨림을 줄이고 빠른 이동에서 고정 lerp보다 덜 늦는지, 재획득 스냅, 라벨 뒤집힘·중복 라벨, 보정 중앙값·상한·기준선 리매핑·저장 왕복). **실기기 미확인**: 체감 부드러움, 보정 후 머리 방향, 손 튐 감소.
   - **파이프라인**(`모션캡쳐기획.md`): 웹캠 → MediaPipe(**Face + Pose + Hand** Landmarker) → **Kalidokit**(좌표→회전값 solve) → **@pixiv/three-vrm**(정규화 휴머노이드 본에 주입) → three.js 렌더. 의존성: `three ^0.185`, `@pixiv/three-vrm ^3.5`, `kalidokit ^1.1.5`.
   - **파일**: `app/vrmmotion/page.tsx`, `components/vrm/{VrmCanvas,VrmControlPanel}.tsx`, `hooks/useVrmMotionScan.ts`(rAF 루프·모델 스케줄링·FPS), `lib/{face,pose,hand}Landmarker.ts`, `lib/resultCard.ts`의 `drawVrmMotionCard`, 그리고 `lib/vrm/`:
     - `vrmScene.ts` — `VRMSceneManager`(렌더러/카메라/OrbitControls/배경, `loadAvatar`·`loadPreset`·`setFraming`)
@@ -215,7 +232,7 @@
     7. **검증·도구**: `tests/humanoidRigger.test.ts`(이름 매핑, 스케일/접지, A-pose→T-pose, 정면 180°, 그리고 **"어댑트된 A-pose 리그가 T-pose 리그와 동일하게 반응한다"** 는 end-to-end 등가성 — 보정을 끄면 손 위치가 **0.226m** 어긋난다). 새 모델은 `node scratch/inspect_avatar_rig.mjs <model.fbx>`로 브라우저·웹캠 없이 미리 볼 수 있다(본 매핑·자동 보정·rest 방향·side-raise가 손을 올리는지·스켈레톤 복사본 중첩 여부).
     8. **⚠️ 메시별 스켈레톤 복사본**: 스파이더맨 FBX처럼 메시마다 스켈레톤 사본이 있는 파일은 사본들이 **0 오프셋으로 중첩**돼 최상단이 전체의 조상이다. 그래서 `collectBones`의 **최소 depth 선택**이 전체 메시를 구동한다 — 이 선택 규칙을 바꾸면 일부 메시만 움직인다.
 
-- **VL-8** Gesture Synth(`/gesturesynth`) — **유일하게 우리가 만들지 않은 앱**. Eric Wei(indecisiveeric.com)의 손 제스처 신스를 **본인 허락을 받아** 그대로 임베드했다(2026-08-08). 포팅이 아니라 임베드다.
+- **VL-8** Gesture Synth(`/gesturesynth`) — **⚠️ 2026-11-17 사용자 요청으로 홈 런처에서 숨김**(`lib/apps.ts`의 `hidden: true`, 홈은 `VISIBLE_APPS`를 렌더). 라우트는 그대로 살아 있어 직접 링크로는 열린다. **유일하게 우리가 만들지 않은 앱**. Eric Wei(indecisiveeric.com)의 손 제스처 신스를 **본인 허락을 받아** 그대로 임베드했다(2026-08-08). 포팅이 아니라 임베드다.
   - **자산**: `public/gesture-synth/`에 `index.html` + `assets/index-B3fG-YTY.js`(147KB). 번들은 **바이트 단위로 원본과 동일**(md5 확인). **번들은 절대 수정하지 않고**, HTML만 고친다: ① 스크립트 경로를 `/assets/…` → `./assets/…`(서브디렉터리에서 서빙하므로) ② 아래 카메라 shim 추가 ③ `?` 도움말·시작 오버레이 문구를 **한국어로 번역**(+ `lang="ko"`, 도움말 폰트를 sans로 — 한국어는 monospace 대응 서체가 거의 없어 원본 `monospace`가 깨져 보였다). 번들이 참조하는 건 **id뿐**(`helpModal`·`closeHelp`·`startOverlay`…)이라 문구 교체는 안전하고, 실제로 `?`·`✕` 동작을 브라우저에서 확인했다. 번역 내용은 신뢰가 아니라 **번들의 제스처 코드와 대조해서** 맞췄다. 로컬 자산은 이 둘뿐이고(이미지·폰트·오디오 파일 0개, CSS는 HTML 인라인), MediaPipe wasm(**0.10.14**)과 손 모델은 런타임에 절대 URL로 CDN에서 받는다. env·API키·도메인 하드코딩 없음.
   - **⚠️ 카메라 소유권 — 이 임베드의 핵심**: 그 앱은 자기가 `getUserMedia`를 호출한다. 그러면 이 사이트의 "웹캠이 켜진 모든 순간은 녹화·업로드" 규칙이 깨진다(스트림 2개 + 권한창 2번 + 녹화 안 되는 세션). 그래서 `index.html` 최상단 인라인 shim이 `getUserMedia`를 **호스트가 준 스트림을 반환하는 함수로 교체**하고, 페이지는 `CameraView`의 스트림을 `window.__visionlabStream`에 올린다.
     - **postMessage가 아니라 객체 직접 참조**다 — `MediaStream`은 structured-clone이 안 돼서 postMessage하면 예외가 난다. same-origin(우리가 서빙)이라 직접 읽기가 된다.

@@ -21,6 +21,9 @@ export interface AppMeta {
   /** "live" apps are clickable; "soon" renders a disabled "준비 중" card so
    * upcoming apps can be announced before their route exists. Defaults to live. */
   status?: "live" | "soon";
+  /** Hidden apps keep their route (a direct link still works) but are left off
+   * the home launcher. */
+  hidden?: boolean;
 }
 
 export const APPS: AppMeta[] = [
@@ -44,7 +47,7 @@ export const APPS: AppMeta[] = [
     slug: "pokematch",
     title: "PokéMatch",
     subtitle: "AI · 닮은꼴",
-    desc: "얼굴을 스캔해 측정한 특징을 GPT-OSS 120B가 읽고, 가장 닮은 포켓몬 5마리를 이유와 함께 골라줍니다.",
+    desc: "얼굴 사진을 비전 AI가 직접 보고, 포켓몬 일러스트와 나란히 비교해 가장 닮은 5마리를 이유와 함께 골라줍니다.",
     accent: "#d64541",
     icon: "pokeball",
   },
@@ -60,6 +63,8 @@ export const APPS: AppMeta[] = [
     // The only app here that isn't ours: Eric Wei's Gesture Synth, embedded with
     // permission (see app/gesturesynth/page.tsx).
     slug: "gesturesynth",
+    // Hidden from the launcher (2026-11-17, user request). The route still works.
+    hidden: true,
     title: "Gesture Synth",
     subtitle: "제스처 · 신스",
     desc: "양손 제스처로 코드를 짚고 음색과 필터를 바꾸는 악기입니다. 왼손이 코드, 오른손이 화성과 음량을 만듭니다.",
@@ -68,3 +73,6 @@ export const APPS: AppMeta[] = [
   },
 ];
 
+
+/** What the home launcher renders. */
+export const VISIBLE_APPS = APPS.filter((app) => !app.hidden);

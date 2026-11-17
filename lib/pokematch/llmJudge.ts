@@ -11,6 +11,7 @@ import { PICK_COUNT } from "./judgeProtocol";
 import { applyPickGuards } from "./pickGuards";
 import { buildCuratedPool } from "./curatedPool";
 import type { FaceFeatures } from "./faceFeatures";
+import { buildContactSheet } from "./contactSheet";
 
 export interface JudgePick {
   slug: string;
@@ -32,6 +33,8 @@ export interface JudgeResult {
    * shown is indistinguishable from the model returning one, and those need
    * opposite fixes. */
   dropped?: string;
+  /** The distinctive features the model wrote down before picking (English). */
+  traits?: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
    * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
@@ -129,10 +132,86 @@ export async function judgeCandidates(
       provider: typeof data.provider === "string" ? data.provider : undefined,
       usage: typeof data.usage === "string" ? data.usage : undefined,
       dropped: typeof data.dropped === "string" ? data.dropped : undefined,
+      traits: typeof data.traits === "string" ? data.traits : undefined,
     };
   } catch (err) {
     const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";
     return { picks: [], model: "", reason };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface RerankOutcome {
+  picks: JudgePick[];
+  /** For ?debug: what happened, and the provider/usage when it ran. */
+  note: string;
+}
+
+const RERANK_TIMEOUT_MS = 30_000;
+
+/**
+ * Stage 2: shows the model the face next to the stage-1 picks' artwork and lets
+ * it re-sort them by actual visual resemblance (see judgeProtocol.ts for why).
+ *
+ * Never makes things worse: on any failure — art didn't load, rate limit,
+ * unusable answer — the stage-1 picks come back unchanged. A rerank reason
+ * replaces the stage-1 reason when it survived sanitizing, since it was written
+ * while looking at both pictures; otherwise the stage-1 reason is kept.
+ */
+export async function rerankPicks(
+  faceDataUrl: string,
+  picks: JudgePick[],
+  traits = ""
+): Promise<RerankOutcome> {
+  if (picks.length < 2) return { picks, note: "skipped (fewer than 2 picks)" };
+  const sheet = await buildContactSheet(faceDataUrl, picks.map((p) => p.slug));
+  if (!sheet) return { picks, note: "skipped (contact sheet failed)" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RERANK_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/pokematch/judge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        mode: "rerank",
+        image: sheet.dataUrl,
+        count: sheet.slugs.length,
+        traits,
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as {
+      order?: { n: number; reason?: string }[];
+      provider?: string;
+      usage?: string;
+      error?: string;
+      keys?: string;
+    } | null;
+    if (!res.ok || !Array.isArray(data?.order) || data!.order.length === 0) {
+      return {
+        picks,
+        note: `failed http_${res.status}${data?.error ? `:${data.error}` : ""}${data?.keys ? ` (${data.keys})` : ""}`,
+      };
+    }
+    const byslug = new Map(picks.map((p) => [p.slug, p]));
+    const reordered: JudgePick[] = [];
+    for (const { n, reason } of data!.order) {
+      const slug = sheet.slugs[n - 1];
+      const original = slug ? byslug.get(slug) : undefined;
+      if (!original || reordered.some((p) => p.slug === slug)) continue;
+      reordered.push({ slug, reason: reason || original.reason });
+    }
+    // Picks whose art failed to load weren't on the sheet; keep them, last.
+    for (const p of picks) if (!reordered.some((r) => r.slug === p.slug)) reordered.push(p);
+    return {
+      picks: reordered,
+      note: `ok (${data!.provider ?? "?"}${data!.usage ? ` · ${data!.usage}` : ""}, ${sheet.slugs.length} panels, ${Math.round(sheet.dataUrl.length / 1024)}KB)`,
+    };
+  } catch (err) {
+    const why = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";
+    return { picks, note: `failed ${why}` };
   } finally {
     clearTimeout(timer);
   }

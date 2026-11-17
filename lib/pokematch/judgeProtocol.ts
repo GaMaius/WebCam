@@ -186,7 +186,8 @@ Rules:
 4. They must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
 5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") over and over — that is making one pick repeatedly, not several. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
-7c. Commit to the answer. Before choosing, decide which two or three features of this face are the most distinctive, then pick the species that match THOSE. Shown the same photo again you should reach the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
+7c. Commit to the answer. FIRST write "traits": the two or three most distinctive features of this face, in a few English words (e.g. "sharp upturned eyes, dark messy hair, narrow jaw"). THEN pick species that match THOSE traits. Shown the same photo again you should reach the same traits and the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
+7d. Match the whole impression, not one feature. A good pick resembles the face in silhouette, eye shape AND colouring/mood together; a species that shares only one feature is a weak pick.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
 8. Write each reason as ONE Korean sentence, at most 45 characters, citing at least one thing actually visible in the photo. Example: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다"
@@ -196,7 +197,7 @@ Rules:
 12. Never guess the person's identity or name any real person.
 
 Output exactly one JSON object, nothing else. No scores.
-{"picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
+{"traits":"...","picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
 
 
 /** English scaffolding for the same reason SYSTEM_PROMPT is English — Korean
@@ -469,4 +470,119 @@ export function unresolvedNames(raw: unknown, candidates: CandidateInput[]): str
     if (clean) out.push(clean);
   }
   return out.slice(0, 12);
+}
+
+
+/**
+ * The traits the model committed to before picking (rule 7c), for ?debug and
+ * as context for the rerank pass. English, short, and stripped to plain text
+ * since it travels back to the browser and into a second prompt.
+ */
+export function extractTraits(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+  const t = (raw as { traits?: unknown }).traits;
+  const text = Array.isArray(t) ? t.join(", ") : typeof t === "string" ? t : "";
+  return text.replace(/[^A-Za-z0-9 ,.'/-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+// ─── Stage 2: visual rerank ────────────────────────────────────────────────
+//
+// ⚠️ WHY A SECOND PASS EXISTS (2026-11-17 remaster, user: "더 얼굴과 비슷한 포켓몬")
+//
+// Stage 1 names species from MEMORY. The model sees the face but has to recall
+// what each Pokemon looks like, and its ranking among the many species that
+// fit "dark hair, sharp eyes" is close to a coin flip (three scans of one face
+// once gave 15 different species with zero repeats). That is the weak link.
+//
+// Stage 2 removes the recall step: the client draws ONE contact sheet — the
+// face on the left, the stage-1 picks' official artwork in numbered panels on
+// the right — and the model ranks the panels by how much the person actually
+// resembles each one, side by side. Comparing two pictures is the thing a
+// vision model is genuinely good at; remembering 1,000 designs is not.
+//
+// One composite image, not nine: this endpoint charges images a flat fee
+// regardless of pixel size (measured: 448px and 256px both cost exactly the
+// same), so a single wide sheet costs one image. That keeps scan + rerank
+// inside one key's 8K-per-minute budget.
+//
+// Only the ORDER (and fresh, comparison-grounded reasons) come back. Species
+// identity is fixed by the panel numbers, so the rerank cannot introduce a
+// species — it can only re-sort what stage 1 already resolved.
+
+export const RERANK_MIN = 2;
+export const RERANK_MAX = REQUEST_PICK_COUNT;
+
+/** ⚠️ English for the same tokenizer reason as SYSTEM_PROMPT. */
+export function buildRerankSystemPrompt(count: number): string {
+  return `You judge a "which Pokemon do you look like" service. The image is a contact sheet: the LEFT square is a real person's face; the panels on the RIGHT show ${count} Pokemon, each with its number in the corner.
+
+Rank ALL ${count} numbered Pokemon by how much the person resembles each one, most similar first. Compare the pictures directly, side by side:
+- overall impression and mood (sharp, gentle, cool, cheerful, sleepy, fierce)
+- face/head silhouette and proportions
+- eye shape and eye expression
+- colour harmony: the person's hair and skin colours against the Pokemon's palette
+- hairstyle against ears, crest or head shape
+A Pokemon that matches several of these together beats one that matches a single feature. Ignore pose and background.
+
+For each, write ONE Korean sentence (at most 35 characters) naming what the person and that Pokemon visibly share. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
+
+Output exactly one JSON object, nothing else:
+{"order":[{"n":3,"reason":"..."},{"n":1,"reason":"..."}]}`;
+}
+
+export function buildRerankMessages(sheetDataUrl: string, count: number, traits = "") {
+  const hint = traits ? `
+An earlier look at this face noted: ${traits}. Use it only if the picture agrees.` : "";
+  return [
+    { role: "system", content: buildRerankSystemPrompt(count) },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: `Rank panels 1-${count} by resemblance to the face, best first.${hint}` },
+        { type: "image_url", image_url: { url: sheetDataUrl } },
+      ],
+    },
+  ];
+}
+
+export interface RerankEntry {
+  /** 1-based panel number. */
+  n: number;
+  reason: string;
+}
+
+/**
+ * The model's ranking as a COMPLETE permutation of 1..count.
+ *
+ * Out-of-range and duplicate numbers are dropped; any panel the model left out
+ * is appended in its original (stage-1) order with an empty reason. Returns []
+ * when the model ranked nothing at all, so the caller keeps stage 1 untouched
+ * instead of applying a "ranking" that is really just the original order.
+ */
+export function normalizeRerank(raw: unknown, count: number): RerankEntry[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { order?: unknown })?.order)
+    ? (raw as { order: unknown[] }).order
+    : Array.isArray((raw as { picks?: unknown })?.picks)
+    ? (raw as { picks: unknown[] }).picks
+    : [];
+  const out: RerankEntry[] = [];
+  const seen = new Set<number>();
+  for (const item of list) {
+    let n = NaN;
+    let reason = "";
+    if (typeof item === "number" || typeof item === "string") n = Number(item);
+    else if (item && typeof item === "object") {
+      const o = item as Record<string, unknown>;
+      n = Number(o.n ?? o.number ?? o.panel ?? o.index);
+      if (typeof o.reason === "string") reason = sanitizeReason(o.reason);
+    }
+    if (!Number.isInteger(n) || n < 1 || n > count || seen.has(n)) continue;
+    seen.add(n);
+    out.push({ n, reason });
+  }
+  if (out.length === 0) return [];
+  for (let n = 1; n <= count; n++) if (!seen.has(n)) out.push({ n, reason: "" });
+  return out;
 }

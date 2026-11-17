@@ -1,7 +1,7 @@
 import { ModuleCard } from "@/components/ModuleCard";
 import { AppIcon } from "@/components/AppIcon";
 import { PokematchPrefetch } from "@/components/PokematchPrefetch";
-import { APPS } from "@/lib/apps";
+import { VISIBLE_APPS } from "@/lib/apps";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -22,7 +22,7 @@ export default function Home() {
       </header>
 
       <section className={styles.grid} aria-label="앱 목록">
-        {APPS.map((app, i) => (
+        {VISIBLE_APPS.map((app, i) => (
           <ModuleCard
             key={app.slug}
             href={`/${app.slug}`}

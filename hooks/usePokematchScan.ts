@@ -17,7 +17,7 @@ import {
   type PokematchMatch,
 } from "@/lib/pokematch/matcher";
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
-import { judgeCandidates, picksToMatches } from "@/lib/pokematch/llmJudge";
+import { judgeCandidates, picksToMatches, rerankPicks } from "@/lib/pokematch/llmJudge";
 import { buildCuratedPool, buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
@@ -323,13 +323,24 @@ export function usePokematchScan() {
       // look the same from the outside.
       let rawPicks: { slug: string; reason: string }[] = [];
       let droppedNames = "";
+      let traits = "";
+      let rerankNote = "";
+      let rerankedPicks: { slug: string; reason: string }[] = [];
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
         rawPicks = judged.picks;
         droppedNames = judged.dropped ?? "";
+        traits = judged.traits ?? "";
         if (judged.picks.length > 0) {
-          result = picksToMatches(judged.picks, pokedex, candidates, features);
+          // Stage 2 (2026-11-17 remaster): the model compares the face with the
+          // picks' actual artwork side by side and re-sorts them. Stage 1 named
+          // species from memory; this is the step that looks at both pictures.
+          // Falls back to the stage-1 order on any failure.
+          const reranked = await rerankPicks(image, judged.picks, traits);
+          rerankedPicks = reranked.picks;
+          rerankNote = reranked.note;
+          result = picksToMatches(reranked.picks, pokedex, candidates, features);
           judgeModel =
             (judged.provider ? `${judged.model} · ${judged.provider}` : judged.model) +
             (judged.usage ? ` · ${judged.usage}` : "");
@@ -417,6 +428,15 @@ export function usePokematchScan() {
             (rawPicks.length
               ? `MODEL RAW PICKS (${rawPicks.length}개 통과):\n` +
                 rawPicks.map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`).join("\n") +
+                `\n`
+              : "") +
+            (traits ? `TRAITS (1차가 먼저 적은 특징): ${traits}\n` : "") +
+            (rerankNote ? `RERANK (2차 시각 비교): ${rerankNote}\n` : "") +
+            (rerankNote.startsWith("ok")
+              ? `RERANKED ORDER:\n` +
+                rerankedPicks
+                  .map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`)
+                  .join("\n") +
                 `\n`
               : "") +
             // Named but refused by the curated pool. A short result means one

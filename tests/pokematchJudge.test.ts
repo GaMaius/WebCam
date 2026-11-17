@@ -350,3 +350,50 @@ test("the summary says whether the limit was per-minute or per-day", () => {
   assert.doesNotMatch(perMinute, /_per_day/);
   assert.match(perMinute, /_per_minute/);
 });
+
+// ── Stage 2: visual rerank (2026-11-17) ────────────────────────────────────
+import {
+  buildRerankMessages,
+  buildRerankSystemPrompt,
+  extractTraits,
+  normalizeRerank,
+} from "../lib/pokematch/judgeProtocol.ts";
+
+test("rerank: returns a complete permutation, model order first", () => {
+  const out = normalizeRerank({ order: [{ n: 3, reason: "눈매가 닮았어요" }, { n: 1 }] }, 4);
+  assert.deepEqual(out.map((e) => e.n), [3, 1, 2, 4]);
+  assert.equal(out[0].reason, "눈매가 닮았어요");
+  assert.equal(out[2].reason, "");
+});
+
+test("rerank: drops out-of-range and duplicate panels", () => {
+  const out = normalizeRerank({ order: [{ n: 9 }, { n: 2 }, { n: 2 }, { n: 0 }, "1"] }, 3);
+  assert.deepEqual(out.map((e) => e.n), [2, 1, 3]);
+});
+
+test("rerank: nothing ranked means no reorder at all", () => {
+  assert.deepEqual(normalizeRerank({ order: [] }, 5), []);
+  assert.deepEqual(normalizeRerank(null, 5), []);
+  assert.deepEqual(normalizeRerank({ order: [{ n: 99 }] }, 5), []);
+});
+
+test("rerank: reasons go through the same sanitizer as stage 1", () => {
+  const out = normalizeRerank({ order: [{ n: 1, reason: "통통한 볼이 닮았어요" }, { n: 2, reason: "Pikachu처럼" }] }, 2);
+  assert.equal(out[0].reason, "");
+  assert.equal(out[1].reason, "");
+});
+
+test("rerank: the prompt is English and carries the sheet as one image", () => {
+  assert.ok(!/[가-힣]{6,}/.test(buildRerankSystemPrompt(8).replace(/"[^"]*"/g, "")));
+  const msgs = buildRerankMessages("data:image/jpeg;base64,AAAA", 8, "sharp eyes");
+  const parts = msgs[1].content as { type: string }[];
+  assert.equal(parts.filter((p) => p.type === "image_url").length, 1);
+});
+
+test("traits: extracted as short plain text", () => {
+  assert.equal(extractTraits({ traits: "sharp eyes, dark hair", picks: [] }), "sharp eyes, dark hair");
+  assert.equal(extractTraits({ traits: ["round face", "soft eyes"] }), "round face, soft eyes");
+  assert.equal(extractTraits({ picks: [] }), "");
+  assert.ok(extractTraits({ traits: "x".repeat(500) }).length <= 160);
+  assert.ok(!extractTraits({ traits: "<script>" }).includes("<"));
+});

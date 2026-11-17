@@ -19,15 +19,62 @@ import {
   planFrame,
   type HeldValue,
 } from "@/lib/vrm/frameSchedule";
+import {
+  LandmarkSmoother,
+  SMOOTH_FACE,
+  SMOOTH_IMAGE,
+  SMOOTH_WORLD,
+} from "@/lib/vrm/oneEuro";
+import { assignHands, type HandDetection, type LastWrists } from "@/lib/vrm/handAssign";
+import {
+  buildCalibration,
+  parseCalibration,
+  type CalibrationProfile,
+  type CalibrationSample,
+} from "@/lib/vrm/calibration";
 
 // Which stages run on which frame, and how stale a reading may get, both live in
 // lib/vrm/frameSchedule.ts — including why the hands get every frame and the
 // face/pose alternate rather than the other way round.
+//
+// Per frame, in order: detect → One Euro smoothing (lib/vrm/oneEuro.ts) → for
+// hands, side assignment by continuity (lib/vrm/handAssign.ts) → hold on
+// dropout → solve + apply with the user's calibration (lib/vrm/calibration.ts).
 
 /** One hand's two landmark sets, kept together so a held hand keeps both. */
 interface HandReading {
   landmarks: NonNullable<LandmarkFrameData["leftHandLandmarks"]>;
   world?: LandmarkFrameData["leftHandWorldLandmarks"];
+}
+
+/** Where the calibration lives between visits. Per-viewer convenience only —
+ * losing it just means calibrating again. */
+const CALIBRATION_STORAGE_KEY = "visionlab.vrmmotion.calibration.v1";
+/** Countdown before recording, so the user can sit back and look at the screen. */
+export const CALIBRATION_COUNTDOWN_MS = 3000;
+/** How long the neutral pose is recorded. */
+export const CALIBRATION_RECORD_MS = 1500;
+/** A hand's last wrist position counts as continuity evidence only briefly. */
+const WRIST_MEMORY_MS = 500;
+
+export type CalibrationPhase = "idle" | "countdown" | "recording" | "failed";
+
+function loadStoredCalibration(): CalibrationProfile | null {
+  try {
+    const raw = window.localStorage.getItem(CALIBRATION_STORAGE_KEY);
+    return raw ? parseCalibration(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeCalibration(profile: CalibrationProfile | null) {
+  try {
+    if (profile) window.localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(profile));
+    else window.localStorage.removeItem(CALIBRATION_STORAGE_KEY);
+  } catch {
+    // Private mode / blocked storage: calibration still works for this visit.
+  }
 }
 
 export function useVrmMotionScan(
@@ -57,13 +104,13 @@ export function useVrmMotionScan(
   // wrist and the metric one for the finger angles.
   const leftHandRef = useRef<HeldValue<HandReading>>(EMPTY_HELD);
   const rightHandRef = useRef<HeldValue<HandReading>>(EMPTY_HELD);
-  // The face also runs on alternate frames now, so its last reading is reused in
-  // between. No timed hold: a lost face should drop the expressions promptly.
+  // The face's last reading is reused on frames where it isn't detected. No
+  // timed hold: a lost face should drop the expressions promptly.
   const lastFaceRef = useRef<{
     landmarks: NonNullable<LandmarkFrameData["faceLandmarks"]>;
     blendshapes?: LandmarkFrameData["faceBlendshapes"];
   } | null>(null);
-  // The pose runs on alternate frames, so it's always held for at least a frame.
+  // The pose runs every third frame, so it's always held for a couple of frames.
   const poseRef = useRef<
     HeldValue<{
       landmarks: NonNullable<LandmarkFrameData["poseLandmarks"]>;
@@ -72,6 +119,100 @@ export function useVrmMotionScan(
   >(EMPTY_HELD);
   const modeRef = useRef(mode);
   modeRef.current = mode;
+
+  // One Euro smoothing per landmark stream. Separate instances per stream and
+  // per hand side: their units and dynamics differ, and a filter must never
+  // blend one hand's history into the other's.
+  const smoothersRef = useRef({
+    face: new LandmarkSmoother(SMOOTH_FACE),
+    poseImage: new LandmarkSmoother(SMOOTH_IMAGE),
+    poseWorld: new LandmarkSmoother(SMOOTH_WORLD),
+    leftImage: new LandmarkSmoother(SMOOTH_IMAGE),
+    leftWorld: new LandmarkSmoother(SMOOTH_WORLD),
+    rightImage: new LandmarkSmoother(SMOOTH_IMAGE),
+    rightWorld: new LandmarkSmoother(SMOOTH_WORLD),
+  });
+  const lastWristsRef = useRef<{ wrists: LastWrists; at: { Left: number; Right: number } }>({
+    wrists: {},
+    at: { Left: 0, Right: 0 },
+  });
+
+  // ── Calibration ──────────────────────────────────────────────────────────
+  // The profile is read in the rAF loop through a ref; state is for the UI.
+  const [calibration, setCalibration] = useState<CalibrationProfile | null>(null);
+  const calibrationRef = useRef<CalibrationProfile | null>(null);
+  const [calibrationPhase, setCalibrationPhase] = useState<CalibrationPhase>("idle");
+  const [calibrationCountdown, setCalibrationCountdown] = useState(0);
+  const calibrationPhaseRef = useRef<CalibrationPhase>("idle");
+  const calibrationSamplesRef = useRef<CalibrationSample[]>([]);
+  const calibrationTimersRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    const stored = loadStoredCalibration();
+    calibrationRef.current = stored;
+    setCalibration(stored);
+  }, []);
+
+  const setPhase = useCallback((phase: CalibrationPhase) => {
+    calibrationPhaseRef.current = phase;
+    setCalibrationPhase(phase);
+  }, []);
+
+  const clearCalibrationTimers = useCallback(() => {
+    calibrationTimersRef.current.forEach((t) => window.clearTimeout(t));
+    calibrationTimersRef.current = [];
+  }, []);
+
+  /** Countdown → record the neutral pose → build and store the profile. */
+  const startCalibration = useCallback(() => {
+    clearCalibrationTimers();
+    calibrationSamplesRef.current = [];
+    setPhase("countdown");
+    const seconds = Math.ceil(CALIBRATION_COUNTDOWN_MS / 1000);
+    setCalibrationCountdown(seconds);
+    const timers = calibrationTimersRef.current;
+    for (let i = 1; i < seconds; i++) {
+      timers.push(window.setTimeout(() => setCalibrationCountdown(seconds - i), i * 1000));
+    }
+    timers.push(
+      window.setTimeout(() => {
+        calibrationSamplesRef.current = [];
+        setCalibrationCountdown(0);
+        setPhase("recording");
+      }, CALIBRATION_COUNTDOWN_MS)
+    );
+    timers.push(
+      window.setTimeout(() => {
+        const profile = buildCalibration(calibrationSamplesRef.current);
+        calibrationSamplesRef.current = [];
+        if (profile) {
+          calibrationRef.current = profile;
+          setCalibration(profile);
+          storeCalibration(profile);
+          setPhase("idle");
+        } else {
+          // Not enough face frames — usually the face left the camera.
+          setPhase("failed");
+        }
+      }, CALIBRATION_COUNTDOWN_MS + CALIBRATION_RECORD_MS)
+    );
+  }, [clearCalibrationTimers, setPhase]);
+
+  const cancelCalibration = useCallback(() => {
+    clearCalibrationTimers();
+    calibrationSamplesRef.current = [];
+    setCalibrationCountdown(0);
+    setPhase("idle");
+  }, [clearCalibrationTimers, setPhase]);
+
+  const resetCalibration = useCallback(() => {
+    cancelCalibration();
+    calibrationRef.current = null;
+    setCalibration(null);
+    storeCalibration(null);
+  }, [cancelCalibration]);
+
+  useEffect(() => clearCalibrationTimers, [clearCalibrationTimers]);
 
   // 1. Initialize MediaPipe Models
   useEffect(() => {
@@ -104,7 +245,12 @@ export function useVrmMotionScan(
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!new URLSearchParams(window.location.search).has("debug")) return;
-    (window as unknown as { __vrmDebug?: unknown }).__vrmDebug = { vrm, applyTrackingToVRM, Kalidokit: _KalidokitForDebug };
+    (window as unknown as { __vrmDebug?: unknown }).__vrmDebug = {
+      vrm,
+      applyTrackingToVRM,
+      Kalidokit: _KalidokitForDebug,
+      calibration: () => calibrationRef.current,
+    };
   }, [vrm]);
 
   // 2. Continuous Tracking Loop
@@ -119,23 +265,25 @@ export function useVrmMotionScan(
 
         const frameData: LandmarkFrameData = {};
         const plan = planFrame(tickRef.current, fpsRef.current);
+        const sm = smoothersRef.current;
+        let faceDetectedThisFrame = false;
 
-        // Face tracking — head/neck plus the ARKit blendshapes. Halved rate: a
-        // head turns far slower than a finger, and LERP_FACE smooths it anyway.
+        // Face tracking — head/neck plus the ARKit blendshapes.
         if (faceLandmarker && plan.face) {
           try {
             const faceResult = faceLandmarker.detectForVideo(video, now);
             if (faceResult.faceLandmarks && faceResult.faceLandmarks.length > 0) {
               lastFaceRef.current = {
-                landmarks: faceResult.faceLandmarks[0],
+                landmarks: sm.face.smooth(faceResult.faceLandmarks[0], now)!,
                 blendshapes: faceResult.faceBlendshapes?.[0]?.categories,
               };
+              faceDetectedThisFrame = true;
               setIsFaceTracked(true);
             } else {
               lastFaceRef.current = null;
               setIsFaceTracked(false);
             }
-          } catch (err) {
+          } catch {
             // ignore frame error
           }
         }
@@ -150,12 +298,17 @@ export function useVrmMotionScan(
             const landmarks = poseResult.landmarks?.[0];
             poseRef.current = holdLandmarks(
               poseRef.current,
-              landmarks ? { landmarks, world: poseResult.worldLandmarks?.[0] } : undefined,
+              landmarks
+                ? {
+                    landmarks: sm.poseImage.smooth(landmarks, now)!,
+                    world: sm.poseWorld.smooth(poseResult.worldLandmarks?.[0], now),
+                  }
+                : undefined,
               now,
               POSE_HOLD_MS
             );
             setIsPoseTracked(Boolean(poseRef.current.value));
-          } catch (err) {
+          } catch {
             // ignore frame error
           }
         }
@@ -167,24 +320,48 @@ export function useVrmMotionScan(
         if (handLandmarker && plan.hands) {
           try {
             const handResult = handLandmarker.detectForVideo(video, now);
-            let left: HandReading | undefined;
-            let right: HandReading | undefined;
             const hands = handResult.landmarks ?? [];
-            hands.forEach((lm, i) => {
+            const detections: HandDetection<HandReading>[] = hands.map((lm, i) => ({
+              label: handResult.handedness?.[i]?.[0]?.categoryName,
+              wrist: { x: lm[0].x, y: lm[0].y },
               // The metric landmarks share the normalized list's indexing; the
               // bridge needs both (normalized wrist, metric finger angles).
-              const reading: HandReading = { landmarks: lm, world: handResult.worldLandmarks?.[i] };
-              // MediaPipe's handedness label is used verbatim as the VRM side.
-              const label = handResult.handedness?.[i]?.[0]?.categoryName;
-              if (label === "Left") left = reading;
-              else if (label === "Right") right = reading;
-            });
+              reading: { landmarks: lm, world: handResult.worldLandmarks?.[i] },
+            }));
+
+            // Side by continuity first, MediaPipe's label second: the label
+            // flips frame to frame, hands don't teleport.
+            const memory = lastWristsRef.current;
+            const recent: LastWrists = {};
+            if (memory.wrists.Left && now - memory.at.Left < WRIST_MEMORY_MS) {
+              recent.Left = memory.wrists.Left;
+            }
+            if (memory.wrists.Right && now - memory.at.Right < WRIST_MEMORY_MS) {
+              recent.Right = memory.wrists.Right;
+            }
+            const assigned = assignHands(detections, recent);
+            for (const side of ["Left", "Right"] as const) {
+              const w = assigned.wrists[side];
+              if (w) {
+                memory.wrists[side] = w;
+                memory.at[side] = now;
+              }
+            }
+
+            const left: HandReading | undefined = assigned.Left && {
+              landmarks: sm.leftImage.smooth(assigned.Left.landmarks, now)!,
+              world: sm.leftWorld.smooth(assigned.Left.world, now),
+            };
+            const right: HandReading | undefined = assigned.Right && {
+              landmarks: sm.rightImage.smooth(assigned.Right.landmarks, now)!,
+              world: sm.rightWorld.smooth(assigned.Right.world, now),
+            };
             leftHandRef.current = holdLandmarks(leftHandRef.current, left, now, HAND_HOLD_MS);
             rightHandRef.current = holdLandmarks(rightHandRef.current, right, now, HAND_HOLD_MS);
             setHandCount(
               (leftHandRef.current.value ? 1 : 0) + (rightHandRef.current.value ? 1 : 0)
             );
-          } catch (err) {
+          } catch {
             // ignore frame error
           }
         }
@@ -193,9 +370,18 @@ export function useVrmMotionScan(
         frameData.rightHandLandmarks = rightHandRef.current.value?.landmarks;
         frameData.rightHandWorldLandmarks = rightHandRef.current.value?.world;
 
-        // Apply tracking solved result to VRM avatar
         if (vrm) {
-          applyTrackingToVRM(vrm, frameData, modeRef.current);
+          const sample = applyTrackingToVRM(
+            vrm,
+            frameData,
+            modeRef.current,
+            calibrationRef.current
+          );
+          // Only frames with a FRESH face detection count: the held face is
+          // reused between detections and would just duplicate samples.
+          if (calibrationPhaseRef.current === "recording" && faceDetectedThisFrame) {
+            calibrationSamplesRef.current.push(sample);
+          }
         }
 
         // FPS calculation. Kept in a ref as well, because the scheduler reads it
@@ -231,5 +417,11 @@ export function useVrmMotionScan(
     isFaceTracked,
     isPoseTracked,
     handCount,
+    calibration,
+    calibrationPhase,
+    calibrationCountdown,
+    startCalibration,
+    cancelCalibration,
+    resetCalibration,
   };
 }

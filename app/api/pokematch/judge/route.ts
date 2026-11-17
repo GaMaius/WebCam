@@ -4,7 +4,12 @@ import {
   buildMessages,
   describeUnusable,
   extractJson,
+  extractTraits,
   isUsableImage,
+  buildRerankMessages,
+  normalizeRerank,
+  RERANK_MAX,
+  RERANK_MIN,
   normalizePicks,
   sanitizeCandidates,
   summarizeRateLimit,
@@ -241,6 +246,7 @@ async function attempt(
       model: string;
       usage?: string;
       dropped?: string;
+      traits?: string;
     }
   | { ok: false; status: number; error: string; detail?: string }
 > {
@@ -320,11 +326,13 @@ async function attempt(
   // opposite — widen what resolves, or ask the model differently. The names it
   // wanted but we refused go back with the answer.
   const dropped = unresolvedNames(parsed, candidates);
+  const traits = extractTraits(parsed);
   return {
     ok: true,
     picks,
     model: provider.model,
     usage: tokens,
+    ...(traits ? { traits } : {}),
     ...(dropped.length ? { dropped: dropped.join(",") } : {}),
   };
 }
@@ -355,11 +363,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const { image, description, candidates: rawCandidates } = (body ?? {}) as {
+  const { image, description, candidates: rawCandidates, mode, count, traits } = (body ?? {}) as {
     image?: unknown;
     description?: unknown;
     candidates?: unknown;
+    mode?: unknown;
+    count?: unknown;
+    traits?: unknown;
   };
+
+  if (mode === "rerank") {
+    return rerank(configured, image, count, traits);
+  }
 
   if (!isUsableImage(image)) {
     return NextResponse.json({ error: "missing or oversized face image" }, { status: 400 });
@@ -421,6 +436,8 @@ export async function POST(request: Request) {
         // whether the answer came from the thinking pass or the direct retry.
         provider: `${provider.label}/${plan.label}`,
         usage: result.usage,
+        // The distinctive features it committed to before picking (rule 7c).
+        ...(result.traits ? { traits: result.traits } : {}),
         // Species it named that the pool refused. Present only when some were.
         ...(result.dropped ? { dropped: result.dropped } : {}),
         // Present only when an earlier key had to be given up on.
@@ -448,5 +465,93 @@ export async function POST(request: Request) {
       keys: summarizeFailures(failures),
     },
     { status: last?.status ?? 502 }
+  );
+}
+
+
+// ─── Stage 2: visual rerank ────────────────────────────────────────────────
+// See the long comment above buildRerankSystemPrompt in judgeProtocol.ts for
+// why this exists. Transport only: the client draws the contact sheet, this
+// forwards it, and normalizeRerank turns the answer into a permutation.
+
+/** Short answer (an order + 8 short Korean reasons ≈ 800 tokens) with thinking
+ * off. Kept small because it is RESERVED against the same per-minute budget the
+ * stage-1 call just used — see the max_completion_tokens note above. */
+const RERANK_PLAN: CallPlan = { label: "rerank", reasoning: "none", maxTokens: 1000 };
+
+async function rerank(
+  configured: Provider[],
+  image: unknown,
+  rawCount: unknown,
+  rawTraits: unknown
+) {
+  if (!isUsableImage(image)) {
+    return NextResponse.json({ error: "missing or oversized sheet image" }, { status: 400 });
+  }
+  const count = Number(rawCount);
+  if (!Number.isInteger(count) || count < RERANK_MIN || count > RERANK_MAX) {
+    return NextResponse.json({ error: "bad panel count" }, { status: 400 });
+  }
+  const traits =
+    typeof rawTraits === "string" ? rawTraits.replace(/[^A-Za-z0-9 ,.'/-]/g, " ").slice(0, 160) : "";
+  const messages = buildRerankMessages(image, count, traits.trim());
+
+  // Prefer a different key from the one that most likely served stage 1 —
+  // random start spreads the two calls across buckets on average.
+  const start = Math.floor(Math.random() * configured.length);
+  const order = configured.map((_, i) => configured[(start + i) % configured.length]);
+  const failures: { label: string; error: string; detail?: string }[] = [];
+
+  for (const provider of order) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await callProvider(provider, messages, RERANK_PLAN, controller.signal);
+    } catch (err) {
+      console.error(`pokematch rerank: ${provider.label} request failed:`, err);
+      failures.push({ label: provider.label, error: "judge_unavailable" });
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      console.error(`pokematch rerank: ${provider.label} responded`, res.status, raw);
+      failures.push({
+        label: provider.label,
+        error: res.status === 429 ? "rate_limited_upstream" : "judge_unavailable",
+        detail: res.status === 429 ? summarizeRateLimit(raw, res.headers.get("retry-after")) : undefined,
+      });
+      continue;
+    }
+    const payload = (await res.json().catch(() => null)) as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    } | null;
+    const content = payload?.choices?.[0]?.message?.content ?? "";
+    const parsed = extractJson(content);
+    const ranked = normalizeRerank(parsed, count);
+    const u = payload?.usage;
+    if (ranked.length === 0) {
+      failures.push({
+        label: provider.label,
+        error: "judge_unusable",
+        detail: describeUnusable(content, parsed),
+      });
+      continue;
+    }
+    return NextResponse.json({
+      order: ranked,
+      model: provider.model,
+      provider: `${provider.label}/${RERANK_PLAN.label}`,
+      usage: u ? `prompt=${u.prompt_tokens} completion=${u.completion_tokens}` : undefined,
+    });
+  }
+
+  // The client keeps the stage-1 order on any failure, so this only feeds ?debug.
+  return NextResponse.json(
+    { error: failures.at(-1)?.error ?? "judge_unavailable", keys: summarizeFailures(failures) },
+    { status: failures.some((f) => f.error === "rate_limited_upstream") ? 429 : 502 }
   );
 }

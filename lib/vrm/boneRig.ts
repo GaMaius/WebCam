@@ -15,10 +15,17 @@ export type Rot = { x: number; y: number; z: number; rotationOrder?: string };
 
 // Smoothing + deadzone to kill micro-jitter while keeping response snappy.
 export const DEADZONE_RAD = 0.02; // ~1.1° — ignore sub-threshold jitter
-export const LERP_BODY = 0.3;
-export const LERP_LEG = 0.22; // extra damping so legs don't pop
-export const LERP_FACE = 0.3;
-export const LERP_HAND = 0.4; // fingers should feel snappy; they're small and fast
+// ⚠️ Raised 2026-11-17 when the landmarks started going through a One Euro
+// filter first (lib/vrm/oneEuro.ts). These slerps used to be the only
+// smoothing, so they had to be low enough to hide jitter — and at 0.3 per frame
+// that cost ~100ms of lag on every motion. With jitter removed upstream (and
+// adaptively: smoothing only while still), the slerp only has to soften what
+// the filter lets through, so it can follow much more closely. Lowering these
+// back to the old values now double-smooths and makes the avatar feel sluggish.
+export const LERP_BODY = 0.45;
+export const LERP_LEG = 0.32; // extra damping so legs don't pop
+export const LERP_FACE = 0.5;
+export const LERP_HAND = 0.6; // fingers should feel snappy; they're small and fast
 
 /** MediaPipe's handedness label — the ANATOMICAL hand, which is what Kalidokit's
  * solver needs to pick its palm points and clamp ranges. */

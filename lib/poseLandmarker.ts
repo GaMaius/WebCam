@@ -19,6 +19,14 @@ async function createPoseLandmarker(delegate: "GPU" | "CPU"): Promise<PoseLandma
     },
     runningMode: "VIDEO",
     numPoses: 1,
+    // Lower presence/tracking thresholds than the 0.5 defaults: in VIDEO mode a
+    // pose that drops below them is thrown away and re-detected from scratch,
+    // which is both slower and jumpier than keeping a slightly unsure track.
+    // Detection stays at 0.5 so a new pose still needs real evidence. Per-limb
+    // visibility gating downstream (resolvePoseGates) still rejects weak joints.
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.4,
+    minTrackingConfidence: 0.4,
   });
 }
 

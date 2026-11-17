@@ -18,6 +18,12 @@ async function createHandLandmarker(delegate: "GPU" | "CPU"): Promise<HandLandma
     },
     runningMode: "VIDEO",
     numHands: 2,
+    // Same reasoning as poseLandmarker.ts: keep an existing track a little
+    // longer instead of dropping to full re-detection, which is where hands
+    // used to flicker out during fast motion or when edge-on to the camera.
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.4,
+    minTrackingConfidence: 0.4,
   });
 }
 
