@@ -397,3 +397,29 @@ test("traits: extracted as short plain text", () => {
   assert.ok(extractTraits({ traits: "x".repeat(500) }).length <= 160);
   assert.ok(!extractTraits({ traits: "<script>" }).includes("<"));
 });
+
+// ── Model selection (2026-11-17: qwen3.6 was retired and took the judge down) ──
+import {
+  DEFAULT_JUDGE_MODEL,
+  resolveJudgeModel,
+  upstreamErrorCode,
+} from "../lib/pokematch/judgeProtocol.ts";
+
+test("model: retired or text-only IDs are replaced even when pinned by env", () => {
+  assert.equal(resolveJudgeModel("qwen/qwen3.6-27b"), DEFAULT_JUDGE_MODEL);
+  assert.equal(resolveJudgeModel("openai/gpt-oss-120b"), DEFAULT_JUDGE_MODEL);
+  assert.equal(resolveJudgeModel(undefined), DEFAULT_JUDGE_MODEL);
+  assert.equal(resolveJudgeModel("  "), DEFAULT_JUDGE_MODEL);
+  assert.equal(resolveJudgeModel("some/new-vision-model"), "some/new-vision-model");
+  assert.notEqual(DEFAULT_JUDGE_MODEL, "qwen/qwen3.6-27b");
+});
+
+test("upstream errors keep only the machine code", () => {
+  const body = JSON.stringify({
+    error: { code: "model_decommissioned", message: "org_123 secret details", type: "invalid_request_error" },
+  });
+  assert.equal(upstreamErrorCode(400, body), "upstream_400:model_decommissioned");
+  assert.equal(upstreamErrorCode(401, '{"error":{"type":"invalid_api_key"}}'), "upstream_401:invalid_api_key");
+  assert.equal(upstreamErrorCode(503, "<html>"), "upstream_503");
+  assert.ok(!upstreamErrorCode(400, body).includes("org_123"));
+});

@@ -586,3 +586,67 @@ export function normalizeRerank(raw: unknown, count: number): RerankEntry[] {
   for (let n = 1; n <= count; n++) if (!seen.has(n)) out.push({ n, reason: "" });
   return out;
 }
+
+// ─── Model selection ───────────────────────────────────────────────────────
+//
+// ⚠️⚠️ WHY THIS EXISTS (2026-11-17): Groq retired `qwen/qwen3.6-27b` on
+// 2026-09-14. From that day EVERY judge request failed and every scan quietly
+// fell back to the local ranker. Users saw "AI가 고른 결과가 아니에요" over and
+// over, and nothing said why, because a non-429 upstream error was reported as
+// a bare "judge_unavailable".
+//
+// Two defences:
+//   1. A model ID we KNOW is retired, or that can't see images, is replaced
+//      with the current default even when an env var pins it. GROQ_MODEL set
+//      once in Vercel would otherwise keep the feature dead after the code
+//      moved on. (Every model on this list fails 100% of requests here, so
+//      overriding the operator's choice can only help.)
+//   2. upstreamErrorCode puts Groq's own error code (model_decommissioned,
+//      model_not_found, invalid_api_key …) into ?debug, so the next retirement
+//      is diagnosed in one scan instead of two months.
+//
+// Groq's vision lineup is all Preview (no production vision model as of
+// 2026-11): qwen/qwen3.8-27b and an enterprise-only Muse model. Preview models
+// get retired, so expect to edit this again — check
+// https://console.groq.com/docs/deprecations when ?debug shows
+// "model_decommissioned" or "model_not_found".
+
+export const DEFAULT_JUDGE_MODEL = "qwen/qwen3.8-27b";
+
+/** Model IDs this endpoint must never send to. Retired ones answer with an
+ * error; text-only ones reject the image. */
+export const UNUSABLE_JUDGE_MODELS: Record<string, string> = {
+  "qwen/qwen3.6-27b": "retired 2026-09-14",
+  "meta-llama/llama-4-scout-17b-16e-instruct": "retired",
+  "meta-llama/llama-4-maverick-17b-128e-instruct": "retired",
+  "openai/gpt-oss-120b": "text-only",
+  "openai/gpt-oss-20b": "text-only",
+  "llama-3.3-70b-versatile": "text-only",
+  "llama-3.1-8b-instant": "text-only",
+};
+
+/** The configured model, or the default when it is unset or known-unusable. */
+export function resolveJudgeModel(configured: string | undefined): string {
+  const id = configured?.trim();
+  if (!id || UNUSABLE_JUDGE_MODELS[id]) return DEFAULT_JUDGE_MODEL;
+  return id;
+}
+
+/**
+ * HTTP status plus the provider's error code, from an OpenAI-style error body
+ * ({"error":{"code":"model_decommissioned","type":…,"message":…}}). Only the
+ * short machine code is kept — the message can echo request details or the
+ * organization, and this string reaches the browser.
+ */
+export function upstreamErrorCode(status: number, body: string): string {
+  let code = "";
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: unknown; type?: unknown } };
+    const raw = parsed?.error?.code ?? parsed?.error?.type;
+    if (typeof raw === "string") code = raw;
+  } catch {
+    // not JSON
+  }
+  code = code.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 40);
+  return code ? `upstream_${status}:${code}` : `upstream_${status}`;
+}

@@ -13,6 +13,8 @@ import {
   normalizePicks,
   sanitizeCandidates,
   summarizeRateLimit,
+  resolveJudgeModel,
+  upstreamErrorCode,
   unresolvedNames,
 } from "@/lib/pokematch/judgeProtocol";
 
@@ -52,9 +54,10 @@ export const maxDuration = 60;
 //   GROQ_API_KEY   / JUDGE_API_URL   / GROQ_MODEL     primary
 //   GROQ_API_KEY_2 / JUDGE_API_URL_2 / JUDGE_MODEL_2  fallback
 const DEFAULT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-// Groq's vision lineup is thin: Llama 4 Scout and Maverick are both deprecated,
-// leaving Qwen 3.6 27B as the multimodal option.
-const DEFAULT_MODEL = "qwen/qwen3.6-27b";
+// The model is chosen by resolveJudgeModel (judgeProtocol.ts): it defaults to
+// Groq's current vision model and refuses IDs known to be retired or
+// text-only, even when an env var pins one. ⚠️ qwen/qwen3.6-27b was retired on
+// 2026-09-14 and took the whole feature down silently for two months.
 
 interface Provider {
   label: string;
@@ -74,7 +77,7 @@ function providers(): Provider[] {
       label: "primary",
       url: process.env.JUDGE_API_URL || DEFAULT_API_URL,
       key: primaryKey,
-      model: process.env.GROQ_MODEL || process.env.JUDGE_MODEL || DEFAULT_MODEL,
+      model: resolveJudgeModel(process.env.GROQ_MODEL || process.env.JUDGE_MODEL),
     });
   }
   const secondKey = process.env.GROQ_API_KEY_2 || process.env.JUDGE_API_KEY_2;
@@ -83,7 +86,7 @@ function providers(): Provider[] {
       label: "secondary",
       url: process.env.JUDGE_API_URL_2 || DEFAULT_API_URL,
       key: secondKey,
-      model: process.env.JUDGE_MODEL_2 || process.env.GROQ_MODEL || DEFAULT_MODEL,
+      model: resolveJudgeModel(process.env.JUDGE_MODEL_2 || process.env.GROQ_MODEL),
     });
   }
   return out;
@@ -278,7 +281,9 @@ async function attempt(
         detail: summarizeRateLimit(raw, res.headers.get("retry-after")),
       };
     }
-    return { ok: false, status: 502, error: "judge_unavailable" };
+    // ⚠️ Carry the provider's error code to ?debug. A bare "judge_unavailable"
+    // hid a retired model for two months (see resolveJudgeModel).
+    return { ok: false, status: 502, error: "judge_unavailable", detail: upstreamErrorCode(res.status, raw) };
   }
 
   const payload = (await res.json().catch(() => null)) as {
@@ -521,7 +526,10 @@ async function rerank(
       failures.push({
         label: provider.label,
         error: res.status === 429 ? "rate_limited_upstream" : "judge_unavailable",
-        detail: res.status === 429 ? summarizeRateLimit(raw, res.headers.get("retry-after")) : undefined,
+        detail:
+          res.status === 429
+            ? summarizeRateLimit(raw, res.headers.get("retry-after"))
+            : upstreamErrorCode(res.status, raw),
       });
       continue;
     }

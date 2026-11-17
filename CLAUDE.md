@@ -18,7 +18,12 @@
 - **VL-4** ~~통합 결과지~~ → **앱별 결과 저장으로 전환**(2026-07-24): 제품을 "독립 앱 런처" 모델로 재구성. 홈은 `lib/apps.ts` 레지스트리를 렌더링(앱 추가 = 항목 1개 + `app/<slug>` 라우트). 각 앱이 자기 결과를 Canvas 이미지로 저장/공유(`components/ResultActions.tsx` + `lib/resultCard.ts`의 `drawHeartPulseCard`/`drawPersonalFrameCard`, Web Share API + 다운로드 폴백). 두 앱을 합치던 `/summary` 라우트와 `lib/summaryCard.ts`는 제거함(이 모델과 충돌). `ModuleCard`는 `status:"soon"`으로 준비 중 앱 표시 지원.
 - **VL-5** Vercel 배포: 완료, 아래 참고
 - **VL-6** PokéMatch("닮은 포켓몬 찾기") — 앱 완성, 자산 커밋됨, 브라우저 end-to-end 검증됨(실기기 최종확인만 남음):
-  - **⚠️⚠️ 2단계 판정 — 리마스터 (2026-11-17, 사용자 "더 얼굴과 비슷한 포켓몬을 추천해줄 수 있도록")**: 1차 판정은 종을 **기억으로** 고른다(얼굴은 보지만 각 포켓몬 생김새는 떠올려야 함) — 그게 약한 고리였다. 그래서 **2차 = 시각 비교 재정렬**을 추가했다.
+  - **⚠️⚠️⚠️ 판정 모델 = `qwen/qwen3.8-27b` (2026-11-17, 사용자 "AI로 자꾸 안 돌아간다")**: Groq가 **`qwen/qwen3.6-27b`를 2026-09-14에 퇴역**시켰고, 그날부터 **모든 판정 요청이 실패해서 약 두 달간 모든 스캔이 로컬 폴백**이었다. 프로덕션에 합성 이미지로 직접 요청해 확인했다: `primary/direct=judge_unavailable secondary/think=judge_unavailable`(2.2초, 429 아님).
+    - 원인이 안 보였던 이유: 429가 아닌 업스트림 오류를 맨 `judge_unavailable`로만 돌려줬다. 이제 `upstreamErrorCode`가 **Groq의 오류 코드**(`upstream_404:model_not_found`, `model_decommissioned`, `invalid_api_key` …)를 `?debug`에 싣는다. 메시지는 조직 정보가 섞일 수 있어 코드만 남긴다.
+    - `resolveJudgeModel`(`judgeProtocol.ts`): **퇴역했거나 텍스트 전용인 모델 ID**(`UNUSABLE_JUDGE_MODELS`: qwen3.6, llama-4 scout/maverick, gpt-oss-120b/20b, llama-3.x)는 **`GROQ_MODEL` 환경변수로 고정돼 있어도 기본값으로 바꿔 쓴다** — Vercel에 한 번 박아둔 env가 코드가 바뀐 뒤에도 기능을 죽이는 걸 막기 위해서.
+    - ⚠️ **Groq의 비전 모델은 전부 Preview**다(2026-11 기준 프로덕션 비전 모델 없음: `qwen/qwen3.8-27b` + 엔터프라이즈 전용 Muse). **또 퇴역할 수 있다** — `?debug`에 `model_decommissioned`/`model_not_found`가 보이면 https://console.groq.com/docs/deprecations 에서 후속 모델을 찾아 `DEFAULT_JUDGE_MODEL`만 바꾸면 된다.
+    - qwen3.8은 `reasoning_effort`로 `none`/`default`/`low`/`medium`/`high`를 받고, 이미지당 최대 2048토큰·요청당 3장. 아래의 토큰 실측치는 **전부 qwen3.6 기준**이라 새 모델에서 다를 수 있다 — `?debug`의 `usage`로 다시 읽을 것.
+ 사용자 "더 얼굴과 비슷한 포켓몬을 추천해줄 수 있도록")**: 1차 판정은 종을 **기억으로** 고른다(얼굴은 보지만 각 포켓몬 생김새는 떠올려야 함) — 그게 약한 고리였다. 그래서 **2차 = 시각 비교 재정렬**을 추가했다.
     - 클라이언트가 **콘택트 시트 한 장**을 그린다(`lib/pokematch/contactSheet.ts`): 왼쪽 448² 얼굴 + 오른쪽 1차 픽 8종의 **공식 일러스트**를 번호 패널(4×2, 224px)로. `/api/pokematch/judge`에 `mode:"rerank"`로 보내면 모델이 **두 그림을 나란히 보고** 순서를 다시 매기고 비교에 근거한 이유를 새로 쓴다(`llmJudge.ts`의 `rerankPicks`).
     - **이미지 한 장으로 합친 이유**: 이미지는 픽셀과 무관한 **정액 과금**(실측)이라 한 장이면 비용이 1장분이다. 2차 호출은 추론 `none`, `max_completion_tokens` 1000. 1차+2차가 한 키의 8K TPM 안에 들어가도록 잡았다(**미실측** — 실키로 `?debug`의 `RERANK … usage`를 읽을 것).
     - **절대 결과를 나쁘게 만들지 않는다**: 시트 실패·429·이상한 응답이면 1차 순서를 그대로 쓴다. 2차는 **패널 번호로만 답하므로 새 종을 끌어올 수 없고**, `normalizeRerank`가 항상 완전한 순열을 만든다. 이유 문장은 1차와 같은 `sanitizeReason`을 탄다.
@@ -251,7 +256,7 @@
 - Vercel 프로젝트: `ga-maius-projects/skill_prac` (GitHub 연동 완료, **production branch = `visionlab`**로 명시적으로 설정해둠 — `master` 푸시는 프로덕션에 영향 없음)
 - 환경변수(B2 자격증명 5개: `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`)는 Vercel Production/Preview에 sensitive로 이미 등록됨. 로컬 `.env.local`에도 실값 있음(gitignore됨).
 - **`GROQ_API_KEY_2` (선택)**: PokéMatch 판정용 **두 번째 Groq 키**. 이것만 넣으면 되고 URL·모델은 안 넣어도 된다(기본값이 Groq). 라우트가 **매 요청 시작 키를 무작위로 골라** 두 계정에 부하를 나누고, 한쪽이 실패하면 다른 쪽으로 넘어간다. **둘 다 실패해야** 사용자에게 "AI가 고른 결과가 아니에요" 배너가 뜬다. Groq 한도는 **계정별**이라 키 2개 = 8K TPM 버킷 2개이고, 429가 비-AI 결과의 압도적 1위 원인이었으므로 효과가 크다. `?debug`에 어느 키가 답했는지(primary/secondary) 찍힌다. 다른 제공자를 2번으로 쓰려면 `JUDGE_API_URL_2`·`JUDGE_MODEL_2`로 덮어쓸 수 있다(OpenAI 호환이면 코드 수정 불필요, **비전 모델이어야 함**).
-- **`GROQ_API_KEY`**: PokéMatch 판정용(2026-08-09 추가). **사용자가 직접 Vercel에 등록**하기로 함 — 로컬 `.env.local`에는 없다(그래서 로컬 개발에서는 PokéMatch가 항상 로컬 z-score 폴백으로 뜬다). 선택적으로 `GROQ_MODEL`로 모델 교체 가능(기본 `openai/gpt-oss-120b`).
+- **`GROQ_API_KEY`**: PokéMatch 판정용(2026-08-09 추가). **사용자가 직접 Vercel에 등록**하기로 함 — 로컬 `.env.local`에는 없다(그래서 로컬 개발에서는 PokéMatch가 항상 로컬 z-score 폴백으로 뜬다). 선택적으로 `GROQ_MODEL`로 모델 교체 가능(기본 `qwen/qwen3.8-27b`, 퇴역·텍스트 전용 ID는 무시됨 — VL-6 참고).
 
 ## 항상 유지해야 하는 요구사항 (사용자 명시)
 
