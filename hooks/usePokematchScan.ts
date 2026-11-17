@@ -19,7 +19,7 @@ import {
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches, rerankPicks } from "@/lib/pokematch/llmJudge";
 import { buildCuratedPool, buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
-import { hasVisibleFeature } from "@/lib/pokematch/judgeProtocol";
+import { RUBRIC_REJECT_BELOW, hasVisibleFeature } from "@/lib/pokematch/judgeProtocol";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
@@ -408,11 +408,20 @@ export function usePokematchScan() {
         const maybeGroundedFirst = rerankNote.startsWith("ok")
           ? (list: typeof finalMatches) => list
           : groundedFirst;
+        // Picks the graded rerank scored as a miss (RUBRIC_REJECT_BELOW) go
+        // behind every other source, local fill included — but are not deleted.
+        const scoreBySlug = new Map(
+          rerankedPicks.filter((p) => p.score !== undefined).map((p) => [p.slug, p.score!])
+        );
+        const rejected = (m: (typeof finalMatches)[number]) =>
+          (scoreBySlug.get(m.slug) ?? Infinity) < RUBRIC_REJECT_BELOW;
+        const kept = finalMatches.filter((m) => !rejected(m));
         const tiers = [
-          maybeGroundedFirst(finalMatches.filter((m) => familiar.has(m.slug))),
+          maybeGroundedFirst(kept.filter((m) => familiar.has(m.slug))),
           local.filter((m) => familiar.has(m.slug)),
-          maybeGroundedFirst(finalMatches.filter((m) => !familiar.has(m.slug))),
+          maybeGroundedFirst(kept.filter((m) => !familiar.has(m.slug))),
           local,
+          finalMatches.filter(rejected),
         ];
         const have = new Set<string>();
         const assembled: typeof finalMatches = [];

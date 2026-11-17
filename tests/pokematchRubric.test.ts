@@ -97,7 +97,7 @@ test("stage 1: picks claiming two or more shared features come first, stably", (
     { slug: "zorua", match: ["eyes", "face", "colors"] },
   ]);
   assert.deepEqual(ordered.map((p) => p.slug), ["riolu", "zorua", "spheal", "pancham"]);
-  const untouched = [{ slug: "a" }, { slug: "b" }];
+  const untouched: { slug: string; match?: string[] }[] = [{ slug: "a" }, { slug: "b" }];
   assert.equal(preferBroadMatches(untouched), untouched, "no match lists → no-op");
 });
 
@@ -116,4 +116,25 @@ test("prompts: stage 1 demands two shared slots, stage 2 grades per feature", ()
   assert.match(rerank, /"overall", 0-10/);
   assert.match(rerank, /"scores"/);
   assert.match(rerank, /one striking shared feature/);
+});
+
+// ── Low-graded panels (observed in production, 2026-11-17) ──────────────────
+import { RUBRIC_REJECT_BELOW, sanitizeReason } from "../lib/pokematch/judgeProtocol.ts";
+
+test("reasons that deny any resemblance are withheld", () => {
+  for (const r of [
+    "얼굴이 보이지 않아 닮은 점을 찾을 수 없습니다.",
+    "아무런 공통점도 없는 모습입니다.",
+    "머리 모양이 닮지 않았어요",
+  ]) {
+    assert.equal(sanitizeReason(r), "", r);
+  }
+  assert.equal(sanitizeReason("파란 머리와 날카로운 눈매가 닮았어요"), "파란 머리와 날카로운 눈매가 닮았어요");
+});
+
+test("reject threshold: a near-zero grade is a miss, a modest match is not", () => {
+  const miss = rubricScore({ hair: 1, eyes: 1, face: 0, colors: 0, accessory: null, overall: 2 });
+  const modest = rubricScore({ hair: 2, eyes: 1, face: 1, colors: 0, accessory: null, overall: 4 });
+  assert.ok(miss < RUBRIC_REJECT_BELOW, `miss ${miss}`);
+  assert.ok(modest >= RUBRIC_REJECT_BELOW, `modest ${modest}`);
 });

@@ -148,8 +148,19 @@ export function sanitizeReason(raw: string): string {
   if (!reason) return "";
   if (/[A-Za-z]{2,}/.test(reason)) return "";
   if (DEMEANING_TERMS.some((term) => reason.includes(term))) return "";
+  if (DENIES_RESEMBLANCE.test(reason)) return "";
   return reason;
 }
+
+/**
+ * A sentence that says the two DON'T look alike. The graded rerank writes a
+ * reason for every panel, including the ones it scores near zero, and those
+ * come back as "닮은 점을 찾을 수 없습니다" (observed in production,
+ * 2026-11-17). Shown under a result titled "가장 닮은 포켓몬" that reads as a
+ * bug, so it is withheld like any other unusable reason.
+ */
+const DENIES_RESEMBLANCE =
+  /(공통점|닮은 점|비슷한 점|유사점)[^.]{0,12}(없|않)|닮지 않|비슷하지 않|찾을 수 없|알 수 없|보이지 않/;
 
 /** Whitelists and truncates whatever the browser posted. Everything here ends
  * up inside a prompt, so nothing is passed through on trust. */
@@ -625,6 +636,16 @@ export interface RubricGrades {
 
 /** Subtracted when fewer than two features grade "clear" (≥2). */
 export const SINGLE_FEATURE_PENALTY = 4;
+
+/**
+ * Below this combined score the rerank has effectively said "this does not
+ * look like the person": a low overall with no feature clearly shared. Such a
+ * pick is not deleted, but it is ranked behind the local fill (see
+ * usePokematchScan) — a verified miss is worse than an unverified guess.
+ * Reference points: overall 2 + two slight features − penalty = 0; overall 4
+ * + one clear feature (2) + two slight (1+1) − penalty = 4.
+ */
+export const RUBRIC_REJECT_BELOW = 3;
 
 /**
  * One number per panel from the graded rubric:
