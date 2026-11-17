@@ -35,6 +35,8 @@ export interface JudgeResult {
   dropped?: string;
   /** The distinctive features the model wrote down before picking (English). */
   traits?: string;
+  /** Same traits in Korean, for display ("AI가 본 내 얼굴"). */
+  traitsKo?: string;
   /** Set only when picks is empty — why the judge didn't run, for the
    * ?debug panel. The route already categorizes its own failures
    * (judge_unconfigured / rate_limited_local — our own IP cap, never reached
@@ -133,6 +135,7 @@ export async function judgeCandidates(
       usage: typeof data.usage === "string" ? data.usage : undefined,
       dropped: typeof data.dropped === "string" ? data.dropped : undefined,
       traits: typeof data.traits === "string" ? data.traits : undefined,
+      traitsKo: typeof data.traitsKo === "string" ? data.traitsKo : undefined,
     };
   } catch (err) {
     const reason = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";

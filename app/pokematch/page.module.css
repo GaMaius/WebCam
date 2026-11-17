@@ -306,3 +306,37 @@
   background: var(--surface);
   color: var(--text);
 }
+
+/* "AI가 본 내 얼굴" — the features the judge based the result on. */
+.observed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(214, 69, 65, 0.06);
+  border: 1px solid rgba(214, 69, 65, 0.18);
+}
+
+.observedLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #d64541;
+  letter-spacing: 0.02em;
+}
+
+.observedChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.observedChip {
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--color-surface, #fffdf7);
+  border: 1px solid rgba(28, 31, 21, 0.12);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #1c1f15);
+}

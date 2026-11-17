@@ -188,6 +188,7 @@ Rules:
 5a. Start from what is MOST visible: hairstyle (bangs, parting, colour), glasses, eye shape, face shape. Glasses are a real feature — Pokemon with eye rings, goggle-like markings or dark patches around the eyes echo them. A calm or neutral expression is common to almost every photo, so it is never enough on its own to choose a species.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
 7c. Commit to the answer. FIRST write "traits": the two or three most distinctive features of this face, in a few English words (e.g. "sharp upturned eyes, dark messy hair, narrow jaw"). THEN pick species that match THOSE traits. Shown the same photo again you should reach the same traits and the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
+7e. Also write "traitsKo": the same two or three features as short Korean noun phrases joined by " · " (at most 30 characters), e.g. "검은 일자 앞머리 · 사각 안경 · 갸름한 얼굴". The user sees this, so the same politeness rules as the reasons apply.
 7d. Match the whole impression, not one feature. A good pick resembles the face in silhouette, eye shape AND colouring/mood together; a species that shares only one feature is a weak pick.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
@@ -198,7 +199,7 @@ Rules:
 12. Never guess the person's identity or name any real person.
 
 Output exactly one JSON object, nothing else. No scores.
-{"traits":"...","picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
+{"traits":"...","traitsKo":"...","picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
 
 
 /** English scaffolding for the same reason SYSTEM_PROMPT is English — Korean
@@ -676,4 +677,22 @@ const VISIBLE_FEATURE_RE =
 
 export function hasVisibleFeature(reason: string): boolean {
   return VISIBLE_FEATURE_RE.test(reason.replace(/눈빛/g, ""));
+}
+
+
+/**
+ * The Korean version of the traits, shown to the user as "AI가 본 내 얼굴".
+ * Same filter as a reason (no latin, nothing demeaning), plus a hard length
+ * cap; "" when it doesn't survive, and the UI then shows nothing.
+ *
+ * Why show it at all: the five species only make sense against what the model
+ * saw. A result that says "검은 일자 앞머리 · 사각 안경" above Riolu and Pancham
+ * reads as a judgement; the same five without it read as a lottery.
+ */
+export function extractTraitsKo(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+  const t = (raw as { traitsKo?: unknown }).traitsKo;
+  const text = Array.isArray(t) ? t.join(" · ") : typeof t === "string" ? t : "";
+  const clean = sanitizeReason(text.replace(/\s+/g, " "));
+  return clean.length <= 40 ? clean : "";
 }

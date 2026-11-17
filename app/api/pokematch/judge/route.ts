@@ -5,6 +5,7 @@ import {
   describeUnusable,
   extractJson,
   extractTraits,
+  extractTraitsKo,
   isUsableImage,
   buildRerankMessages,
   normalizeRerank,
@@ -250,6 +251,7 @@ async function attempt(
       usage?: string;
       dropped?: string;
       traits?: string;
+      traitsKo?: string;
     }
   | { ok: false; status: number; error: string; detail?: string }
 > {
@@ -332,12 +334,14 @@ async function attempt(
   // wanted but we refused go back with the answer.
   const dropped = unresolvedNames(parsed, candidates);
   const traits = extractTraits(parsed);
+  const traitsKo = extractTraitsKo(parsed);
   return {
     ok: true,
     picks,
     model: provider.model,
     usage: tokens,
     ...(traits ? { traits } : {}),
+    ...(traitsKo ? { traitsKo } : {}),
     ...(dropped.length ? { dropped: dropped.join(",") } : {}),
   };
 }
@@ -443,6 +447,7 @@ export async function POST(request: Request) {
         usage: result.usage,
         // The distinctive features it committed to before picking (rule 7c).
         ...(result.traits ? { traits: result.traits } : {}),
+        ...(result.traitsKo ? { traitsKo: result.traitsKo } : {}),
         // Species it named that the pool refused. Present only when some were.
         ...(result.dropped ? { dropped: result.dropped } : {}),
         // Present only when an earlier key had to be given up on.

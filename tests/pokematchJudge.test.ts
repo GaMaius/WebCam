@@ -458,3 +458,18 @@ test("prompts ask for concrete features and put mood last", () => {
   assert.ok(rerank.indexOf("overall mood") > rerank.indexOf("glasses"));
   assert.match(rerank, /mood-only reason/);
 });
+
+// ── Korean traits shown to the user ────────────────────────────────────────
+import { extractTraitsKo } from "../lib/pokematch/judgeProtocol.ts";
+
+test("traitsKo: kept when short, clean Korean", () => {
+  assert.equal(extractTraitsKo({ traitsKo: "검은 일자 앞머리 · 사각 안경" }), "검은 일자 앞머리 · 사각 안경");
+  assert.equal(extractTraitsKo({ traitsKo: ["갸름한 얼굴", "짙은 눈썹"] }), "갸름한 얼굴 · 짙은 눈썹");
+});
+
+test("traitsKo: dropped when demeaning, latin or too long", () => {
+  assert.equal(extractTraitsKo({ traitsKo: "통통한 볼 · 안경" }), "");
+  assert.equal(extractTraitsKo({ traitsKo: "glasses · 앞머리" }), "");
+  assert.equal(extractTraitsKo({ traitsKo: "가".repeat(60) }), "");
+  assert.equal(extractTraitsKo({ picks: [] }), "");
+});

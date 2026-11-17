@@ -160,9 +160,11 @@ export default function PokematchPage() {
   const cardCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderCard = useCallback(async (): Promise<HTMLCanvasElement> => {
     if (!cardCanvasRef.current) cardCanvasRef.current = document.createElement("canvas");
-    if (scan.matches) await drawPokematchCard(cardCanvasRef.current, scan.matches);
+    if (scan.matches) {
+      await drawPokematchCard(cardCanvasRef.current, scan.matches, scan.observedTraits);
+    }
     return cardCanvasRef.current;
-  }, [scan.matches]);
+  }, [scan.matches, scan.observedTraits]);
 
   return (
     <ModuleShell
@@ -295,6 +297,18 @@ export default function PokematchPage() {
             </div>
           ) : (
             <span className={styles.engineOk}>✨ AI가 사진을 보고 골랐어요</span>
+          )}
+          {/* What the judge based the five on. Without it the species read as a
+              lottery; with it, as a judgement the user can check. */}
+          {scan.engine !== "local" && scan.observedTraits && (
+            <div className={styles.observed}>
+              <span className={styles.observedLabel}>AI가 본 내 얼굴</span>
+              <div className={styles.observedChips}>
+                {scan.observedTraits.split("·").map((t) => t.trim()).filter(Boolean).map((t) => (
+                  <span key={t} className={styles.observedChip}>{t}</span>
+                ))}
+              </div>
+            </div>
           )}
           <h3 className={styles.resultTitle}>가장 닮은 포켓몬</h3>
           <div className={styles.matchList}>

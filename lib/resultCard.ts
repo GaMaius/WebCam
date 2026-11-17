@@ -554,7 +554,9 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
 
 export async function drawPokematchCard(
   canvas: HTMLCanvasElement,
-  matches: PokematchCardMatch[]
+  matches: PokematchCardMatch[],
+  /** What the AI saw in the face ("검은 일자 앞머리 · 사각 안경"), if any. */
+  observedTraits = ""
 ): Promise<void> {
   canvas.width = W;
   canvas.height = H;
@@ -564,6 +566,13 @@ export async function drawPokematchCard(
   drawShell(ctx, { appName: "PokéMatch", accent: POKEMATCH_ACCENT });
 
   const imgs = await Promise.all(matches.map((m) => loadImage(pokemonImageUrl(m.slug))));
+
+  // Fits between the title (baseline 134) and the first row (224).
+  if (observedTraits) {
+    ctx.fillStyle = COL.textDim;
+    ctx.font = `600 24px ${SANS}`;
+    wrapTextKo(ctx, `AI가 본 내 얼굴 · ${observedTraits}`, PAD, 188, W - PAD * 2, 28, 1);
+  }
 
   const cardX = PAD;
   const cardW = W - PAD * 2;

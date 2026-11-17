@@ -19,6 +19,7 @@ import {
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches, rerankPicks } from "@/lib/pokematch/llmJudge";
 import { buildCuratedPool, buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
+import { hasVisibleFeature } from "@/lib/pokematch/judgeProtocol";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
@@ -220,6 +221,8 @@ export function usePokematchScan() {
   const [fallbackCause, setFallbackCause] = useState<PokematchFallbackCause>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [debugText, setDebugText] = useState<string | null>(null);
+  /** What the judge saw in the face, in Korean ("검은 일자 앞머리 · 사각 안경"). */
+  const [observedTraits, setObservedTraits] = useState("");
   const runningRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -235,6 +238,7 @@ export function usePokematchScan() {
     setFallbackCause(null);
     setErrorMessage("");
     setDebugText(null);
+    setObservedTraits("");
     faceAspectRef.current = 1.15;
   }, []);
 
@@ -324,6 +328,7 @@ export function usePokematchScan() {
       let rawPicks: { slug: string; reason: string }[] = [];
       let droppedNames = "";
       let traits = "";
+      let traitsKo = "";
       let rerankNote = "";
       let rerankedPicks: { slug: string; reason: string }[] = [];
       // No image means no vision judgement — fall straight through to local.
@@ -332,6 +337,7 @@ export function usePokematchScan() {
         rawPicks = judged.picks;
         droppedNames = judged.dropped ?? "";
         traits = judged.traits ?? "";
+        traitsKo = judged.traitsKo ?? "";
         if (judged.picks.length > 0) {
           // Stage 2 (2026-11-17 remaster): the model compares the face with the
           // picks' actual artwork side by side and re-sorts them. Stage 1 named
@@ -384,10 +390,22 @@ export function usePokematchScan() {
         const local = matchTopK(embedding, gallery, pokedex, 12, {
           faceAspect: faceAspectRef.current,
         });
+        // ⚠️ Within the model's own picks, the ones it justified with a
+        // visible feature (hair, glasses, eye shape …) come before the ones it
+        // justified only with a mood. A real scan returned Mudkip, Slowpoke and
+        // Snorlax on "차분한 분위기" alone — a calm neutral face is in nearly
+        // every selfie, so those were picked on nothing. Stable sort, so the
+        // model's order survives inside each group, and nothing is deleted.
+        const grounded = (m: (typeof finalMatches)[number]) =>
+          Boolean(m.reason && hasVisibleFeature(m.reason));
+        const groundedFirst = (list: typeof finalMatches) => [
+          ...list.filter(grounded),
+          ...list.filter((m) => !grounded(m)),
+        ];
         const tiers = [
-          finalMatches.filter((m) => familiar.has(m.slug)),
+          groundedFirst(finalMatches.filter((m) => familiar.has(m.slug))),
           local.filter((m) => familiar.has(m.slug)),
-          finalMatches.filter((m) => !familiar.has(m.slug)),
+          groundedFirst(finalMatches.filter((m) => !familiar.has(m.slug))),
           local,
         ];
         const have = new Set<string>();
@@ -430,7 +448,7 @@ export function usePokematchScan() {
                 rawPicks.map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`).join("\n") +
                 `\n`
               : "") +
-            (traits ? `TRAITS (1차가 먼저 적은 특징): ${traits}\n` : "") +
+            (traits ? `TRAITS (1차가 먼저 적은 특징): ${traits}${traitsKo ? ` / ${traitsKo}` : ""}\n` : "") +
             (rerankNote ? `RERANK (2차 시각 비교): ${rerankNote}\n` : "") +
             (rerankNote.startsWith("ok")
               ? `RERANKED ORDER:\n` +
@@ -483,6 +501,7 @@ export function usePokematchScan() {
       setFallbackCause(
         usedLlm ? null : dailyLimit ? "quota" : rateLimited ? "busy" : "unavailable"
       );
+      setObservedTraits(usedLlm ? traitsKo : "");
       setMatches(finalMatches);
       setPhase("done");
     },
@@ -666,6 +685,7 @@ export function usePokematchScan() {
     fallbackCause,
     errorMessage,
     debugText,
+    observedTraits,
     start,
     startWithImage,
     reset,
