@@ -7,7 +7,7 @@
 // vision model — that's the feature. The intro modal says so; keep it saying so.
 
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
-import { PICK_COUNT } from "./judgeProtocol";
+import { PICK_COUNT, hasVisibleFeature } from "./judgeProtocol";
 import { applyPickGuards } from "./pickGuards";
 import { buildCuratedPool } from "./curatedPool";
 import type { FaceFeatures } from "./faceFeatures";
@@ -142,6 +142,20 @@ export async function judgeCandidates(
   }
 }
 
+/**
+ * Which reason to show when both stages wrote one: the one that names a
+ * visible feature (hasVisibleFeature) wins over a mood-only one; between two of
+ * the same kind, the rerank's, since it was written looking at both pictures.
+ * A mood-only reason is still better than none, so nothing is blanked here.
+ */
+export function pickReason(rerank: string | undefined, stage1: string | undefined): string {
+  const a = rerank?.trim() ?? "";
+  const b = stage1?.trim() ?? "";
+  if (a && hasVisibleFeature(a)) return a;
+  if (b && hasVisibleFeature(b)) return b;
+  return a || b;
+}
+
 export interface RerankOutcome {
   picks: JudgePick[];
   /** For ?debug: what happened, and the provider/usage when it ran. */
@@ -201,7 +215,7 @@ export async function rerankPicks(
       const slug = sheet.slugs[n - 1];
       const original = slug ? byslug.get(slug) : undefined;
       if (!original || reordered.some((p) => p.slug === slug)) continue;
-      reordered.push({ slug, reason: reason || original.reason });
+      reordered.push({ slug, reason: pickReason(reason, original.reason) });
     }
     // Picks whose art failed to load weren't on the sheet; keep them, last.
     for (const p of picks) if (!reordered.some((r) => r.slug === p.slug)) reordered.push(p);

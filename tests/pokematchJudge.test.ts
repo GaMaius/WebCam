@@ -423,3 +423,38 @@ test("upstream errors keep only the machine code", () => {
   assert.equal(upstreamErrorCode(503, "<html>"), "upstream_503");
   assert.ok(!upstreamErrorCode(400, body).includes("org_123"));
 });
+
+// ── Mood-only reasons (2026-11-17 real scan: five rewordings of "calm") ─────
+import { hasVisibleFeature, SYSTEM_PROMPT as JUDGE_SYSTEM_PROMPT } from "../lib/pokematch/judgeProtocol.ts";
+
+test("reasons: mood-only sentences don't count as a visible feature", () => {
+  for (const r of [
+    "고요한 눈빛과 차분한 이미지가 닮아 있습니다.",
+    "부드러운 곡선과 단정한 분위기가 닮았습니다.",
+    "차분한 눈빛과 우직한 인상이 닮았습니다.",
+    "평온하고 고요한 분위기가 닮아 있습니다.",
+    "차분하고 단정한 인상이 닮아 있습니다.",
+  ]) {
+    assert.equal(hasVisibleFeature(r), false, r);
+  }
+});
+
+test("reasons: hair, glasses, eyes, face shape and colour count", () => {
+  for (const r of [
+    "검은 일자 앞머리가 머리 장식과 닮았어요",
+    "안경 테가 눈 주위 무늬와 겹쳐 보여요",
+    "올라간 눈꼬리가 닮았습니다",
+    "갸름한 얼굴형이 닮았어요",
+    "어두운 색감이 잘 어울립니다",
+  ]) {
+    assert.equal(hasVisibleFeature(r), true, r);
+  }
+});
+
+test("prompts ask for concrete features and put mood last", () => {
+  assert.match(JUDGE_SYSTEM_PROMPT, /CONCRETE visible feature/);
+  assert.match(JUDGE_SYSTEM_PROMPT, /glasses/i);
+  const rerank = buildRerankSystemPrompt(8);
+  assert.ok(rerank.indexOf("overall mood") > rerank.indexOf("glasses"));
+  assert.match(rerank, /mood-only reason/);
+});

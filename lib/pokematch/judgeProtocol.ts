@@ -184,13 +184,14 @@ Rules:
 2a. Never name a species that is filthy, decaying, a joke about being useless, or an unsettling design (Muk, Garbodor, Magikarp, Jynx, Hypno and the like). The input is a real person's face and the answer has to be something they enjoy being shown.
 3. Pick exactly ${REQUEST_PICK_COUNT}, most similar first. Only the top few are shown, so put real effort into the ordering.
 4. They must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
-5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes") over and over — that is making one pick repeatedly, not several. Spread across eye shape, face shape, hairstyle, mood, skin tone, expression.
+5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes", "calm mood") over and over — that is making one pick repeatedly, not several. Spread across hairstyle and hair colour, glasses or other accessories, eye shape, eyebrows, face shape, jawline, skin tone.
+5a. Start from what is MOST visible: hairstyle (bangs, parting, colour), glasses, eye shape, face shape. Glasses are a real feature — Pokemon with eye rings, goggle-like markings or dark patches around the eyes echo them. A calm or neutral expression is common to almost every photo, so it is never enough on its own to choose a species.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
 7c. Commit to the answer. FIRST write "traits": the two or three most distinctive features of this face, in a few English words (e.g. "sharp upturned eyes, dark messy hair, narrow jaw"). THEN pick species that match THOSE traits. Shown the same photo again you should reach the same traits and the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
 7d. Match the whole impression, not one feature. A good pick resembles the face in silhouette, eye shape AND colouring/mood together; a species that shares only one feature is a weak pick.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
-8. Write each reason as ONE Korean sentence, at most 45 characters, citing at least one thing actually visible in the photo. Example: "눈꼬리가 올라가고 턱선이 뚜렷해 잘 맞습니다"
+8. Write each reason as ONE Korean sentence, at most 45 characters, naming at least one CONCRETE visible feature (hair, bangs, glasses, eye shape, eyebrows, face shape, jaw, skin tone). A reason that only describes mood ("차분한 분위기", "고요한 인상") is not allowed. Example: "검은 일자 앞머리와 눈 주위 안경 테가 무늬와 닮았어요"
 9. NEVER write a Pokemon name inside the reason — the name is displayed separately, so a name you write will contradict it. Describe only what you see in the face.
 10. This is for fun. Write only sentences the reader would enjoy. Never judge body or looks: the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Use appealing features instead — eyes, impression, mood, hairstyle.
 11. Say only what is visible. Do not invent features; calling a slender face "통통한" means you have no evidence.
@@ -517,14 +518,15 @@ export function buildRerankSystemPrompt(count: number): string {
   return `You judge a "which Pokemon do you look like" service. The image is a contact sheet: the LEFT square is a real person's face; the panels on the RIGHT show ${count} Pokemon, each with its number in the corner.
 
 Rank ALL ${count} numbered Pokemon by how much the person resembles each one, most similar first. Compare the pictures directly, side by side:
-- overall impression and mood (sharp, gentle, cool, cheerful, sleepy, fierce)
-- face/head silhouette and proportions
-- eye shape and eye expression
-- colour harmony: the person's hair and skin colours against the Pokemon's palette
-- hairstyle against ears, crest or head shape
-A Pokemon that matches several of these together beats one that matches a single feature. Ignore pose and background.
+1. hairstyle and hair colour against the Pokemon's ears, crest, head shape and colours (bangs, parting, length)
+2. glasses or accessories against eye rings, goggle-like markings or patches around the eyes
+3. face/head silhouette and proportions (long, oval, round, angular)
+4. eye shape and eyebrows
+5. colour harmony: hair and skin colours against the Pokemon's palette
+6. overall mood — LAST, and only as a tie-breaker: a calm or neutral expression fits almost anyone, so it never decides the order by itself
+A Pokemon that matches several of 1-5 together beats one that matches a single feature. Ignore pose and background.
 
-For each, write ONE Korean sentence (at most 35 characters) naming what the person and that Pokemon visibly share. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
+For each, write ONE Korean sentence (at most 35 characters) naming a CONCRETE feature the person and that Pokemon visibly share (hair, glasses, eye shape, face shape, colours). A mood-only reason ("차분한 분위기가 닮았다") is not allowed, and each reason must name a different feature. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
 
 Output exactly one JSON object, nothing else:
 {"order":[{"n":3,"reason":"..."},{"n":1,"reason":"..."}]}`;
@@ -649,4 +651,29 @@ export function upstreamErrorCode(status: number, body: string): string {
   }
   code = code.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 40);
   return code ? `upstream_${status}:${code}` : `upstream_${status}`;
+}
+
+
+/**
+ * True when a Korean reason names something you can point at in the photo —
+ * hair, glasses, eyes, face shape, colour — rather than only a mood.
+ *
+ * ⚠️ WHY (2026-11-17, real scan): a face with square glasses and dark straight
+ * bangs came back with five reasons that were all one observation reworded —
+ * "고요한 눈매", "차분한 이미지", "차분한 눈빛", "평온하고 고요한 분위기",
+ * "차분하고 단정한 인상" — and none mentioned the glasses or the bangs. A calm
+ * neutral expression is in almost every selfie, so a mood-only reason says
+ * nothing about THIS face, and the species chosen on it (Mudkip, Slowpoke,
+ * Snorlax) were chosen on nothing. The bigram-overlap guard didn't catch it
+ * because the wording varied.
+ *
+ * Used to PREFER a feature-based reason, never to delete a pick: see
+ * pickReason in llmJudge.ts. "눈빛" deliberately doesn't count — it is mood
+ * expressed through the eyes, not the eyes' shape.
+ */
+const VISIBLE_FEATURE_RE =
+  /(앞머리|머리카락|머리색|머릿결|헤어|가르마|곱슬|직모|단발|머리|안경|안경테|렌즈|눈매|눈꼬리|눈썹|쌍꺼풀|눈 모양|눈동자|큰 눈|얼굴형|얼굴선|얼굴 윤곽|갸름|둥근 얼굴|긴 얼굴|각진|턱|광대|이마|콧대|코끝|입술|입매|입꼬리|볼|피부|색감|색깔|빛깔|검은|갈색|하얀|밝은 색|어두운 색|귀|무늬|테두리)/;
+
+export function hasVisibleFeature(reason: string): boolean {
+  return VISIBLE_FEATURE_RE.test(reason.replace(/눈빛/g, ""));
 }
