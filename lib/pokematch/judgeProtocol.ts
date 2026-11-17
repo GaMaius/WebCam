@@ -417,7 +417,7 @@ export function describeUnusable(content: string, parsed: unknown): string {
   // so it gets its own name rather than looking like malformed output.
   if (/<think>/.test(content) && !/<\/think>/.test(content)) return "thinking_never_finished";
   if (parsed === null || parsed === undefined) {
-    return `unparsed:${content.trim().replace(/\s+/g, " ").slice(0, 80)}`;
+    return `unparsed:${content.trim().replace(/\s+/g, " ").slice(-240)}`; // the TAIL: where malformed JSON breaks (2026-11-17: a 71-token answer cut at 80 chars showed only the healthy start)
   }
   const list = Array.isArray(parsed)
     ? parsed
