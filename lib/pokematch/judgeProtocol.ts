@@ -71,7 +71,7 @@ export interface Pick {
 /** The fixed trait slots both stages work in. "mood" is deliberately absent:
  * a calm neutral face is in almost every selfie, so it never counts as a
  * shared feature. */
-export const MATCH_SLOTS = ["hair", "eyes", "face", "accessory", "colors"] as const;
+export const MATCH_SLOTS = ["hair", "eyes", "face", "mouth", "accessory", "colors"] as const;
 
 function parseMatch(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -85,6 +85,8 @@ function parseMatch(value: unknown): string[] | undefined {
         ? "accessory"
         : k === "eye"
         ? "eyes"
+        : k === "smile" || k === "expression" || k === "lips"
+        ? "mouth"
         : k;
     if ((MATCH_SLOTS as readonly string[]).includes(slot)) slots.add(slot);
   }
@@ -239,12 +241,12 @@ Rules:
 3. Pick exactly ${REQUEST_PICK_COUNT}, most similar first. Only the top few are shown, so put real effort into the ordering.
 4. They must not all give the same impression. Don't fill them with one evolution family; mix different impressions, but rank the single best fit first.
 5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes", "calm mood") over and over — that is making one pick repeatedly, not several. Spread across hairstyle and hair colour, glasses or other accessories, eye shape, eyebrows, face shape, jawline, skin tone.
-5a. Start from what is MOST visible: hairstyle (bangs, parting, colour), glasses, eye shape, face shape. Glasses are a real feature — Pokemon with eye rings, goggle-like markings or dark patches around the eyes echo them. A calm or neutral expression is common to almost every photo, so it is never enough on its own to choose a species.
+5a. Start from what is MOST visible: hairstyle (bangs, parting, colour), glasses, eye shape, face shape. Glasses are a real feature — Pokemon with eye rings, goggle-like markings or dark patches around the eyes echo them. A calm or neutral expression is common to almost every photo, so it is never enough on its own to choose a species — but a DISTINCTIVE expression is a real feature: a wide open smile, smiling eyes, raised round cheeks, a pout. Record it in the "mouth" slot and match it like any other feature.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
-7c. Commit to the answer. FIRST fill "traits", one short English phrase per slot: "hair" (style and colour, e.g. "straight black bangs"), "eyes" (shape and brows), "face" (shape and proportions), "accessory" (e.g. "square glasses", or "none"), "colors" (hair/skin palette). THEN pick species. Shown the same photo again you should reach the same traits and the same conclusion.
+7c. Commit to the answer. FIRST fill "traits", one short English phrase per slot: "hair" (style and colour, e.g. "straight black bangs"), "eyes" (shape and brows), "face" (shape and proportions), "mouth" (mouth shape and expression, e.g. "wide open smile, raised cheeks", or "neutral" if nothing distinctive), "accessory" (e.g. "square glasses", or "none"), "colors" (hair/skin palette). THEN pick species. Shown the same photo again you should reach the same traits and the same conclusion.
 7e. Also write "traitsKo": the same two or three features as short Korean noun phrases joined by " · " (at most 30 characters), e.g. "검은 일자 앞머리 · 사각 안경 · 갸름한 얼굴". The user sees this, so the same politeness rules as the reasons apply.
-7d. ⚠️ ONE SHARED FEATURE IS NOT RESEMBLANCE. Every pick must share AT LEAST TWO of the trait slots with the face — list them in "match" (slot names: hair, eyes, face, accessory, colors; mood never counts). Glasses alone do not make a species with eye rings a match; it must also share the hair, the face shape or the colours. Prefer species that share three. If a species shares only one slot, however striking, leave it out.
-7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
+7d. ⚠️ ONE SHARED FEATURE IS NOT RESEMBLANCE. Every pick must share AT LEAST TWO of the trait slots with the face — list them in "match" (slot names: hair, eyes, face, mouth, accessory, colors; mood never counts, and "mouth" counts only when the expression is distinctive). Glasses alone do not make a species with eye rings a match; it must also share the hair, the face shape or the colours. Prefer species that share three. If a species shares only one slot, however striking, leave it out.
+7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Choosing Pikachu, Psyduck, Clefairy, Togepi, Eevee, the starters and similar household-name species BY DEFAULT is the lazy answer, because a vague cute impression fits almost anybody. They are NOT banned: pick one exactly like any other species — when it shares at least two concrete slots with this face (for example the same wide smile and round cheeks, plus the eye shape).
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
 8. Write each reason as ONE Korean sentence, at most 45 characters, naming the CONCRETE features in its "match" — ideally two of them (hair, bangs, glasses, eye shape, eyebrows, face shape, jaw, colours). A reason that only describes mood ("차분한 분위기", "고요한 인상") is not allowed. Example: "검은 일자 앞머리와 눈 주위 안경 테가 무늬와 닮았어요"
 9. NEVER write a Pokemon name inside the reason — the name is displayed separately, so a name you write will contradict it. Describe only what you see in the face.
@@ -545,7 +547,7 @@ export function extractTraits(raw: unknown): string {
   else if (t && typeof t === "object") {
     // The slot object from rule 7c. "none" slots (no glasses) are dropped.
     text = Object.entries(t as Record<string, unknown>)
-      .filter(([, v]) => typeof v === "string" && v.trim() && !/^none$/i.test(v.trim()))
+      .filter(([, v]) => typeof v === "string" && v.trim() && !/^(none|neutral)$/i.test(v.trim()))
       .map(([k, v]) => `${k}: ${v}`)
       .join("; ");
   }
@@ -590,13 +592,14 @@ Per-feature grades, 0-3 (0 = nothing in common, 1 = slight, 2 = clear, 3 = strik
 - "eyes": eye shape and eyebrows
 - "face": face/head silhouette and proportions (long, oval, round, angular)
 - "colors": the person's hair and skin colours vs the Pokemon's palette
+- "mouth": the person's mouth shape and expression (a wide smile, raised cheeks, a pout) vs the Pokemon's mouth and expression; null if the person's expression is neutral
 - "accessory": glasses or other accessories vs eye rings, goggle-like markings, patches around the eyes; null if the person wears none
-Then "overall", 0-10: at a glance, how much does this person look like this Pokemon AS A WHOLE? Be strict — one striking shared feature with everything else different is a 3 or 4, not an 8. Mood and expression barely count: a calm face fits almost anyone.
+Then "overall", 0-10: at a glance, how much does this person look like this Pokemon AS A WHOLE? Be strict — one striking shared feature with everything else different is a 3 or 4, not an 8. Mood barely counts: a calm face fits almost anyone. A distinctive expression is graded under "mouth", not here.
 
 For each, "reason": ONE Korean sentence (at most 35 characters) naming the features that graded highest. A mood-only reason is not allowed. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
 
 Output exactly one JSON object covering all ${count} panels, nothing else:
-{"scores":[{"n":1,"hair":2,"eyes":1,"face":0,"colors":2,"accessory":null,"overall":5,"reason":"..."}]}`;
+{"scores":[{"n":1,"hair":2,"eyes":1,"face":0,"mouth":null,"colors":2,"accessory":null,"overall":5,"reason":"..."}]}`;
 }
 
 export function buildRerankMessages(sheetDataUrl: string, count: number, traits = "") {
@@ -629,6 +632,14 @@ export interface RubricGrades {
   eyes: number;
   face: number;
   colors: number;
+  /** null when the person's expression is neutral — a calm face says nothing
+   * about any species, so the slot doesn't exist rather than scoring 0. A
+   * DISTINCTIVE expression (a wide smile) is often exactly what a lookalike
+   * rests on, which is why it is a slot at all (2026-11-17: a smiling face
+   * widely said to resemble a starter got nothing near one, because the only
+   * expression rule was "mood barely counts"). Optional so older callers and
+   * answers without it still type-check. */
+  mouth?: number | null;
   /** null when the person wears no accessory — the slot doesn't exist. */
   accessory: number | null;
   overall: number;
@@ -672,7 +683,14 @@ export function rubricPercent(score: number): number {
  * (3) with nothing else always ranks below two clearly shared ones (2 + 2).
  */
 export function rubricScore(g: RubricGrades): number {
-  const features = [g.hair, g.eyes, g.face, g.colors, ...(g.accessory === null ? [] : [g.accessory])];
+  const features = [
+    g.hair,
+    g.eyes,
+    g.face,
+    g.colors,
+    ...(g.mouth === null || g.mouth === undefined ? [] : [g.mouth]),
+    ...(g.accessory === null ? [] : [g.accessory]),
+  ];
   const sum = features.reduce((x, y) => x + y, 0);
   const breadth = features.filter((v) => v >= 2).length;
   return g.overall + sum - (breadth < 2 ? SINGLE_FEATURE_PENALTY : 0);
@@ -692,6 +710,7 @@ function parseGrades(o: Record<string, unknown>): RubricGrades | null {
     eyes: grade(o.eyes, 3),
     face: grade(o.face, 3),
     colors: grade(o.colors ?? o.color, 3),
+    mouth: o.mouth === null || o.mouth === undefined ? null : grade(o.mouth, 3),
     accessory: o.accessory === null || o.accessory === undefined ? null : grade(o.accessory, 3),
     overall: grade(o.overall, 10),
   };
@@ -738,6 +757,7 @@ export function normalizeRerank(raw: unknown, count: number): RerankEntry[] {
             score: rubricScore(g),
             grades:
               `h${g.hair} e${g.eyes} f${g.face} c${g.colors} ` +
+              `m${g.mouth === null || g.mouth === undefined ? "-" : g.mouth} ` +
               `a${g.accessory === null ? "-" : g.accessory} o${g.overall}`,
           }
         : { n, reason }
@@ -837,7 +857,7 @@ export function upstreamErrorCode(status: number, body: string): string {
  * expressed through the eyes, not the eyes' shape.
  */
 const VISIBLE_FEATURE_RE =
-  /(앞머리|머리카락|머리색|머릿결|헤어|가르마|곱슬|직모|단발|머리|안경|안경테|렌즈|눈매|눈꼬리|눈썹|쌍꺼풀|눈 모양|눈동자|큰 눈|얼굴형|얼굴선|얼굴 윤곽|갸름|둥근 얼굴|긴 얼굴|각진|턱|광대|이마|콧대|코끝|입술|입매|입꼬리|볼|피부|색감|색깔|빛깔|검은|갈색|하얀|밝은 색|어두운 색|귀|무늬|테두리)/;
+  /(앞머리|머리카락|머리색|머릿결|헤어|가르마|곱슬|직모|단발|머리|안경|안경테|렌즈|눈매|눈꼬리|눈썹|쌍꺼풀|눈 모양|눈동자|큰 눈|얼굴형|얼굴선|얼굴 윤곽|갸름|둥근 얼굴|긴 얼굴|각진|턱|광대|이마|콧대|코끝|입술|입매|입꼬리|미소|웃는|웃음|보조개|입 모양|볼|피부|색감|색깔|빛깔|검은|갈색|하얀|밝은 색|어두운 색|귀|무늬|테두리)/;
 
 export function hasVisibleFeature(reason: string): boolean {
   return VISIBLE_FEATURE_RE.test(reason.replace(/눈빛/g, ""));

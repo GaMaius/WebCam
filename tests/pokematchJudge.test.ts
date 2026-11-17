@@ -455,7 +455,7 @@ test("prompts ask for concrete features and put mood last", () => {
   assert.match(JUDGE_SYSTEM_PROMPT, /CONCRETE features/);
   assert.match(JUDGE_SYSTEM_PROMPT, /glasses/i);
   const rerank = buildRerankSystemPrompt(8);
-  assert.match(rerank, /Mood and expression barely count/);
+  assert.match(rerank, /Mood barely counts/);
   assert.match(rerank, /mood-only reason/);
 });
 

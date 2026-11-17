@@ -447,7 +447,7 @@ export function usePokematchScan() {
             (traits ? `TRAITS (1차가 먼저 적은 특징): ${traits}${traitsKo ? ` / ${traitsKo}` : ""}\n` : "") +
             (rerankNote ? `RERANK (2차 시각 비교): ${rerankNote}\n` : "") +
             (rerankNote.startsWith("ok")
-              ? `RERANKED ORDER (점수 = overall + 특징합 − 단일특징 감점; h머리 e눈 f얼굴형 c색 a액세서리 o전체):\n` +
+              ? `RERANKED ORDER (점수 = overall + 특징합 − 단일특징 감점; h머리 e눈 f얼굴형 c색 m입·표정 a액세서리 o전체):\n` +
                 rerankedPicks
                   .map(
                     (p, i) =>

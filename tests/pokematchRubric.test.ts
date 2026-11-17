@@ -59,13 +59,13 @@ test("rerank: graded answers are ordered by the combined score, not the listing"
     4
   );
   assert.deepEqual(out.map((e) => e.n), [2, 3, 1, 4]);
-  assert.equal(out[0].grades, "h2 e2 f1 c2 a0 o6");
+  assert.equal(out[0].grades, "h2 e2 f1 c2 m- a0 o6");
   assert.equal(out[3].score, undefined, "an ungraded missing panel sinks to the end");
 });
 
 test("rerank: out-of-range grades are clamped, junk becomes 0", () => {
   const [e] = normalizeRerank({ scores: [{ n: 1, hair: 9, eyes: -2, face: "x", colors: 2, overall: 99 }] }, 1);
-  assert.equal(e.grades, "h3 e0 f0 c2 a- o10");
+  assert.equal(e.grades, "h3 e0 f0 c2 m- a- o10");
 });
 
 test("rerank: legacy order answers keep the listed order", () => {
@@ -139,4 +139,52 @@ test("percent follows the rubric score: monotone, bounded, not a fixed 2% stairc
   assert.ok(ps[0] - ps[1] < ps[1] - ps[2], "a close pair stays close, a big gap shows as a big gap");
   assert.equal(rubricPercent(-5), 55);
   assert.equal(rubricPercent(40), 95);
+});
+
+// ── Distinctive expression (2026-11-17) ─────────────────────────────────────
+// A smiling face widely said to resemble a starter got nothing near one: the
+// only expression rule was "mood barely counts", and the prompt banned
+// household-name species outright. A neutral face still says nothing; a wide
+// smile is a feature.
+import { hasVisibleFeature, normalizePicks as normalize } from "../lib/pokematch/judgeProtocol.ts";
+
+test("mouth: a neutral face has no mouth slot, a distinctive smile is graded", () => {
+  const neutral = rubricScore({ hair: 2, eyes: 2, face: 1, colors: 1, mouth: null, accessory: null, overall: 5 });
+  const legacy = rubricScore({ hair: 2, eyes: 2, face: 1, colors: 1, accessory: null, overall: 5 });
+  assert.equal(neutral, legacy, "null and absent mean the same thing");
+  // A shared smile can be the second clear feature that lifts the penalty.
+  const oneFeature = rubricScore({ hair: 2, eyes: 1, face: 1, colors: 1, mouth: 0, accessory: null, overall: 5 });
+  const smileToo = rubricScore({ hair: 2, eyes: 1, face: 1, colors: 1, mouth: 3, accessory: null, overall: 5 });
+  assert.equal(smileToo - oneFeature, 3 + SINGLE_FEATURE_PENALTY);
+});
+
+test("mouth: parsed from the rerank, shown in the grades", () => {
+  const [e] = normalizeRerank({ scores: [{ n: 1, hair: 1, eyes: 2, face: 1, mouth: 3, colors: 2, accessory: null, overall: 6 }] }, 1);
+  assert.equal(e.grades, "h1 e2 f1 c2 m3 a- o6");
+});
+
+test("mouth: 'smile' and 'expression' map to the mouth slot", () => {
+  const [p] = normalize({ picks: [{ name: "Riolu", match: ["smile", "Expression", "eyes"] }] }, [
+    { slug: "riolu", nameEn: "Riolu" },
+  ]);
+  assert.deepEqual(p.match, ["mouth", "eyes"]);
+});
+
+test("mouth: a smile counts as a visible feature, a calm mood still doesn't", () => {
+  assert.equal(hasVisibleFeature("활짝 웃는 입매와 둥근 볼이 닮았어요"), true);
+  assert.equal(hasVisibleFeature("환한 미소가 닮았어요"), true);
+  assert.equal(hasVisibleFeature("차분한 분위기가 닮았어요"), false);
+});
+
+test("prompts: famous species are no longer banned outright, only by default", () => {
+  assert.match(SYSTEM_PROMPT, /They are NOT banned/);
+  assert.match(SYSTEM_PROMPT, /"mouth"/);
+  assert.match(buildRerankSystemPrompt(8), /"mouth"/);
+});
+
+test("traits: a neutral mouth slot is dropped like a missing accessory", () => {
+  assert.equal(
+    extractTraits({ traits: { hair: "long dark hair", mouth: "neutral", accessory: "none" } }),
+    "hair: long dark hair"
+  );
 });
