@@ -119,7 +119,7 @@ test("prompts: stage 1 demands two shared slots, stage 2 grades per feature", ()
 });
 
 // ── Low-graded panels (observed in production, 2026-11-17) ──────────────────
-import { RUBRIC_REJECT_BELOW, sanitizeReason } from "../lib/pokematch/judgeProtocol.ts";
+import { rubricPercent, sanitizeReason } from "../lib/pokematch/judgeProtocol.ts";
 
 test("reasons that deny any resemblance are withheld", () => {
   for (const r of [
@@ -132,9 +132,11 @@ test("reasons that deny any resemblance are withheld", () => {
   assert.equal(sanitizeReason("파란 머리와 날카로운 눈매가 닮았어요"), "파란 머리와 날카로운 눈매가 닮았어요");
 });
 
-test("reject threshold: a near-zero grade is a miss, a modest match is not", () => {
-  const miss = rubricScore({ hair: 1, eyes: 1, face: 0, colors: 0, accessory: null, overall: 2 });
-  const modest = rubricScore({ hair: 2, eyes: 1, face: 1, colors: 0, accessory: null, overall: 4 });
-  assert.ok(miss < RUBRIC_REJECT_BELOW, `miss ${miss}`);
-  assert.ok(modest >= RUBRIC_REJECT_BELOW, `modest ${modest}`);
+test("percent follows the rubric score: monotone, bounded, not a fixed 2% staircase", () => {
+  // Scores from the real 2026-11-17 scan: Gothita 13, Espurr 12, Munna 4, Pansage 2.
+  const ps = [13, 12, 4, 2].map(rubricPercent);
+  assert.deepEqual(ps, [...ps].sort((a, b) => b - a));
+  assert.ok(ps[0] - ps[1] < ps[1] - ps[2], "a close pair stays close, a big gap shows as a big gap");
+  assert.equal(rubricPercent(-5), 55);
+  assert.equal(rubricPercent(40), 95);
 });

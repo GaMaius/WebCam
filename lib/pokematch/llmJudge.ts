@@ -7,7 +7,7 @@
 // vision model — that's the feature. The intro modal says so; keep it saying so.
 
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
-import { PICK_COUNT, hasVisibleFeature, preferBroadMatches } from "./judgeProtocol";
+import { PICK_COUNT, hasVisibleFeature, preferBroadMatches, rubricPercent } from "./judgeProtocol";
 import { applyPickGuards } from "./pickGuards";
 import { buildCuratedPool } from "./curatedPool";
 import type { FaceFeatures } from "./faceFeatures";
@@ -300,12 +300,24 @@ export function picksToMatches(
   // instead: household names sort ahead, everything else still gets shown when
   // there aren't five of them. Computed from the candidates actually sent, so
   // it can't reference a species this scan couldn't render.
-  const familiar = new Set(buildCuratedPool(pokedex, candidates.map((c) => c.slug)));
+  // ⚠️ GRADED picks (the rerank scored each one against the face) keep their
+  // rubric order: no familiar-first reordering and no cut to five here. Both
+  // used to happen, and on a real scan they dropped the rubric's top picks
+  // before the result was even assembled (see assembleResult.ts). The guards
+  // still run — contradicting reasons are blanked, one silhouette can't take
+  // over — they just don't get to override the visual verdict on familiarity.
+  const scoreBySlug = new Map(
+    picks.filter((p) => typeof p.score === "number").map((p) => [p.slug, p.score as number])
+  );
+  const graded = scoreBySlug.size > 0;
+  const familiar = graded
+    ? new Set<string>()
+    : new Set(buildCuratedPool(pokedex, candidates.map((c) => c.slug)));
   const guarded = applyPickGuards(
     picks.map((p) => ({ slug: p.slug, reason: p.reason ?? "" })),
     pokedex,
     features,
-    PICK_COUNT,
+    graded ? picks.length : PICK_COUNT,
     familiar
   );
   picks = guarded;
@@ -322,8 +334,13 @@ export function picksToMatches(
     slug: p.slug,
     entry: pokedex[p.slug] ?? null,
     z: zBySlug.get(p.slug) ?? 0,
-    percent: zToPercent(standardized(p.slug), topSz),
+    // Graded: the number comes from the rubric that ranked it, so rank and
+    // percent agree. Ungraded: the embedding z, as before.
+    percent: scoreBySlug.has(p.slug)
+      ? rubricPercent(scoreBySlug.get(p.slug)!)
+      : zToPercent(standardized(p.slug), topSz),
     reason: withoutSpeciesNames(p.reason || undefined, pokedex),
+    ...(scoreBySlug.has(p.slug) ? { score: scoreBySlug.get(p.slug) } : {}),
   }));
 
   // The judge's ORDER is the ranking; z only sets the magnitude. A later pick

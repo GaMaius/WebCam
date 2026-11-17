@@ -638,14 +638,19 @@ export interface RubricGrades {
 export const SINGLE_FEATURE_PENALTY = 4;
 
 /**
- * Below this combined score the rerank has effectively said "this does not
- * look like the person": a low overall with no feature clearly shared. Such a
- * pick is not deleted, but it is ranked behind the local fill (see
- * usePokematchScan) — a verified miss is worse than an unverified guess.
- * Reference points: overall 2 + two slight features − penalty = 0; overall 4
- * + one clear feature (2) + two slight (1+1) − penalty = 4.
+ * The displayed "닮은 정도 %" for a graded pick, from its rubric score.
+ *
+ * Replaces the embedding-z percent for graded picks: the z measures what the
+ * local encoder thinks, which is not what decided the order, so the number
+ * next to a species disagreed with its rank (and the old forced-descending
+ * fix-up turned it into a mechanical 92/90/88/86/84). The rubric score is
+ * what actually ranked the pick. A score of 18 (e.g. overall 7, four features
+ * at 2-3) reads as 95%; 0 or below reads as 55%.
  */
-export const RUBRIC_REJECT_BELOW = 3;
+export function rubricPercent(score: number): number {
+  const t = Math.min(1, Math.max(0, score / 18));
+  return Math.round(55 + 40 * t);
+}
 
 /**
  * One number per panel from the graded rubric:

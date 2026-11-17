@@ -74,6 +74,8 @@ export interface PokematchMatch {
   subAnalysis?: FaceSubAnalysis;
   /** One-line Korean rationale, present only when the LLM judge ranked it. */
   reason?: string;
+  /** Rubric score from the graded rerank, when it ran (rubricScore). */
+  score?: number;
 }
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;

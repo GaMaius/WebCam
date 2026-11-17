@@ -19,7 +19,7 @@ import {
 import { describeFaceFeatures, extractFaceFeatures, type FaceFeatures } from "@/lib/pokematch/faceFeatures";
 import { judgeCandidates, picksToMatches, rerankPicks } from "@/lib/pokematch/llmJudge";
 import { buildCuratedPool, buildJudgeAllowlist } from "@/lib/pokematch/curatedPool";
-import { RUBRIC_REJECT_BELOW, hasVisibleFeature } from "@/lib/pokematch/judgeProtocol";
+import { assembleDisplayed } from "@/lib/pokematch/assembleResult";
 import { orderCandidatesForJudge } from "@/lib/pokematch/candidateOrder";
 
 export type PokematchPhase = "idle" | "loading" | "aligning" | "scanning" | "analyzing" | "done" | "error";
@@ -396,43 +396,15 @@ export function usePokematchScan() {
         // Snorlax on "차분한 분위기" alone — a calm neutral face is in nearly
         // every selfie, so those were picked on nothing. Stable sort, so the
         // model's order survives inside each group, and nothing is deleted.
-        const grounded = (m: (typeof finalMatches)[number]) =>
-          Boolean(m.reason && hasVisibleFeature(m.reason));
-        const groundedFirst = (list: typeof finalMatches) => [
-          ...list.filter(grounded),
-          ...list.filter((m) => !grounded(m)),
-        ];
-        // ⚠️ Only when the rerank DIDN'T grade the picks. Its per-feature rubric
-        // is real evidence about resemblance; how a reason happens to be worded
-        // is not, and must not overturn it.
-        const maybeGroundedFirst = rerankNote.startsWith("ok")
-          ? (list: typeof finalMatches) => list
-          : groundedFirst;
-        // Picks the graded rerank scored as a miss (RUBRIC_REJECT_BELOW) go
-        // behind every other source, local fill included — but are not deleted.
-        const scoreBySlug = new Map(
-          rerankedPicks.filter((p) => p.score !== undefined).map((p) => [p.slug, p.score!])
-        );
-        const rejected = (m: (typeof finalMatches)[number]) =>
-          (scoreBySlug.get(m.slug) ?? Infinity) < RUBRIC_REJECT_BELOW;
-        const kept = finalMatches.filter((m) => !rejected(m));
-        const tiers = [
-          maybeGroundedFirst(kept.filter((m) => familiar.has(m.slug))),
-          local.filter((m) => familiar.has(m.slug)),
-          maybeGroundedFirst(kept.filter((m) => !familiar.has(m.slug))),
+        // See assembleResult.ts for why graded and ungraded results are
+        // assembled differently — the graded path once showed zero of the
+        // judge's picks because familiar-first tiers outranked the rubric.
+        finalMatches = assembleDisplayed({
+          modelPicks: finalMatches,
           local,
-          finalMatches.filter(rejected),
-        ];
-        const have = new Set<string>();
-        const assembled: typeof finalMatches = [];
-        for (const tier of tiers) {
-          for (const m of tier) {
-            if (assembled.length >= 5 || have.has(m.slug)) continue;
-            have.add(m.slug);
-            assembled.push(m);
-          }
-        }
-        finalMatches = assembled;
+          familiar,
+          graded: finalMatches.some((m) => m.score !== undefined),
+        });
         // percent came from two different standardizations, so re-impose the
         // descending order the UI assumes.
         for (let i = 1; i < finalMatches.length; i++) {
