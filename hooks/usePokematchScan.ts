@@ -325,12 +325,12 @@ export function usePokematchScan() {
       // panel can't tell an unstable MODEL from a guard that reshuffled a
       // stable one — the displayed five are chosen from a larger list, so both
       // look the same from the outside.
-      let rawPicks: { slug: string; reason: string }[] = [];
+      let rawPicks: { slug: string; reason: string; match?: string[] }[] = [];
       let droppedNames = "";
       let traits = "";
       let traitsKo = "";
       let rerankNote = "";
-      let rerankedPicks: { slug: string; reason: string }[] = [];
+      let rerankedPicks: { slug: string; reason: string; score?: number; grades?: string }[] = [];
       // No image means no vision judgement — fall straight through to local.
       if (image) {
         const judged = await judgeCandidates(image, description, candidates);
@@ -402,10 +402,16 @@ export function usePokematchScan() {
           ...list.filter(grounded),
           ...list.filter((m) => !grounded(m)),
         ];
+        // ⚠️ Only when the rerank DIDN'T grade the picks. Its per-feature rubric
+        // is real evidence about resemblance; how a reason happens to be worded
+        // is not, and must not overturn it.
+        const maybeGroundedFirst = rerankNote.startsWith("ok")
+          ? (list: typeof finalMatches) => list
+          : groundedFirst;
         const tiers = [
-          groundedFirst(finalMatches.filter((m) => familiar.has(m.slug))),
+          maybeGroundedFirst(finalMatches.filter((m) => familiar.has(m.slug))),
           local.filter((m) => familiar.has(m.slug)),
-          groundedFirst(finalMatches.filter((m) => !familiar.has(m.slug))),
+          maybeGroundedFirst(finalMatches.filter((m) => !familiar.has(m.slug))),
           local,
         ];
         const have = new Set<string>();
@@ -445,15 +451,29 @@ export function usePokematchScan() {
             // that reshuffled a stable one look identical from outside.
             (rawPicks.length
               ? `MODEL RAW PICKS (${rawPicks.length}개 통과):\n` +
-                rawPicks.map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`).join("\n") +
+                rawPicks
+                  .map(
+                    (p, i) =>
+                      `  ${i + 1}. ${p.slug}` +
+                      // The slots the model CLAIMS this species shares. Fewer
+                      // than two is the "one feature" failure.
+                      (p.match ? ` [${p.match.join(",") || "-"}]` : "") +
+                      (p.reason ? ` — ${p.reason}` : "")
+                  )
+                  .join("\n") +
                 `\n`
               : "") +
             (traits ? `TRAITS (1차가 먼저 적은 특징): ${traits}${traitsKo ? ` / ${traitsKo}` : ""}\n` : "") +
             (rerankNote ? `RERANK (2차 시각 비교): ${rerankNote}\n` : "") +
             (rerankNote.startsWith("ok")
-              ? `RERANKED ORDER:\n` +
+              ? `RERANKED ORDER (점수 = overall + 특징합 − 단일특징 감점; h머리 e눈 f얼굴형 c색 a액세서리 o전체):\n` +
                 rerankedPicks
-                  .map((p, i) => `  ${i + 1}. ${p.slug}${p.reason ? ` — ${p.reason}` : ""}`)
+                  .map(
+                    (p, i) =>
+                      `  ${i + 1}. ${p.slug}` +
+                      (p.score !== undefined ? ` ${p.score}점 [${p.grades ?? ""}]` : "") +
+                      (p.reason ? ` — ${p.reason}` : "")
+                  )
                   .join("\n") +
                 `\n`
               : "") +

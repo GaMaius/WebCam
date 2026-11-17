@@ -487,7 +487,9 @@ export async function POST(request: Request) {
 /** Short answer (an order + 8 short Korean reasons ≈ 800 tokens) with thinking
  * off. Kept small because it is RESERVED against the same per-minute budget the
  * stage-1 call just used — see the max_completion_tokens note above. */
-const RERANK_PLAN: CallPlan = { label: "rerank", reasoning: "none", maxTokens: 1000 };
+// 1300: the answer is now a graded rubric (6 grades + a reason per panel),
+// measured at roughly 50 tokens a panel before the reason on qwen3.8.
+const RERANK_PLAN: CallPlan = { label: "rerank", reasoning: "none", maxTokens: 1300 };
 
 async function rerank(
   configured: Provider[],

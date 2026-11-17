@@ -63,6 +63,49 @@ export interface CandidateInput {
 export interface Pick {
   slug: string;
   reason: string;
+  /** Which trait slots the model says this species shares (MATCH_SLOTS).
+   * Self-reported, so it only orders picks; the rerank verifies visually. */
+  match?: string[];
+}
+
+/** The fixed trait slots both stages work in. "mood" is deliberately absent:
+ * a calm neutral face is in almost every selfie, so it never counts as a
+ * shared feature. */
+export const MATCH_SLOTS = ["hair", "eyes", "face", "accessory", "colors"] as const;
+
+function parseMatch(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const slots = new Set<string>();
+  for (const v of value) {
+    const k = typeof v === "string" ? v.trim().toLowerCase() : "";
+    const slot =
+      k === "color" || k === "colour" || k === "colours"
+        ? "colors"
+        : k === "glasses" || k === "accessories"
+        ? "accessory"
+        : k === "eye"
+        ? "eyes"
+        : k;
+    if ((MATCH_SLOTS as readonly string[]).includes(slot)) slots.add(slot);
+  }
+  return [...slots];
+}
+
+/**
+ * Picks that share TWO OR MORE trait slots with the face come first; the rest
+ * keep their order behind them. Stable, nothing deleted, and a no-op when the
+ * model gave no "match" lists at all.
+ *
+ * ⚠️ WHY (2026-11-17, user: "특징을 하나만 뽑아서 … 그 특징 하나만을 가진
+ * 포켓몬이 나온다"): with "name a concrete feature" enforced, the model
+ * started choosing species on ONE feature — glasses → anything with eye
+ * rings. One shared feature is not resemblance. This only decides the order
+ * when the rerank fails; when it runs, its per-feature grades decide.
+ */
+export function preferBroadMatches<T extends { match?: string[] }>(picks: T[]): T[] {
+  if (!picks.some((p) => p.match !== undefined)) return picks;
+  const broad = (p: T) => (p.match?.length ?? 0) >= 2;
+  return [...picks.filter(broad), ...picks.filter((p) => !broad(p))];
 }
 
 const SLUG_RE = /^[a-z0-9_-]{1,40}$/;
@@ -187,19 +230,19 @@ Rules:
 5. Each reason must cite a DIFFERENT feature. Do not reword one observation (e.g. "big eyes", "calm mood") over and over — that is making one pick repeatedly, not several. Spread across hairstyle and hair colour, glasses or other accessories, eye shape, eyebrows, face shape, jawline, skin tone.
 5a. Start from what is MOST visible: hairstyle (bangs, parting, colour), glasses, eye shape, face shape. Glasses are a real feature — Pokemon with eye rings, goggle-like markings or dark patches around the eyes echo them. A calm or neutral expression is common to almost every photo, so it is never enough on its own to choose a species.
 7. Different people must get different results. Base the choice on what is specific to THIS face.
-7c. Commit to the answer. FIRST write "traits": the two or three most distinctive features of this face, in a few English words (e.g. "sharp upturned eyes, dark messy hair, narrow jaw"). THEN pick species that match THOSE traits. Shown the same photo again you should reach the same traits and the same conclusion — if several species feel equally fine, you have not narrowed it down yet.
+7c. Commit to the answer. FIRST fill "traits", one short English phrase per slot: "hair" (style and colour, e.g. "straight black bangs"), "eyes" (shape and brows), "face" (shape and proportions), "accessory" (e.g. "square glasses", or "none"), "colors" (hair/skin palette). THEN pick species. Shown the same photo again you should reach the same traits and the same conclusion.
 7e. Also write "traitsKo": the same two or three features as short Korean noun phrases joined by " · " (at most 30 characters), e.g. "검은 일자 앞머리 · 사각 안경 · 갸름한 얼굴". The user sees this, so the same politeness rules as the reasons apply.
-7d. Match the whole impression, not one feature. A good pick resembles the face in silhouette, eye shape AND colouring/mood together; a species that shares only one feature is a weak pick.
+7d. ⚠️ ONE SHARED FEATURE IS NOT RESEMBLANCE. Every pick must share AT LEAST TWO of the trait slots with the face — list them in "match" (slot names: hair, eyes, face, accessory, colors; mood never counts). Glasses alone do not make a species with eye rings a match; it must also share the hair, the face shape or the colours. Prefer species that share three. If a species shares only one slot, however striking, leave it out.
 7a. ⚠️ DO NOT DEFAULT TO FAMOUS MASCOTS. Pikachu, Psyduck, Clefairy, Togepi, Eevee and similar household-name cute species are the lazy answer and they fit almost anybody, which makes them wrong almost every time. Pick one only if this face matches it distinctly better than every alternative.
 7b. Let the measured notes steer you where they are decisive. Upturned or sharp eyes suit a sharp-featured species, not a round mascot; a long face suits an elongated design; dark hair suits a dark-coloured species. A round cute species needs a genuinely round soft face to earn the pick.
-8. Write each reason as ONE Korean sentence, at most 45 characters, naming at least one CONCRETE visible feature (hair, bangs, glasses, eye shape, eyebrows, face shape, jaw, skin tone). A reason that only describes mood ("차분한 분위기", "고요한 인상") is not allowed. Example: "검은 일자 앞머리와 눈 주위 안경 테가 무늬와 닮았어요"
+8. Write each reason as ONE Korean sentence, at most 45 characters, naming the CONCRETE features in its "match" — ideally two of them (hair, bangs, glasses, eye shape, eyebrows, face shape, jaw, colours). A reason that only describes mood ("차분한 분위기", "고요한 인상") is not allowed. Example: "검은 일자 앞머리와 눈 주위 안경 테가 무늬와 닮았어요"
 9. NEVER write a Pokemon name inside the reason — the name is displayed separately, so a name you write will contradict it. Describe only what you see in the face.
 10. This is for fun. Write only sentences the reader would enjoy. Never judge body or looks: the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Use appealing features instead — eyes, impression, mood, hairstyle.
 11. Say only what is visible. Do not invent features; calling a slender face "통통한" means you have no evidence.
 12. Never guess the person's identity or name any real person.
 
 Output exactly one JSON object, nothing else. No scores.
-{"traits":"...","traitsKo":"...","picks":[{"name":"Riolu","reason":"..."},{"name":"Zorua","reason":"..."}]}`;
+{"traits":{"hair":"...","eyes":"...","face":"...","accessory":"...","colors":"..."},"traitsKo":"...","picks":[{"name":"Riolu","match":["hair","colors"],"reason":"..."},{"name":"Zorua","match":["eyes","face","colors"],"reason":"..."}]}`;
 
 
 /** English scaffolding for the same reason SYSTEM_PROMPT is English — Korean
@@ -444,7 +487,9 @@ export function normalizePicks(raw: unknown, candidates: CandidateInput[]): Pick
     const { slug, reason } = resolveItem(item, candidates, bySlug, byName);
     if (!slug || used.has(slug)) continue;
     used.add(slug);
-    picks.push({ slug, reason });
+    const match =
+      item && typeof item === "object" ? parseMatch((item as { match?: unknown }).match) : undefined;
+    picks.push(match ? { slug, reason, match } : { slug, reason });
     if (picks.length >= REQUEST_PICK_COUNT) break;
   }
 
@@ -483,8 +528,17 @@ export function unresolvedNames(raw: unknown, candidates: CandidateInput[]): str
 export function extractTraits(raw: unknown): string {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
   const t = (raw as { traits?: unknown }).traits;
-  const text = Array.isArray(t) ? t.join(", ") : typeof t === "string" ? t : "";
-  return text.replace(/[^A-Za-z0-9 ,.'/-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+  let text = "";
+  if (Array.isArray(t)) text = t.join(", ");
+  else if (typeof t === "string") text = t;
+  else if (t && typeof t === "object") {
+    // The slot object from rule 7c. "none" slots (no glasses) are dropped.
+    text = Object.entries(t as Record<string, unknown>)
+      .filter(([, v]) => typeof v === "string" && v.trim() && !/^none$/i.test(v.trim()))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("; ");
+  }
+  return text.replace(/[^A-Za-z0-9 ,.'/:;-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
 // ─── Stage 2: visual rerank ────────────────────────────────────────────────
@@ -518,19 +572,20 @@ export const RERANK_MAX = REQUEST_PICK_COUNT;
 export function buildRerankSystemPrompt(count: number): string {
   return `You judge a "which Pokemon do you look like" service. The image is a contact sheet: the LEFT square is a real person's face; the panels on the RIGHT show ${count} Pokemon, each with its number in the corner.
 
-Rank ALL ${count} numbered Pokemon by how much the person resembles each one, most similar first. Compare the pictures directly, side by side:
-1. hairstyle and hair colour against the Pokemon's ears, crest, head shape and colours (bangs, parting, length)
-2. glasses or accessories against eye rings, goggle-like markings or patches around the eyes
-3. face/head silhouette and proportions (long, oval, round, angular)
-4. eye shape and eyebrows
-5. colour harmony: hair and skin colours against the Pokemon's palette
-6. overall mood — LAST, and only as a tie-breaker: a calm or neutral expression fits almost anyone, so it never decides the order by itself
-A Pokemon that matches several of 1-5 together beats one that matches a single feature. Ignore pose and background.
+Grade EVERY numbered Pokemon against the person, comparing the pictures directly. Grade each panel on its own merits — never let its number or position influence the grade.
 
-For each, write ONE Korean sentence (at most 35 characters) naming a CONCRETE feature the person and that Pokemon visibly share (hair, glasses, eye shape, face shape, colours). A mood-only reason ("차분한 분위기가 닮았다") is not allowed, and each reason must name a different feature. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
+Per-feature grades, 0-3 (0 = nothing in common, 1 = slight, 2 = clear, 3 = striking):
+- "hair": hairstyle and hair colour vs the Pokemon's ears, crest, head shape, fur on the head
+- "eyes": eye shape and eyebrows
+- "face": face/head silhouette and proportions (long, oval, round, angular)
+- "colors": the person's hair and skin colours vs the Pokemon's palette
+- "accessory": glasses or other accessories vs eye rings, goggle-like markings, patches around the eyes; null if the person wears none
+Then "overall", 0-10: at a glance, how much does this person look like this Pokemon AS A WHOLE? Be strict — one striking shared feature with everything else different is a 3 or 4, not an 8. Mood and expression barely count: a calm face fits almost anyone.
 
-Output exactly one JSON object, nothing else:
-{"order":[{"n":3,"reason":"..."},{"n":1,"reason":"..."}]}`;
+For each, "reason": ONE Korean sentence (at most 35 characters) naming the features that graded highest. A mood-only reason is not allowed. Never write any Pokemon name. Never judge the person's body or looks negatively — the words "통통한", "뚱뚱한", "넓은 코", "어색한", "이상한", "못생긴" are forbidden. Never guess who the person is.
+
+Output exactly one JSON object covering all ${count} panels, nothing else:
+{"scores":[{"n":1,"hair":2,"eyes":1,"face":0,"colors":2,"accessory":null,"overall":5,"reason":"..."}]}`;
 }
 
 export function buildRerankMessages(sheetDataUrl: string, count: number, traits = "") {
@@ -541,7 +596,7 @@ An earlier look at this face noted: ${traits}. Use it only if the picture agrees
     {
       role: "user",
       content: [
-        { type: "text", text: `Rank panels 1-${count} by resemblance to the face, best first.${hint}` },
+        { type: "text", text: `Grade panels 1-${count} against the face.${hint}` },
         { type: "image_url", image_url: { url: sheetDataUrl } },
       ],
     },
@@ -552,6 +607,68 @@ export interface RerankEntry {
   /** 1-based panel number. */
   n: number;
   reason: string;
+  /** Combined rubric score (rubricScore), when the model graded this panel. */
+  score?: number;
+  /** Compact grades for ?debug, e.g. "h2 e1 f0 c2 a- o5". */
+  grades?: string;
+}
+
+export interface RubricGrades {
+  hair: number;
+  eyes: number;
+  face: number;
+  colors: number;
+  /** null when the person wears no accessory — the slot doesn't exist. */
+  accessory: number | null;
+  overall: number;
+}
+
+/** Subtracted when fewer than two features grade "clear" (≥2). */
+export const SINGLE_FEATURE_PENALTY = 4;
+
+/**
+ * One number per panel from the graded rubric:
+ *   overall (0-10, holistic) + Σ feature grades (0-3 each) − penalty when fewer
+ *   than two features are clearly shared.
+ *
+ * ⚠️ WHY HYBRID, NOT JUST A SUM (2026-11-17): the failure being fixed is
+ * "one feature → one species" (glasses → anything with eye rings). Two
+ * findings shaped the formula:
+ *   - Decomposed, per-criterion grading tends to track expert judgement better
+ *     than a single holistic ranking (CheckEval; DeCE, arXiv 2509.16093), so
+ *     each feature is graded on its own and the COMBINING happens here, in
+ *     code, where it is visible and testable — not inside the model's head.
+ *   - But summed attributes alone don't track perceived lookalikeness either
+ *     ("Finding your Lookalike", arXiv 1806.05252), and holistic judges catch
+ *     what checklists miss. So the holistic "overall" stays in, at a weight
+ *     comparable to the whole feature sum.
+ * The penalty is what targets the reported failure: a single striking feature
+ * (3) with nothing else always ranks below two clearly shared ones (2 + 2).
+ */
+export function rubricScore(g: RubricGrades): number {
+  const features = [g.hair, g.eyes, g.face, g.colors, ...(g.accessory === null ? [] : [g.accessory])];
+  const sum = features.reduce((x, y) => x + y, 0);
+  const breadth = features.filter((v) => v >= 2).length;
+  return g.overall + sum - (breadth < 2 ? SINGLE_FEATURE_PENALTY : 0);
+}
+
+function grade(v: unknown, max: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(0, n)) : 0;
+}
+
+/** Grades from one rerank item, or null when it carries none (a legacy
+ * "order" answer), in which case the model's listed order is used as-is. */
+function parseGrades(o: Record<string, unknown>): RubricGrades | null {
+  if (o.overall === undefined && o.hair === undefined && o.eyes === undefined) return null;
+  return {
+    hair: grade(o.hair, 3),
+    eyes: grade(o.eyes, 3),
+    face: grade(o.face, 3),
+    colors: grade(o.colors ?? o.color, 3),
+    accessory: o.accessory === null || o.accessory === undefined ? null : grade(o.accessory, 3),
+    overall: grade(o.overall, 10),
+  };
 }
 
 /**
@@ -565,6 +682,8 @@ export interface RerankEntry {
 export function normalizeRerank(raw: unknown, count: number): RerankEntry[] {
   const list = Array.isArray(raw)
     ? raw
+    : Array.isArray((raw as { scores?: unknown })?.scores)
+    ? (raw as { scores: unknown[] }).scores
     : Array.isArray((raw as { order?: unknown })?.order)
     ? (raw as { order: unknown[] }).order
     : Array.isArray((raw as { picks?: unknown })?.picks)
@@ -575,17 +694,36 @@ export function normalizeRerank(raw: unknown, count: number): RerankEntry[] {
   for (const item of list) {
     let n = NaN;
     let reason = "";
+    let g: RubricGrades | null = null;
     if (typeof item === "number" || typeof item === "string") n = Number(item);
     else if (item && typeof item === "object") {
       const o = item as Record<string, unknown>;
       n = Number(o.n ?? o.number ?? o.panel ?? o.index);
       if (typeof o.reason === "string") reason = sanitizeReason(o.reason);
+      g = parseGrades(o);
     }
     if (!Number.isInteger(n) || n < 1 || n > count || seen.has(n)) continue;
     seen.add(n);
-    out.push({ n, reason });
+    out.push(
+      g
+        ? {
+            n,
+            reason,
+            score: rubricScore(g),
+            grades:
+              `h${g.hair} e${g.eyes} f${g.face} c${g.colors} ` +
+              `a${g.accessory === null ? "-" : g.accessory} o${g.overall}`,
+          }
+        : { n, reason }
+    );
   }
   if (out.length === 0) return [];
+  // Graded answers are ORDERED BY THE COMBINED SCORE, not by the order the
+  // model happened to list them in — that is the point of grading. Ties keep
+  // the listed order (sort is stable). Ungraded panels sink below graded ones.
+  if (out.some((e) => e.score !== undefined)) {
+    out.sort((x, y) => (y.score ?? -Infinity) - (x.score ?? -Infinity));
+  }
   for (let n = 1; n <= count; n++) if (!seen.has(n)) out.push({ n, reason: "" });
   return out;
 }

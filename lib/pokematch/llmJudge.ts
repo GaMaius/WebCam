@@ -7,7 +7,7 @@
 // vision model — that's the feature. The intro modal says so; keep it saying so.
 
 import { zToPercent, type PokematchCandidate, type PokematchMatch, type PokedexEntry } from "./matcher";
-import { PICK_COUNT, hasVisibleFeature } from "./judgeProtocol";
+import { PICK_COUNT, hasVisibleFeature, preferBroadMatches } from "./judgeProtocol";
 import { applyPickGuards } from "./pickGuards";
 import { buildCuratedPool } from "./curatedPool";
 import type { FaceFeatures } from "./faceFeatures";
@@ -16,6 +16,11 @@ import { buildContactSheet } from "./contactSheet";
 export interface JudgePick {
   slug: string;
   reason: string;
+  /** Trait slots stage 1 says this species shares (see MATCH_SLOTS). */
+  match?: string[];
+  /** Stage-2 rubric result, for ?debug: combined score and compact grades. */
+  score?: number;
+  grades?: string;
 }
 
 export interface JudgeResult {
@@ -181,9 +186,12 @@ export async function rerankPicks(
   picks: JudgePick[],
   traits = ""
 ): Promise<RerankOutcome> {
-  if (picks.length < 2) return { picks, note: "skipped (fewer than 2 picks)" };
+  // Without a rerank, stage 1's own "match" lists are the only breadth signal:
+  // picks claiming two or more shared features go first.
+  const fallback = preferBroadMatches(picks);
+  if (picks.length < 2) return { picks: fallback, note: "skipped (fewer than 2 picks)" };
   const sheet = await buildContactSheet(faceDataUrl, picks.map((p) => p.slug));
-  if (!sheet) return { picks, note: "skipped (contact sheet failed)" };
+  if (!sheet) return { picks: fallback, note: "skipped (contact sheet failed)" };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RERANK_TIMEOUT_MS);
@@ -200,7 +208,7 @@ export async function rerankPicks(
       }),
     });
     const data = (await res.json().catch(() => null)) as {
-      order?: { n: number; reason?: string }[];
+      order?: { n: number; reason?: string; score?: number; grades?: string }[];
       provider?: string;
       usage?: string;
       error?: string;
@@ -208,17 +216,24 @@ export async function rerankPicks(
     } | null;
     if (!res.ok || !Array.isArray(data?.order) || data!.order.length === 0) {
       return {
-        picks,
+        picks: fallback,
         note: `failed http_${res.status}${data?.error ? `:${data.error}` : ""}${data?.keys ? ` (${data.keys})` : ""}`,
       };
     }
     const byslug = new Map(picks.map((p) => [p.slug, p]));
     const reordered: JudgePick[] = [];
-    for (const { n, reason } of data!.order) {
+    // The route has already sorted graded answers by rubricScore, so this
+    // order IS the per-feature verdict, not the model's holistic listing.
+    for (const { n, reason, score, grades } of data!.order) {
       const slug = sheet.slugs[n - 1];
       const original = slug ? byslug.get(slug) : undefined;
       if (!original || reordered.some((p) => p.slug === slug)) continue;
-      reordered.push({ slug, reason: pickReason(reason, original.reason) });
+      reordered.push({
+        ...original,
+        reason: pickReason(reason, original.reason),
+        ...(typeof score === "number" ? { score } : {}),
+        ...(typeof grades === "string" ? { grades } : {}),
+      });
     }
     // Picks whose art failed to load weren't on the sheet; keep them, last.
     for (const p of picks) if (!reordered.some((r) => r.slug === p.slug)) reordered.push(p);
@@ -228,7 +243,7 @@ export async function rerankPicks(
     };
   } catch (err) {
     const why = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "network_error";
-    return { picks, note: `failed ${why}` };
+    return { picks: fallback, note: `failed ${why}` };
   } finally {
     clearTimeout(timer);
   }

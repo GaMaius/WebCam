@@ -394,7 +394,7 @@ test("traits: extracted as short plain text", () => {
   assert.equal(extractTraits({ traits: "sharp eyes, dark hair", picks: [] }), "sharp eyes, dark hair");
   assert.equal(extractTraits({ traits: ["round face", "soft eyes"] }), "round face, soft eyes");
   assert.equal(extractTraits({ picks: [] }), "");
-  assert.ok(extractTraits({ traits: "x".repeat(500) }).length <= 160);
+  assert.ok(extractTraits({ traits: "x".repeat(500) }).length <= 200);
   assert.ok(!extractTraits({ traits: "<script>" }).includes("<"));
 });
 
@@ -452,10 +452,10 @@ test("reasons: hair, glasses, eyes, face shape and colour count", () => {
 });
 
 test("prompts ask for concrete features and put mood last", () => {
-  assert.match(JUDGE_SYSTEM_PROMPT, /CONCRETE visible feature/);
+  assert.match(JUDGE_SYSTEM_PROMPT, /CONCRETE features/);
   assert.match(JUDGE_SYSTEM_PROMPT, /glasses/i);
   const rerank = buildRerankSystemPrompt(8);
-  assert.ok(rerank.indexOf("overall mood") > rerank.indexOf("glasses"));
+  assert.match(rerank, /Mood and expression barely count/);
   assert.match(rerank, /mood-only reason/);
 });
 
